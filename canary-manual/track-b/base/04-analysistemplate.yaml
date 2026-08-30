@@ -1,0 +1,129 @@
+# =============================================================================
+# Track B — AnalysisTemplate（用指標自動判斷 canary 好不好）
+#
+# 這個檔案有兩份：
+#   1. success-rate-minimal —— 最小可用版，只看一個指標。先用這份。
+#   2. success-rate-safe    —— 加上「最低樣本數」保護，正式環境建議用這份。
+#
+# 【前置需求】環境要有 Prometheus，而且 Istio 的 telemetry 有在上報。
+#   確認指令：
+#     kubectl get svc -A | grep -i prometheus
+#     kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy -- \
+#       curl -s localhost:15020/stats/prometheus | grep istio_requests_total | head -3
+#
+# 【失敗會怎樣】失敗次數超過 failureLimit → Argo 自動 abort：
+#   流量立刻切回 stable、canary pod 縮掉。這是 Argo 的預設行為，不用額外設定。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 第 1 份：最小可用版 —— 只看成功率
+# -----------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-minimal
+  namespace: ea-pmc
+spec:
+  metrics:
+    - name: success-rate
+
+      # 每隔多久量一次
+      interval: 1m
+
+      # 總共量幾次。1m x 5 = 這個 analysis 會跑 5 分鐘
+      count: 5
+
+      # 通過的條件。result[0] 是 Prometheus 回傳的第一個（也是唯一一個）數值。
+      # 0.99 = 99% 的請求不是 5xx
+      successCondition: result[0] >= 0.99
+
+      # 容許失敗幾次。設 1 = 第 2 次失敗才 abort（給一次容錯，避免瞬間抖動誤判）
+      failureLimit: 1
+
+      provider:
+        prometheus:
+          # Istio addon 安裝的 Prometheus 預設是這個位址，
+          # 如果你們是自己裝的請改成實際位址
+          address: http://prometheus.istio-system.svc.cluster.local:9090
+
+          # 分子：非 5xx 的請求數；分母：全部請求數
+          query: |
+            sum(rate(istio_requests_total{
+              destination_workload="pmc-epmmformquerygui",
+              destination_workload_namespace="ea-pmc",
+              response_code!~"5.."
+            }[2m]))
+            /
+            sum(rate(istio_requests_total{
+              destination_workload="pmc-epmmformquerygui",
+              destination_workload_namespace="ea-pmc"
+            }[2m]))
+---
+# -----------------------------------------------------------------------------
+# 第 2 份：加上「最低樣本數」保護（正式環境建議用這份）
+#
+# 【為什麼需要】canary 初期只有 5% 流量。如果那 2 分鐘總共只進來 3 個請求，
+#   其中 1 個是使用者自己按取消造成的 5xx，成功率就變成 66% ——
+#   Rollout 會誤判失敗直接回滾，但其實根本沒問題。
+#
+#   多加一個「請求數要夠多才算數」的指標就能避免。
+# -----------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate-safe
+  namespace: ea-pmc
+spec:
+  metrics:
+    # 指標 1：成功率（同上）
+    - name: success-rate
+      interval: 1m
+      count: 5
+      successCondition: result[0] >= 0.99
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.istio-system.svc.cluster.local:9090
+          query: |
+            sum(rate(istio_requests_total{
+              destination_workload="pmc-epmmformquerygui",
+              destination_workload_namespace="ea-pmc",
+              response_code!~"5.."
+            }[2m]))
+            /
+            sum(rate(istio_requests_total{
+              destination_workload="pmc-epmmformquerygui",
+              destination_workload_namespace="ea-pmc"
+            }[2m]))
+
+    # 指標 2：最低樣本數 —— 流量太少就不下結論
+    - name: enough-traffic
+      interval: 1m
+      count: 5
+      successCondition: result[0] >= 20      # 2 分鐘內至少要有 20 個請求
+      failureLimit: 5                        # 故意設寬鬆：流量少不是「失敗」，
+                                             # 只是「資料不足」，不該因此回滾
+      provider:
+        prometheus:
+          address: http://prometheus.istio-system.svc.cluster.local:9090
+          query: |
+            sum(increase(istio_requests_total{
+              destination_workload="pmc-epmmformquerygui",
+              destination_workload_namespace="ea-pmc"
+            }[2m]))
+
+    # 指標 3（選配）：P99 延遲 —— 想加就把下面五行解開
+    # - name: latency-p99
+    #   interval: 1m
+    #   count: 5
+    #   successCondition: result[0] <= 1000    # 毫秒
+    #   failureLimit: 1
+    #   provider:
+    #     prometheus:
+    #       address: http://prometheus.istio-system.svc.cluster.local:9090
+    #       query: |
+    #         histogram_quantile(0.99,
+    #           sum(rate(istio_request_duration_milliseconds_bucket{
+    #             destination_workload="pmc-epmmformquerygui",
+    #             destination_workload_namespace="ea-pmc"
+    #           }[2m])) by (le))

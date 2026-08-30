@@ -1,0 +1,245 @@
+# =============================================================================
+# Track B — Argo Rollouts（完整可 apply 版本，保留人工 pilot run 閘門）
+#
+# 【與 Track A 互斥】兩軌不能同時套用在同一個服務上。
+#   Rollout 會自己管理 ReplicaSet；如果同時存在 Deployment，兩個 controller
+#   會互相搶 pod。切換前必須先刪掉 Track A 的兩個 Deployment。
+#
+# 【與 Deployment 的差異】
+#   - kind 從 Deployment 換成 Rollout，其餘 spec.template 完全一樣（可直接複製）
+#   - 沒有 stable/canary 兩份檔案：Argo 用同一份 template 產生兩組 ReplicaSet
+#   - 流量切換由 Argo 自動改 VirtualService，不用你手動 patch
+#
+# 【人工閘門在哪】steps 裡的 pause: {} —— 沒有 duration 就是「無限期等待」，
+#   直到有人執行 kubectl argo rollouts promote 才會往下走。
+#   這就是你要保留的 pilot run 簽核點。
+#
+# 前置需求：
+#   kubectl create namespace argo-rollouts
+#   kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+#   kubectl krew install argo-rollouts        # CLI 外掛
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: pmc-epmmformquerygui
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+
+  # 逾時保護：30 分鐘還沒完成就判定失敗
+  progressDeadlineSeconds: 1800
+  progressDeadlineAbort: true      # 逾時自動 abort（不設的話只標記失敗但會卡住）
+
+  selector:
+    matchLabels:
+      app: pmc-epmmformquerygui
+
+  # ---------------------------------------------------------------------------
+  # Pod template —— 跟 Track A 的 Deployment 完全相同，可以直接複製過來
+  # 注意：這裡「不要」寫 version: stable/canary 的 label，
+  #       Argo 會自己加 rollouts-pod-template-hash 來區分兩軌。
+  # ---------------------------------------------------------------------------
+  template:
+    metadata:
+      labels:
+        app: pmc-epmmformquerygui
+      annotations:
+        config-version: "1.2.3"                  # 【三處之一】改這個 + image → Argo 產生新 ReplicaSet
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
+    spec:
+      serviceAccountName: pmc-epmmformquerygui
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: app
+          # >>> 發布新版就改這一行，然後 apply <<<
+          image: your-registry/pmc-epmmformquerygui:1.2.3
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          envFrom:
+            - secretRef:
+                name: pmc-epmmformquery-secret
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/app/config/application.yml"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          resources:
+            requests: { memory: "512Mi", cpu: "250m" }
+            limits:   { memory: "1Gi",   cpu: "1000m" }
+
+          startupProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: config
+          configMap:
+            name: pmc-epmmformquery-config-1.2.3   # 【三處之一】Track B 只能版本化
+        - name: tmp
+          emptyDir: {}
+
+  # ---------------------------------------------------------------------------
+  # 發布策略
+  # ---------------------------------------------------------------------------
+  strategy:
+    canary:
+      # Argo 會動態改這兩個 Service 的 selector，把它們分別指向兩組 ReplicaSet
+      stableService: pmc-epmmformquerygui-stable
+      canaryService: pmc-epmmformquerygui-canary
+
+      # abort 後多久縮掉 canary pod
+      abortScaleDownDelaySeconds: 30
+
+      trafficRouting:
+        # 【必要】宣告 Argo 可以動態建立/移除哪些 route。
+        # 沒有這一段，setHeaderRoute 會失敗。
+        managedRoutes:
+          - name: pilot-run
+        istio:
+          virtualService:
+            name: app-routing          # Argo 會自動改這個 VirtualService 的權重
+            routes:
+              - primary                # 【必要】VirtualService 裡必須有名為 primary 的 route
+
+
+      # =======================================================================
+      # 【重要】以下 steps 有兩種版本，擇一使用：
+      #
+      #   版本 A（目前生效）：人工閘門 —— 停在 pause: {} 等人簽核
+      #   版本 B（下方註解）：指標自動判斷 —— analysis 失敗自動回滾，不用人
+      #
+      # 這是「一套基礎設施支援兩種上版節奏」的關鍵：不用換 Rollout、
+      # 不用刪 Deployment，只要改 steps 就能切換。詳見 guide Part 15.2。
+      # =======================================================================
+      steps:
+        # =====================================================================
+        # 步驟 1：只開 1 個 canary pod，正式流量仍 100% 在 stable
+        #         （replicas: 1 的理由同 Track A：in-memory session）
+        # =====================================================================
+        - setCanaryScale:
+            replicas: 1
+
+        # =====================================================================
+        # 步驟 2：開一條 cookie 專用路由，讓 pilot 使用者進 canary
+        #         Argo 會自動在 VirtualService 最前面插入這條 route
+        # =====================================================================
+        - setHeaderRoute:
+            name: pilot-run
+            match:
+              - headerName: cookie
+                headerValue:
+                  regex: "^(.*;\\s*)?canary=always(\\s*;.*)?$"
+
+        # =====================================================================
+        # 步驟 3：【人工閘門】無限期暫停，等 pilot run 簽核
+        #
+        #   通過 → kubectl argo rollouts promote pmc-epmmformquerygui -n ea-pmc
+        #   失敗 → kubectl argo rollouts abort   pmc-epmmformquerygui -n ea-pmc
+        # =====================================================================
+        - pause: {}
+
+        # =====================================================================
+        # 步驟 4：簽核通過，移除 cookie 路由
+        #         （同名 setHeaderRoute 但沒有 match = 移除這條 route）
+        # =====================================================================
+        - setHeaderRoute:
+            name: pilot-run
+
+        # =====================================================================
+        # 步驟 5：讓 canary 的 pod 數量改為依流量比例自動調整
+        #         不做這步的話，canary 會一直卡在 1 個 pod，
+        #         等一下切 100% 流量過去會把單一 pod 打爆。
+        # =====================================================================
+        - setCanaryScale:
+            matchTrafficWeight: true
+
+        # =====================================================================
+        # 步驟 6：全量切換
+        #
+        #   如果簽核後還想漸進放量，把下面換成：
+        #     - setWeight: 20
+        #     - pause: { duration: 10m }
+        #     - setWeight: 50
+        #     - pause: { duration: 10m }
+        #     - setWeight: 100
+        #
+        #   如果要「第二道人工閘門」（放量前再確認一次），插入：
+        #     - setWeight: 20
+        #     - pause: {}
+        # =====================================================================
+        - setWeight: 100
+
+        # =====================================================================
+        # 【版本 B】指標自動判斷（把上面步驟 3 的 pause: {} 換成這一段）
+        #
+        #   - analysis:
+        #       templates:
+        #         - templateName: success-rate-safe   # 見 05-analysistemplate.yaml
+        #
+        #   行為：analysis 跑 5 分鐘，成功率低於 99% 且失敗次數超過 failureLimit
+        #        → Argo 自動 abort：流量切回 stable、canary pod 縮掉、發通知。
+        #        全程不需要人。
+        #
+        #   注意：版本 B 的情況下，步驟 2 的 setHeaderRoute 可以保留
+        #        （讓自動化 smoke test 用 cookie 精準打到 canary），
+        #        也可以拿掉（純靠正式流量的指標判斷）。
+        # =====================================================================

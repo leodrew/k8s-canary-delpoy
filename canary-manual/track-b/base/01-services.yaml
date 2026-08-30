@@ -1,0 +1,67 @@
+# =============================================================================
+# Track B — 兩個 Service（Argo Rollouts 需要）
+#
+# 【跟 Track A 的重大差異】
+#   Track A 用「一個 Service + DestinationRule subset」分兩軌。
+#   Track B 用「兩個 Service」分兩軌 —— Argo 會動態把
+#   rollouts-pod-template-hash 這個 label 寫進各自的 selector，
+#   讓 stable Service 只指到舊 ReplicaSet、canary Service 只指到新 ReplicaSet。
+#
+#   所以這裡「不要」自己寫 version 之類的 selector，只寫 app 就好，
+#   剩下的交給 Argo 動態填。
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: pmc-epmmformquerygui-stable
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+spec:
+  type: ClusterIP
+  selector:
+    app: pmc-epmmformquerygui     # Argo 會再自動加上 rollouts-pod-template-hash
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      appProtocol: http           # 必要：cookie 比對是 L7 功能
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pmc-epmmformquerygui-canary
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+spec:
+  type: ClusterIP
+  selector:
+    app: pmc-epmmformquerygui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      appProtocol: http
+---
+# 保留原本的 Service 名稱給 mesh 內部其他服務使用（可選）。
+# 它同時涵蓋兩軌，適合「不在乎打到哪一軌」的呼叫方（例如監控）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: pmc-epmmformquerygui-svc
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+spec:
+  type: ClusterIP
+  selector:
+    app: pmc-epmmformquerygui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      appProtocol: http

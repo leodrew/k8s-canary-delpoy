@@ -1,0 +1,56 @@
+# =============================================================================
+# Track A — DestinationRule（把一個 Service 切成 stable / canary 兩個 subset）
+#
+# subset 名稱固定為 stable / canary，永遠不用改。
+# VirtualService 靠 subset 名稱決定流量往哪一軌。
+# =============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: pmc-epmmformquerygui-dr
+  namespace: ea-pmc
+spec:
+  host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+
+  # ---------- 兩個 subset 共用的預設策略 ----------
+  trafficPolicy:
+    loadBalancer:
+      # 【session 黏著】取代失效的 Service.sessionAffinity。
+      # canary 維持 replicas: 1 的話這個設定對 canary 不影響（只有一個 pod），
+      # 但對 stable 的 2 個 pod 有效，可減少使用者被登出的機率。
+      consistentHash:
+        httpCookie:
+          name: JSESSIONID        # Spring Boot 的 session cookie
+          ttl: 10800s
+
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 3s
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 0
+
+    outlierDetection:             # 熔斷：連續出錯的 pod 自動踢出負載平衡
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50      # 最多踢一半，避免全部被踢光
+
+  subsets:
+    - name: stable
+      labels:
+        version: stable           # 對應 Deployment pod template 的 label
+
+    - name: canary
+      labels:
+        version: canary
+
+      # 若 canary 需要開超過 1 個 replica，把下面這段解開，
+      # 否則 pilot 使用者會在多個 canary pod 之間跳而被登出。
+      # trafficPolicy:
+      #   loadBalancer:
+      #     consistentHash:
+      #       httpCookie:
+      #         name: JSESSIONID
+      #         ttl: 10800s

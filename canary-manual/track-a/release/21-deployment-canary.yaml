@@ -1,0 +1,137 @@
+# =============================================================================
+# Track A — CANARY Deployment（只有帶 cookie 的 pilot 使用者打得到）
+#
+# 跟 stable 的差別只有三處：
+#   1. name  : ...-canary
+#   2. label : version: canary
+#   3. replicas: 1  ← 重要，見下方說明
+#
+# 【為什麼 replicas 必須是 1】
+#   你的 app 用 in-memory HttpSession，而 sessionAffinity 在 Istio 下不生效
+#   （見 guide Part 6.2）。canary 若開 2 個 pod，pilot 使用者的請求會在兩個
+#   canary pod 之間跳，session 找不到就被踢回 Keycloak 重登 —— pilot run 會
+#   一直被中斷，測不下去。
+#   開 1 個 pod 是最簡單可靠的解法。若真的需要多個 canary pod，就必須在
+#   DestinationRule 的 canary subset 上加 consistentHash（見 04 檔案的註解）。
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pmc-epmmformquerygui-canary
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+    version: canary
+spec:
+  replicas: 0                    # 【靜止狀態】平時 0；發布時改成 1（見 SOP-apply-only.md）
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  minReadySeconds: 15
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: pmc-epmmformquerygui
+      version: canary
+
+  template:
+    metadata:
+      labels:
+        app: pmc-epmmformquerygui
+        version: canary
+      annotations:
+        config-version: "1.2.3"                  # 【三處之一】要跟 image / configMap 版本一致
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
+    spec:
+      serviceAccountName: pmc-epmmformquerygui
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: app
+          # >>> 【三處之一】發布時改成新版本 <<<
+          image: your-registry/pmc-epmmformquerygui:1.2.3
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          envFrom:
+            - secretRef:
+                name: pmc-epmmformquery-secret
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/app/config/application.yml"
+            - name: APP_TRACK
+              value: "canary"               # log 裡可以直接分辨
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          resources:
+            requests: { memory: "512Mi", cpu: "250m" }
+            limits:   { memory: "1Gi",   cpu: "1000m" }
+
+          startupProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: config
+          configMap:
+            name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
+        - name: tmp
+          emptyDir: {}

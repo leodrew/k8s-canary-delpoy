@@ -1,0 +1,142 @@
+# =============================================================================
+# Track A — STABLE Deployment（正式流量都在這裡）
+#
+# 命名固定：名稱永遠是 pmc-epmmformquerygui-stable，不帶版本號。
+# 每次發布只換 image tag，不新增 Deployment。
+#
+# 【重要】pod label 的 version: stable 是 DestinationRule 分 subset 的依據，
+#         也是 Istio metrics 的 destination_version，不要改動。
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pmc-epmmformquerygui-stable
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+    version: stable
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  minReadySeconds: 15
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # 更新期間不減少可用數
+
+  selector:
+    matchLabels:
+      app: pmc-epmmformquerygui
+      version: stable            # 建立後不可修改
+
+  template:
+    metadata:
+      labels:
+        app: pmc-epmmformquerygui
+        version: stable          # Service 用 app 選中；DestinationRule 用 version 分 subset
+      annotations:
+        # 改 ConfigMap 版本時這個值要跟著改，才會觸發滾動更新
+        config-version: "1.2.3"                  # 改 ConfigMap 版本會改動 template → 觸發滾動更新
+        # 確保 sidecar 先就緒再啟動 app，避免啟動瞬間的連線失敗
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
+    spec:
+      serviceAccountName: pmc-epmmformquerygui
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: pmc-epmmformquerygui
+              version: stable
+
+      containers:
+        - name: app
+          # >>> 發布時只改這一行 <<<
+          image: your-registry/pmc-epmmformquerygui:1.2.3
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          envFrom:
+            - secretRef:
+                name: pmc-epmmformquery-secret
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/app/config/application.yml"
+            - name: APP_TRACK               # 方便 log 裡分辨自己是哪一軌
+              value: "stable"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          resources:
+            requests: { memory: "512Mi", cpu: "250m" }
+            limits:   { memory: "1Gi",   cpu: "1000m" }
+
+          startupProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10               # 最多給 300 秒啟動
+
+          readinessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /gui_epmmFormQuery/actuator/health
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3             # 比 readiness 遲鈍，避免雪崩式重啟
+
+          lifecycle:
+            preStop:
+              exec:
+                # 等 endpoint 從所有 sidecar / kube-proxy 移除，消除滾動更新期間的零星 502
+                command: ["/bin/sh", "-c", "sleep 10"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: config
+          configMap:
+            name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
+        - name: tmp
+          emptyDir: {}

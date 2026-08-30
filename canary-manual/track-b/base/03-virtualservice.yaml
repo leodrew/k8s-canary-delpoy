@@ -1,0 +1,61 @@
+# =============================================================================
+# Track B — VirtualService（Argo Rollouts 會自動修改這個檔案的內容）
+#
+# 【重要觀念】這份 YAML 只是「初始狀態」。
+#   apply 之後，Argo Rollouts 會在發布過程中自動改它：
+#     - 改 primary route 裡兩個 destination 的 weight
+#     - 在最前面動態插入 / 移除名為 pilot-run 的 route
+#
+#   所以：發布期間「不要」手動 kubectl apply 這個檔案，會跟 Argo 打架。
+#   如果用 GitOps（Argo CD），要把這個資源設成忽略 weight 差異，
+#   否則 Argo CD 會一直想把權重改回 100/0。
+#
+# 【必要條件】
+#   1. 必須有一個名為 primary 的 http route（對應 Rollout 的 routes: [primary]）
+#   2. primary route 必須有兩個 destination，指向 stable / canary 兩個 Service
+#   3. gateways 要包含 mesh，否則內部呼叫不套用這些規則
+# =============================================================================
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: app-routing
+  namespace: ea-pmc
+spec:
+  hosts:
+    - myapp.example.com
+    - pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+  gateways:
+    - istio-system/my-gateway
+    - mesh
+
+  http:
+    # Argo 會在這個位置之前動態插入 pilot-run route（步驟 2 時），
+    # 並在簽核通過後移除（步驟 4 時）。你不需要自己寫那條。
+
+    - name: primary                  # 【必要】名稱要跟 Rollout 的 routes 對上
+      match:
+        - uri: { prefix: /gui_epmmFormQuery/ }
+        - uri: { exact: /gui_epmmFormQuery }
+      route:
+        - destination:
+            host: pmc-epmmformquerygui-stable      # 【必要】對應 stableService
+            port:
+              number: 8080
+          weight: 100                              # Argo 會動態改這個數字
+        - destination:
+            host: pmc-epmmformquerygui-canary      # 【必要】對應 canaryService
+            port:
+              number: 8080
+          weight: 0                                # Argo 會動態改這個數字
+      timeout: 15s
+      retries:
+        attempts: 3
+        perTryTimeout: 4s
+        retryOn: "5xx,reset,connect-failure"
+
+    - name: default
+      route:
+        - destination:
+            host: pmc-epmmformquerygui-stable
+            port:
+              number: 8080

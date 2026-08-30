@@ -1,0 +1,59 @@
+# =============================================================================
+# Track B — DestinationRule（可選，但強烈建議）
+#
+# 【跟 Track A 的差異】
+#   Track B 用兩個 Service 分軌，「不需要」subset。
+#   這份 DestinationRule 的作用只剩下 trafficPolicy：
+#   session 黏著、連線池、熔斷。
+#
+#   要對兩個 Service 各套一份（DestinationRule 是綁 host 的）。
+# =============================================================================
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: pmc-epmmformquerygui-stable-dr
+  namespace: ea-pmc
+spec:
+  host: pmc-epmmformquerygui-stable
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpCookie:
+          name: JSESSIONID        # 減少使用者在 stable 的多個 pod 之間跳
+          ttl: 10800s
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 3s
+      http:
+        http1MaxPendingRequests: 100
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: pmc-epmmformquerygui-canary-dr
+  namespace: ea-pmc
+spec:
+  host: pmc-epmmformquerygui-canary
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpCookie:
+          name: JSESSIONID
+          ttl: 10800s
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 3s
+      http:
+        http1MaxPendingRequests: 100
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

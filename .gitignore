@@ -1,0 +1,13 @@
+# 備份壓縮檔（.claude/ 的內容已在版控中，不需要重複）
+*.zip
+
+# OS / 編輯器
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# 本機暫存
+tmp/
+*.log

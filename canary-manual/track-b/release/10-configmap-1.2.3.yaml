@@ -1,0 +1,89 @@
+# =============================================================================
+# release/ — ConfigMap（每個版本一個檔，檔名帶版本號）
+#
+# 【apply-only 流程】每次發布「新增」一個這樣的檔案，不要改既有的。
+#   1.2.3 上線 → 有 10-configmap-1.2.3.yaml
+#   1.3.0 上線 → 新增 10-configmap-1.3.0.yaml（1.2.3 那份留著）
+#
+# 【為什麼舊的不能刪】回滾 = git revert，revert 之後 Deployment 會引用回
+#   舊的 ConfigMap 名稱。那份 ConfigMap 如果已經從 cluster 刪掉，
+#   Pod 會卡在 ContainerCreating —— 你就回不去了。
+#   保留數量必須 >= 你可能回滾的深度（建議至少 3 個版本）。
+#
+# 【immutable: true】建立後不可修改，只能新增版本。
+#   要改設定就發一個新版本，而不是偷偷改線上的設定。
+# =============================================================================
+#   1. 建立新版本的 ConfigMap（新名稱）
+#   2. 改 Rollout template 的 image + configMap.name
+#   3. Argo 自動產生新 ReplicaSet（canary），舊的留著當 stable
+#
+# 【內容與 track-a/00-configmap.yaml 完全相同】
+#   兩個 track 的設定內容一樣，差別只在「誰引用它」。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pmc-epmmformquery-config-1.2.3     # ← 舊 ReplicaSet（stable）仍引用這份
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+    config-version: "1.2.3"
+immutable: true
+data:
+  application.yml: |
+    server:
+      port: 8080
+      forward-headers-strategy: framework
+
+    spring:
+      application:
+        name: pmc-epmmformquerygui
+      security:
+        oauth2:
+          client:
+            registration:
+              keycloak:
+                client-id: ${KEYCLOAK_CLIENT_ID}
+                client-secret: ${KEYCLOAK_CLIENT_SECRET}
+                authorization-grant-type: authorization_code
+                scope: [openid, profile, email]
+                client-name: Keycloak Login
+            provider:
+              keycloak:
+                issuer-uri: ${KEYCLOAK_ISSUER_URI}
+                user-name-attribute: preferred_username
+
+    app:
+      context-prefix: /gui_epmmFormQuery
+
+      cors:
+        allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+        allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,PATCH,OPTIONS}
+        allowed-headers: ${CORS_ALLOWED_HEADERS:*}
+        allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
+        max-age: ${CORS_MAX_AGE:3600}
+
+      sso:
+        custom-logout-url: ${SSO_LOGOUT_URL:}
+        post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI}
+        logout-redirect-param-name: ${SSO_LOGOUT_REDIRECT_PARAM:redirectUri}
+
+      privilege:
+        enabled: ${PRIVILEGE_CHECK_ENABLED:false}
+
+      test-endpoints:
+        enabled: ${TEST_ENDPOINTS_ENABLED:false}
+
+      frontend:
+        url-prefix: /gui_epmmFormQuery/web
+        resource-location: classpath:/gui_epmmFormQuery/web/
+        index-path: /gui_epmmFormQuery/web/index.html
+        classpath-base: gui_epmmFormQuery/web
+
+    logging:
+      level:
+        com.example: INFO
+        org.springframework.web.servlet.DispatcherServlet: DEBUG
+
+    management:
+      endpoints:

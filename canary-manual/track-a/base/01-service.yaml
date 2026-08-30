@@ -1,0 +1,33 @@
+# =============================================================================
+# Track A — Service（一個 Service 同時涵蓋 stable 與 canary）
+#
+# 【關鍵】selector 只寫 app，不要寫 version。
+#         寫了 version 就只會選到其中一軌，DestinationRule 的 subset 會沒有
+#         endpoint，結果是 503（access log 的 response_flags 顯示 UH）。
+#
+# 【關鍵】ports 一定要有 name 與 appProtocol。
+#         cookie 比對是 L7 功能，Istio 必須確定這個 port 是 HTTP 才會啟用
+#         L7 filter。沒命名時 Istio 只能靠自動偵測，cookie 路由可能失效。
+#         （這也是 guide Part 9 發現 4 要修的項目）
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: pmc-epmmformquerygui-svc
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+spec:
+  type: ClusterIP
+  selector:
+    app: pmc-epmmformquerygui     # 只比對 app —— stable 和 canary 的 pod 都會被選中
+  ports:
+    - name: http                  # 必要：Istio 協定判定
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      appProtocol: http           # 必要：比 port 命名更明確
+
+  # 【不要加 sessionAffinity: ClientIP】
+  # 它在 Istio mesh 內不生效（流量由 sidecar 直送 pod IP，繞過 kube-proxy）。
+  # 需要黏著請用 DestinationRule 的 consistentHash，見 04 檔案。

@@ -1,0 +1,99 @@
+# =============================================================================
+# Track A — VirtualService（整套機制的核心）
+#
+# 設計重點：
+#   1. 帶 canary=always cookie 的請求 → 100% 進 canary
+#   2. 其他所有請求               → 100% 進 stable
+#   3. 正式流量的權重永遠是 stable 100 / canary 0
+#      → pilot run 期間對正式使用者「零風險」，因為沒有任何正式流量進 canary
+#
+# 【順序決定一切】match 是 first-match-wins，cookie 規則一定要放在最前面。
+#                 放在後面的話永遠不會被執行到（見 guide Part 6.6 踩雷 2）。
+#
+# 【gateways 一定要有 mesh】否則 cluster 內部呼叫這個 Service 時完全不套用
+#                 這裡的路由規則，會在 stable 和 canary 的 pod 之間隨機分配
+#                 —— 內部呼叫會意外打到未經驗證的 canary。
+#                 （這也是 guide Part 9 發現 3 要修的項目）
+# =============================================================================
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: app-routing
+  namespace: ea-pmc
+spec:
+  hosts:
+    - myapp.example.com                                     # 外部進來的 host
+    - pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local     # mesh 內部呼叫的 host
+  gateways:
+    - istio-system/my-gateway
+    - mesh                                                  # 必要，見上方說明
+
+  http:
+    # =========================================================================
+    # 規則 1：PILOT RUN —— 帶 cookie 的人走 canary
+    # =========================================================================
+    - name: pilot-run
+      match:
+        - headers:
+            cookie:
+              # 精準比對 canary=always 這個 cookie。
+              # 用完整的分隔符比對，避免誤中 xcanary=always 之類的名稱。
+              regex: "^(.*;\\s*)?canary=always(\\s*;.*)?$"
+      route:
+        - destination:
+            host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+            subset: canary
+            port:
+              number: 8080
+      headers:
+        response:
+          set:
+            # pilot 使用者可以在瀏覽器 F12 的 Network 分頁看到這個 header，
+            # 用來確認「我現在真的在 canary 上」。這是驗收的關鍵證據。
+            x-app-track: "canary"
+      timeout: 15s
+      retries:
+        attempts: 3
+        perTryTimeout: 4s
+        retryOn: "5xx,reset,connect-failure"
+
+    # =========================================================================
+    # 規則 2：正式流量 —— 全部走 stable
+    # =========================================================================
+    - name: primary
+      match:
+        - uri: { prefix: /gui_epmmFormQuery/ }
+        - uri: { exact: /gui_epmmFormQuery }
+      route:
+        - destination:
+            host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+            subset: stable
+            port:
+              number: 8080
+          weight: 100                # pilot run 期間永遠是 100
+        - destination:
+            host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+            subset: canary
+            port:
+              number: 8080
+          weight: 0                  # 永遠是 0；要漸進放量才改這兩個數字
+      headers:
+        response:
+          set:
+            x-app-track: "stable"
+      timeout: 15s
+      retries:
+        attempts: 3
+        perTryTimeout: 4s
+        retryOn: "5xx,reset,connect-failure"
+
+    # =========================================================================
+    # 規則 3：預設路由（沒有 match = 全部命中，一定放最後）
+    # =========================================================================
+    - name: default
+      route:
+        - destination:
+            host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+            subset: stable
+            port:
+              number: 8080
