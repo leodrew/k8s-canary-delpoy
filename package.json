@@ -1,0 +1,12 @@
+{
+  "name": "k8s-canary-manifests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kubernetes/Istio manifests for pmc-epmmformquerygui canary deployment. Not a build; js-yaml is here purely so scripts/validate.sh can parse manifests offline.",
+  "scripts": {
+    "validate": "bash scripts/validate.sh"
+  },
+  "devDependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

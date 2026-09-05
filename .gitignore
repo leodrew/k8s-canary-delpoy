@@ -11,3 +11,8 @@ desktop.ini
 # 本機暫存
 tmp/
 *.log
+
+# npm 相依套件。這個 repo 沒有要 build 任何東西，js-yaml 只是給
+# scripts/validate.sh 解析 manifest 用的；package-lock.json 有進版控，
+# 需要時在 repo root 跑 npm install 就會還原。
+node_modules/

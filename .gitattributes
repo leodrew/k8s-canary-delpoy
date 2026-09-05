@@ -1,0 +1,6 @@
+# 這台機器的 git 設定是 core.autocrlf=true，checkout 時會把文字檔換成 CRLF。
+# shell 腳本不能跟著換：Git Bash 目前容忍行尾的 \r，但同一份檔案在 Linux 或
+# WSL 上（例如未來有人在 CI 跑 scripts/validate.sh）會直接死在
+# `#!/usr/bin/env bash\r: bad interpreter`。品質閘門不應該因為在哪台機器
+# checkout 而時好時壞，所以 *.sh 一律以 LF 進版控也以 LF 取出。
+*.sh text eol=lf
