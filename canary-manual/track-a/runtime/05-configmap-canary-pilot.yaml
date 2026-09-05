@@ -1,0 +1,35 @@
+# =============================================================================
+# Track A — Canary pilot 名單（可變）
+#
+# 這份 ConfigMap 跟 release/ 底下那份**規則完全相反**，三個「不要」都是刻意的：
+#
+#   【不要加 immutable: true】改名單就是這份檔案存在的理由。
+#   【不要帶版本號】帶了就會退化成「改名單 = 換 ConfigMap 名稱 = 改 Deployment
+#                   = 滾動重啟正式環境」。加一個 pilot 使用者不該重啟任何東西。
+#   【不要在 Deployment 加對應的 config-version annotation】
+#                   release/ 那份靠 annotation 觸發滾動更新；這一份刻意不要觸發。
+#
+# 生效時間：kubectl apply → kubelet 同步（≤60s）→ app 重讀（30s）→ ≤90 秒。
+#           使用者要「重新登入」新加的名單才會把他送進 canary；
+#           被移除的人則在下一次頁面導航就會被送回 stable。
+#
+# 掛載方式見 20/21-deployment：掛「目錄」到 /app/canary，不要用 subPath
+# —— subPath 掛的檔案永遠不會跟著 ConfigMap 更新。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pmc-epmmformquery-canary-pilot
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+data:
+  pilot-users.txt: |
+    # 一行一個 Keycloak 的 preferred_username（就是使用者登入時打的帳號）。
+    # 開頭是 # 的是註解，空行會被忽略，大小寫不敏感。
+    #
+    # 【不是】OIDC 的 sub。app 端是用 OidcUser.getPreferredUsername() 比對的，
+    # 不是 Authentication.getName()（這支 app 設了 user-name-attribute: sub，
+    # getName() 回傳的是 UUID）。詳見 CanaryUsernames.java。
+    #
+    # 空檔案 = 沒有任何人會被自動送進 canary。

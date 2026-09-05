@@ -1,5 +1,9 @@
 # 人工 pilot run 閘門的 Canary 發布
 
+> ⚠ **已被 [`CANARY-COMPLETE.md`](CANARY-COMPLETE.md) 取代。** 設計理由仍值得一讀，
+> 但**操作步驟不要照這份做** —— 本文「簽核不通過 → `replicas: 1 → 0`」的指示已被判定為 outage 動作
+> （會讓還握著 cookie 的人吃 503 直到 8 小時後過期），正確做法見總集手冊第 8 章。
+
 保留「**使用者 pilot run 簽核通過才能把 canary 變成 stable**」的流程，但用 Istio 讓它做得更可靠。
 
 ## 核心設計

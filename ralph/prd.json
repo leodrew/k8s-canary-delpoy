@@ -1,0 +1,192 @@
+{
+  "project": "canary-manual (dev/k8s)",
+  "branchName": "ralph/canary-configmap-split",
+  "description": "Canary ConfigMap split and pre-launch fixes for pmc-epmmformquerygui. IMPORTANT - THIS IS NOT A CODE PROJECT: the repo root is dev/k8s and it contains only Kubernetes/Istio YAML manifests, shell scripts and Traditional-Chinese markdown. There is no compiler, no test suite, no package to build. The typecheck equivalent is `bash scripts/validate.sh` run from the repo root; exit code 0 means the check passed. That script does not exist yet - US-001 creates it, and EVERY LATER STORY MUST ADD ITS OWN ASSERTIONS TO scripts/validate.sh IN THE SAME COMMIT as the change it is verifying. That is the single most important rule in this PRD: it is what keeps the script green at every commit and what stops a later story from silently breaking an earlier one. TOOLING: this machine has node/npm/npx only. There is NO kubectl, NO yq, NO usable python (only the Microsoft Store stub). Do not try to install kubectl, do not try to reach a cluster, do not run `kubectl apply` even with --dry-run - it will not exist. YAML parsing is done with the js-yaml CLI pinned as a devDependency (US-001 sets this up). SCOPE: dev/k8s only. The Spring Boot backend lives in a separate repo at dev/spring_oauth2_backend and is deliberately OUT OF SCOPE - in particular the SecurityConfig permitAll change that US-007 depends on, and the whole BFF-proxy phase, are not part of this run. Never edit files outside dev/k8s. SOURCE OF TRUTH: canary-manual/CANARY-COMPLETE.md holds the full target state - section 3.1 (how config is loaded) and Appendix C (the required-key list) are the two most important sections, and section 3.5 contains the complete target ConfigMap. The original requirements are in tasks/prd-canary-configmap-split-and-hardening.md. Read the relevant section BEFORE editing any manifest. WHAT IS BEING FIXED: the image's Dockerfile sets SPRING_CONFIG_LOCATION=file:/config/application.yaml (replace semantics, a path nothing mounts) while the Deployment sets SPRING_CONFIG_ADDITIONAL_LOCATION=file:/app/config/application.yml - the pod cannot start, and under replace semantics every key the ConfigMap omits silently falls back to a Java @Value default. Stories 002-006 make the ConfigMap complete and then flip the env var; stories 008-009 split the single shared ConfigMap into per-track -stable/-canary copies with a content-hash annotation. STYLE: YAML comments in this repo explain WHY at length - see track-a/release/20-deployment-stable.yaml for the density to match. Prose is Traditional Chinese. Five documents under canary-manual/ carry a 'superseded' banner; do not follow their operational steps, they contain known-wrong instructions. NOTE: canary-manual/ is a documentation tree, so nothing here is auto-deployed - but do not leave the repo in a state you would be embarrassed to have applied.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Bootstrap scripts/validate.sh with YAML syntax checking",
+      "description": "As a Ralph iteration, I need a quality-check command in a repo that has no compiler and no tests, so that every later story has something to verify against.",
+      "acceptanceCriteria": [
+        "Create package.json at the repo root with js-yaml pinned as a devDependency (js-yaml ^4), a `scripts.validate` entry running `bash scripts/validate.sh`, and `private: true`",
+        "Run `npm install` once so package-lock.json is generated and node_modules/js-yaml exists; commit package.json and package-lock.json but NOT node_modules",
+        "Add node_modules/ to .gitignore",
+        "Create scripts/validate.sh as a check runner: it defines a `check <name> <command>` helper that prints `PASS <name>` or `FAIL <name>`, accumulates a failure count, and exits 1 if any check failed and 0 otherwise",
+        "scripts/validate.sh must be runnable from the repo root as `bash scripts/validate.sh` and must cd to the repo root itself so it also works when invoked from elsewhere",
+        "Add the first check: every *.yaml file under canary-manual/track-a/ and canary-manual/track-b/ parses as YAML, using the local js-yaml CLI (node_modules/.bin/js-yaml) - NOT `npx --yes`, which needs network on every run and cannot be a quality gate",
+        "The YAML check must iterate files found with `find`, not a hardcoded list, so manifests added by later stories are covered automatically",
+        "This story makes ZERO changes to any file under canary-manual/ - it is a tooling-only commit and the check must pass against the repo exactly as it is today",
+        "`bash scripts/validate.sh` exits 0 and its output names every manifest it parsed"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add the three ConfigMap keys whose absence prevents startup",
+      "description": "As a maintainer, I need the three keys that have no usable Java default present in the ConfigMap, so that the pod can start once the config-load env var is flipped in US-006.",
+      "acceptanceCriteria": [
+        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml, add `issuer-uri: ${KEYCLOAK_ISSUER_URI}` under spring.security.oauth2.client.provider.keycloak (it was deleted from this file at some point; track-b still has it at line 53)",
+        "Add `app.post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}` - the backend reads `@Value(\"${app.post-logout-redirect-uri}\")` with NO default, so a missing key is a Could-not-resolve-placeholder startup failure",
+        "Add `redirect-uri: \"{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}\"` under spring.security.oauth2.client.registration.keycloak - Spring's own default omits the /gui_epmmFormQuery prefix and would not match redirectionEndpoint.baseUri",
+        "Each added key carries a YAML comment saying what breaks without it, matching the comment density of the surrounding file",
+        "Do NOT add the app.sso.* keys back - the correct key is app.post-logout-redirect-uri at the app.* top level, and removing app.sso.* is US-005's job",
+        "Add a check to scripts/validate.sh asserting all three keys are present in the track-a ConfigMap's application.yml (parse the ConfigMap with js-yaml, then parse the data['application.yml'] string as YAML and assert on the parsed object - do not grep the raw file)",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Cluster verification deferred to deploy time: `kubectl logs` must show no ConfigDataLocationNotFoundException and no 'Could not resolve placeholder'."
+    },
+    {
+      "id": "US-003",
+      "title": "Add the ConfigMap keys that silently fall back to Java defaults",
+      "description": "As a maintainer, I need the keys whose Java defaults are wrong for this environment written out explicitly, so that replace-semantics config loading does not silently change behaviour.",
+      "acceptanceCriteria": [
+        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml add `server.servlet.session.timeout: 8h` - the Spring default is 30 minutes",
+        "Add server.servlet.session.cookie with name `__Host-JSESSIONID`, same-site `lax`, secure `true`, http-only `true` - without the name key it falls back to JSESSIONID, which collides with the Envoy affinity cookie",
+        "Add `app.security.csp-policy` with the exact policy string from canary-manual/CANARY-COMPLETE.md section 3.5, and `app.security.csp-report-only: true` - the Java default for csp-policy is an empty string, which suppresses the CSP header entirely",
+        "Add `app.security.required-role: \"\"`",
+        "Add `spring.task.scheduling.pool.size: 2` - the default of 1 queues the canary roster reload behind the 60-second Keycloak token refresh",
+        "Add `app.canary.leave-path: /gui_epmmFormQuery/canary/leave` - this one value is read in three places in the backend and must not be left implicit",
+        "Add app.token-refresh.{enabled,skew-seconds,schedule-rate-ms}, app.silent-auth.{enabled,hint-cookie-name,hint-cookie-max-age-seconds,cookie-secure}, app.downstream.base-url and app.third-party.base-url, using the values in CANARY-COMPLETE.md section 3.5",
+        "Each key carries a comment; the ones listed in CANARY-COMPLETE.md Appendix C.2 must say what wrong value they would fall back to",
+        "Extend the scripts/validate.sh check from US-002 into a required-key list covering Appendix C.1, C.2 and C.3, asserting each key exists in the parsed application.yml and that session.cookie.name equals `__Host-JSESSIONID` and task pool size equals 2",
+        "The new checks are added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Cluster verification deferred: after deploy, the session cookie in the browser must be named __Host-JSESSIONID and a Content-Security-Policy-Report-Only header must be present."
+    },
+    {
+      "id": "US-004",
+      "title": "Change user-name-attribute from preferred_username back to sub",
+      "description": "As a maintainer, I need the OIDC token store keyed on a stable claim, so that a recycled username cannot resolve the previous user's tokens.",
+      "acceptanceCriteria": [
+        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml line ~59, change `user-name-attribute: preferred_username` to `user-name-attribute: sub`",
+        "Make the same change in canary-manual/track-b/release/10-configmap-1.2.3.yaml line ~54",
+        "Replace the stale commented-out hint at track-a line ~48 with a real comment explaining why sub is required: Authentication.getName() keys InMemoryOAuth2AuthorizedClientService, and OIDC does not guarantee preferred_username is stable or unique (review F15)",
+        "Add a check to scripts/validate.sh asserting that in BOTH track-a and track-b ConfigMaps the parsed value of spring.security.oauth2.client.provider.keycloak.user-name-attribute is exactly `sub`",
+        "The check must fail loudly if the value is `preferred_username`, so a future edit cannot quietly reintroduce it",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "track-b is otherwise out of scope for this run; only this one line is changed there because the same regression exists in both files."
+    },
+    {
+      "id": "US-005",
+      "title": "Remove the three dead config blocks",
+      "description": "As a maintainer, I do not want configuration in the repo that no code reads, because it sends people in the wrong direction when they are debugging.",
+      "acceptanceCriteria": [
+        "Delete the whole `app.cors:` block (allowed-origins, allowed-methods, allowed-headers, allow-credentials, max-age) from canary-manual/track-a/release/10-configmap-1.2.3.yaml around line 64 - the backend has no CORS configuration at all, deliberately (SecurityConfig's `// No .cors()`, review F4)",
+        "Delete the whole `app.sso:` block (custom-logout-url, post-logout-redirect-uri, logout-redirect-param-name) around line 71 - it is the wrong key path; the correct key was added as app.post-logout-redirect-uri in US-002",
+        "Delete `app.test-endpoints:` around line 79 - no code reads it",
+        "Delete the same blocks from canary-manual/track-b/release/10-configmap-1.2.3.yaml where present",
+        "Leave a single short comment where app.cors was, pointing at canary-manual/CANARY-COMPLETE.md Appendix A, so the next person who goes looking for CORS settings finds the explanation instead of re-adding them",
+        "Add a check to scripts/validate.sh asserting the parsed application.yml of both ConfigMaps has no `cors`, `sso` or `test-endpoints` key under `app`",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Switch both Deployments to SPRING_CONFIG_LOCATION at the real mount path",
+      "description": "As a maintainer, I need the Deployment to point Spring at the path the ConfigMap is actually mounted on, so that the pod stops failing to start.",
+      "acceptanceCriteria": [
+        "In canary-manual/track-a/release/20-deployment-stable.yaml and 21-deployment-canary.yaml, replace the env var `SPRING_CONFIG_ADDITIONAL_LOCATION` with `SPRING_CONFIG_LOCATION`, value `file:/app/config/application.yml`",
+        "The value must match the `config` volumeMount mountPath (/app/config) already present in both files",
+        "Add a comment explaining that the Deployment env overrides the image's own ENV (Dockerfile line 120 sets SPRING_CONFIG_LOCATION=file:/config/application.yaml, a path nothing mounts), that this is replace semantics not merge, and that the ConfigMap must therefore stay complete - cross-reference CANARY-COMPLETE.md section 3.1 and Appendix C",
+        "Do NOT modify dev/spring_oauth2_backend/Dockerfile - the decision is to fix this from the k8s side only, so no image rebuild is needed",
+        "Add a check to scripts/validate.sh asserting that no file under canary-manual/ contains the string SPRING_CONFIG_ADDITIONAL_LOCATION, and that both track-a Deployments have an env entry named SPRING_CONFIG_LOCATION whose value is exactly file:/app/config/application.yml",
+        "This story is ordered after US-002 through US-005 on purpose: flipping to replace semantics before the ConfigMap is complete would make the manifests worse, not better",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Cluster verification deferred: `kubectl exec <pod> -- head -3 /app/config/application.yml` must print the ConfigMap contents."
+    },
+    {
+      "id": "US-007",
+      "title": "Point the probes at separate liveness and readiness health groups",
+      "description": "As a maintainer, I want liveness and readiness to be different endpoints, so that a dependency blip stops restarting the pod.",
+      "acceptanceCriteria": [
+        "Add `management.endpoint.health.probes.enabled: true` to the track-a ConfigMap so the liveness and readiness health groups exist",
+        "In both track-a Deployments, change livenessProbe httpGet path to /gui_epmmFormQuery/actuator/health/liveness",
+        "Change readinessProbe and startupProbe httpGet paths to /gui_epmmFormQuery/actuator/health/readiness",
+        "Add a comment on the probe block recording the known gap: SecurityConfig's permitAll list only covers the UNPREFIXED /actuator/health and /actuator/health/**, so the prefixed paths currently return 302, and kubelet counts 3xx as success - the probes pass unconditionally until the backend adds the prefixed entries. Reference CANARY-COMPLETE.md section 3.6",
+        "Add a check to scripts/validate.sh asserting the three probes in both Deployments use the health/liveness and health/readiness paths and that liveness and readiness are NOT the same path",
+        "Do NOT edit anything in dev/spring_oauth2_backend - the permitAll fix is out of scope for this run",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "BLOCKED ON A DIFFERENT REPO: this story only completes the k8s half. Until dev/spring_oauth2_backend adds contextPrefix + \"/actuator/health\" and \"/actuator/health/**\" to SecurityConfig's permitAll list, the probes still return 302 and still pass unconditionally. Do not report the probe problem as solved."
+    },
+    {
+      "id": "US-008",
+      "title": "Split the shared ConfigMap into per-track stable and canary copies",
+      "description": "As a maintainer, I need each track to own its configuration, so that changing the canary's CSP or backend URL does not roll the stable Deployment.",
+      "acceptanceCriteria": [
+        "Rename canary-manual/track-a/release/10-configmap-1.2.3.yaml to 10-configmap-stable.yaml with `git mv`, and change metadata.name to pmc-epmmformquery-config-stable",
+        "Create canary-manual/track-a/release/11-configmap-canary.yaml as a copy with metadata.name pmc-epmmformquery-config-canary",
+        "Remove `immutable: true` from both - a fixed-name ConfigMap must be overwritable by kubectl apply, and leaving it makes apply fail with 'field is immutable'. Replace the old immutable comment with one explaining this",
+        "Remove the `config-version: \"1.2.3\"` label from both and add `track: stable` / `track: canary`",
+        "Point 20-deployment-stable.yaml's volumes[config].configMap.name at pmc-epmmformquery-config-stable and 21-deployment-canary.yaml's at pmc-epmmformquery-config-canary",
+        "The two files' data['application.yml'] contents must be byte-identical at this point - per-track divergence is a later, deliberate act, not something introduced by the split",
+        "Add checks to scripts/validate.sh: both ConfigMaps exist; neither has an `immutable` key; neither metadata.name matches a version-number pattern; the two data['application.yml'] strings are identical; each Deployment references the ConfigMap for its own track",
+        "The existing US-002..US-005 key checks must now run against BOTH ConfigMaps, not just one - update them rather than duplicating them",
+        "The new checks are added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Replace config-version with a content-hash annotation and a sync script",
+      "description": "As a maintainer, I need changing ConfigMap content to trigger a rolling restart automatically, now that the ConfigMap name no longer changes between releases.",
+      "acceptanceCriteria": [
+        "Create scripts/sync-config-hash.sh: for each track it reads the ConfigMap's data['application.yml'], computes sha256, takes the first 8 hex characters, and writes it into the matching Deployment's spec.template.metadata.annotations['config-hash']",
+        "The script must be idempotent - running it twice in a row leaves no diff on the second run; assert this in validate.sh by running it and checking `git diff --quiet`",
+        "Replace the `config-version: \"1.2.3\"` annotation in both track-a Deployments with `config-hash`, and run the script to populate the real values",
+        "Add a comment on the annotation explaining that changing ConfigMap content changes the hash, which changes the pod template, which triggers the rollout - and that a stale hash fails silently by simply not restarting",
+        "Add a check to scripts/validate.sh asserting each Deployment's config-hash annotation equals the sha256-prefix of its own ConfigMap's application.yml",
+        "The script must use node for hashing (`node -e` with require('crypto')) since there is no python and sha256sum availability is not guaranteed under Git Bash on this machine - verify whichever you use actually runs",
+        "The new checks are added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "The CI half of the original requirement (fail the build when the annotation is stale, and require ConfigMap+Deployment changes in one commit) is out of scope: neither repo has any CI. validate.sh covers the staleness check locally; the commit-pairing check needs a git hook and is deferred."
+    },
+    {
+      "id": "US-010",
+      "title": "Remove the outage-causing commands from scripts/canary.sh",
+      "description": "As an on-call engineer, I do not want the helper script to offer commands that the SOP classifies as an outage.",
+      "acceptanceCriteria": [
+        "In canary-manual/scripts/canary.sh, `cmd_rollback` must no longer run `kubectl scale --replicas=0`; replace it with the documented shutdown (set image back to stable's version, set APP_CANARY_ENABLED=false, keep replicas at 1) or make it print a pointer to CANARY-COMPLETE.md section 8.2 and exit 1",
+        "`cmd_promote` must no longer end with `kubectl scale --replicas=0` - the drain must happen first (CANARY-COMPLETE.md section 5, step 4a)",
+        "`cmd_undo` must no longer run `kubectl rollout undo` - with fixed-name mutable ConfigMaps that restores the old pod template while leaving the new ConfigMap content mounted. Replace it with a pointer to the `git revert` procedure in section 8.4",
+        "`patch_deploy` and `cmd_deploy` still reference the versioned ConfigMap name pattern ${CM_PREFIX}-${ver}; update them for the fixed -stable/-canary names introduced in US-008, or make the affected subcommands refuse to run and say why",
+        "`cmd_cleanup` deletes old versioned ConfigMaps and no longer has anything to clean - remove it or make it a no-op that explains the names are now fixed",
+        "Add a check to scripts/validate.sh asserting canary-manual/scripts/canary.sh contains neither `--replicas=0` nor `rollout undo`",
+        "The new check is added to scripts/validate.sh in this same commit",
+        "`bash scripts/validate.sh` run from the repo root exits 0"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+# Ralph Progress Log
+Started: (not yet run)
+---
+
+## Codebase Patterns
+
+- **This is NOT a code project.** `dev/k8s` holds Kubernetes/Istio YAML, shell scripts and
+  Traditional-Chinese markdown. There is no compiler, no test framework, nothing to build.
+  The typecheck equivalent is `bash scripts/validate.sh` from the repo root, exit 0 = pass.
+  US-001 creates that script; before it exists there is no quality gate at all.
+
+- **Every story adds its own assertions to `scripts/validate.sh`, in the same commit as the
+  change.** This is the most important rule in this run. It is what keeps the script green at
+  every commit and what stops story N+3 from silently undoing story N. A story that changes a
+  manifest but adds no check is not finished.
+
+- **Tooling is thin: node / npm / npx only.** There is NO `kubectl`, NO `yq`, and NO usable
+  `python` (only the Microsoft Store stub, which prints an install prompt instead of running).
+  Do not try to install them and do not try to reach a cluster — there isn't one.
+  YAML is parsed with the local `node_modules/.bin/js-yaml` CLI, pinned as a devDependency.
+  Do not use `npx --yes js-yaml`: it needs network on every run and cannot be a quality gate.
+
+- **Assert on parsed YAML, not on grep.** The interesting content lives inside a ConfigMap's
+  `data["application.yml"]` — a YAML document embedded as a string inside another YAML
+  document. Parse the outer file, then parse that string, then assert on the object.
+  Grepping the raw file gives false passes on commented-out lines (there are several).
+
+- **`canary-manual/CANARY-COMPLETE.md` is the single source of truth for the target state.**
+  Read the relevant section before touching any manifest. Section 3.1 explains how config is
+  loaded (and why the pod currently cannot start), section 3.5 has the complete target
+  ConfigMap, and Appendix C is the required-key list with "what it falls back to if omitted".
+
+- **Five documents under `canary-manual/` carry a "已被取代" banner** (`README.md`, `SOP.md`,
+  `SOP-apply-only.md`, `canary-ops-runbook.md`). Do not follow their operational steps —
+  they contain instructions that are known to cause an outage (`replicas: 0`, `rollout undo`).
+  `pilot-run-guide.md` is deliberately kept: its reader is the end user, not operations.
+
+- **YAML comments here explain WHY, at length.** Look at
+  `canary-manual/track-a/release/20-deployment-stable.yaml` for the density to match. A key
+  added with no comment saying what breaks without it is off-pattern for this repo.
+  Prose and comments are Traditional Chinese.
+
+- **Scope is `dev/k8s` only.** The Spring Boot backend is a separate repo at
+  `dev/spring_oauth2_backend`. Never edit it. US-007 in particular only completes the k8s half
+  of the probe fix — the `SecurityConfig` permitAll change it depends on is out of scope, and
+  the probes keep passing unconditionally until that lands elsewhere. Say so; do not report
+  the probe problem as solved.
+
+- **Story order is load-bearing.** The ConfigMap is made complete (US-002..US-005) *before*
+  the env var is flipped to replace semantics (US-006), and the file is split (US-008) *after*
+  its content is correct so both copies inherit the fix. Do not reorder.
+
+---

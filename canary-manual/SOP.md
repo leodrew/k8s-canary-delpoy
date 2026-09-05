@@ -1,5 +1,8 @@
 # 上版 SOP（可列印）
 
+> ⚠ **已被 [`CANARY-COMPLETE.md`](CANARY-COMPLETE.md) 取代**（需要完整 kubectl 權限的版本）。
+> 內容保留供對照，但發布與關閉流程一律以總集手冊第 5、8 章為準。
+
 > 完整說明見 `../k8s-ecosystem-guide.md` 的 Part 15。
 > 這份是操作時對照用的 checklist。
 

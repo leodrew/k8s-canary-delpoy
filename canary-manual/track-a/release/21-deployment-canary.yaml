@@ -79,6 +79,15 @@ spec:
               value: "file:/app/config/application.yml"
             - name: APP_TRACK
               value: "canary"               # log 裡可以直接分辨
+            # 自動分流的主開關。只有 canary 這一份要設 true；stable 維持預設
+            # false —— stable 發 cookie 而 canary 沒有 endpoint 的話，
+            # 拿到 cookie 的人會被規則 1 送進空的 subset，直接 503。
+            #
+            # 收工時把這行改成 "false"（連同 image 改回 stable 版），
+            # 使用者會在下一次頁面導航被乾淨地送回 stable。
+            # 【不要】改用 replicas: 0 收工 —— 見 SOP-apply-only.md。
+            - name: APP_CANARY_ENABLED
+              value: "true"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -128,6 +137,11 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            # Canary pilot 名單。canary 也要掛 —— 它要靠名單把「已經被移除、
+            # 但 cookie 還沒過期」的人趕回 stable（CanaryEvictionFilter）。
+            - name: canary-pilot
+              mountPath: /app/canary          # 【關鍵】掛目錄，不是 subPath
+              readOnly: true                  #   subPath 掛的檔案永遠不會更新
 
       volumes:
         - name: config
@@ -135,3 +149,7 @@ spec:
             name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
         - name: tmp
           emptyDir: {}
+        - name: canary-pilot
+          configMap:
+            name: pmc-epmmformquery-canary-pilot   # runtime/05-configmap-canary-pilot.yaml
+            optional: true                  # 【關鍵】ConfigMap 不存在也不能卡住 pod 啟動

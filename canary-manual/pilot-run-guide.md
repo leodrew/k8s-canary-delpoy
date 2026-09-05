@@ -1,5 +1,8 @@
 # Pilot Run 操作說明（給驗證人員）
 
+> ℹ️ **這份保留，仍是給驗證人員的唯一入口。** 讀者是使用者，不是維運。
+> 維運側的完整流程見 [`CANARY-COMPLETE.md`](CANARY-COMPLETE.md)。
+
 > 這份是**給做 pilot run 的使用者**看的，不需要任何 K8s 知識。
 > 建議整份轉成公司內部的公告或 Wiki 頁面。
 
@@ -7,52 +10,20 @@
 
 系統有新版本要上線。在讓所有人使用之前，需要你先幫忙驗證一輪。
 
-**你會用「跟平常一模一樣的網址」操作**，只是多做一個步驟，讓系統知道要給你看新版本。
+**你會用「跟平常一模一樣的網址」操作**，而且**不需要做任何設定** ——
+管理員把你加進名單之後，系統會在你登入時自動把你帶到新版本。
 
 **你的操作不會影響其他同事** —— 在你驗證期間，其他人看到的仍然是舊版本。
 
 ---
 
-## 步驟 1：切換到新版本
+## 步驟 1：登入
 
-用下面**任一種**方式都可以。
+用你平常的帳號，從平常的網址登入就好。**沒有其他要做的事。**
 
-### 方式 A：書籤按鈕（推薦，只要設定一次）
+登入過程中畫面可能會多閃一兩下（系統在把你導到新版本），**這是正常的**。
 
-1. 在瀏覽器顯示書籤列（Chrome / Edge 按 `Ctrl + Shift + B`）
-2. 在書籤列**點右鍵 → 新增網頁**
-3. 名稱填「**切到新版**」，網址貼上這一整段：
-
-```
-javascript:document.cookie="canary=always;path=/;max-age=28800";location.reload();
-```
-
-4. 之後只要在系統頁面上點一下這個書籤，就會切到新版本
-
-同樣方式再建一個「**切回舊版**」：
-
-```
-javascript:document.cookie="canary=;path=/;max-age=0";location.reload();
-```
-
-> 有些公司的瀏覽器政策會擋掉 `javascript:` 書籤。如果貼上後書籤失效，請改用方式 B。
-
-### 方式 B：開發者工具（不用設定，但每次要貼一次）
-
-1. 打開系統頁面
-2. 按 `F12` 打開開發者工具
-3. 切到 **Console（主控台）** 分頁
-4. 貼上這一行後按 Enter：
-
-```javascript
-document.cookie = "canary=always;path=/;max-age=28800"; location.reload();
-```
-
-切回舊版：
-
-```javascript
-document.cookie = "canary=;path=/;max-age=0"; location.reload();
-```
+> **如果你已經登入著**，請先登出再重新登入 —— 名單是在登入那一刻生效的。
 
 ---
 
@@ -69,7 +40,7 @@ document.cookie = "canary=;path=/;max-age=0"; location.reload();
 | 顯示的值 | 意思 |
 |---|---|
 | `x-app-track: canary` | **正確**，你在新版本上，可以開始驗證 |
-| `x-app-track: stable` | 還在舊版，cookie 沒設成功 —— 回步驟 1 再試一次 |
+| `x-app-track: stable` | 還在舊版 —— 先登出再登入一次；仍然一樣就通知管理員（可能還沒被加進名單，或名單還沒生效，最多要等 90 秒） |
 | 完全沒有這個項目 | 設定有問題，請通知系統管理員 |
 
 ---
@@ -116,21 +87,32 @@ document.cookie = "canary=;path=/;max-age=0"; location.reload();
 
 ## 驗證完成後
 
-**請務必點「切回舊版」的書籤**（或執行步驟 1 的切回指令）。
-
-不切回去的話，在新版本正式上線之前，你會一直看到還沒驗證完成的版本。
+**你不用做任何事。** 管理員會把你從名單移除，你在下一次點連結時就會自動回到舊版。
 
 ---
 
 ## 常見問題
 
+**Q：我什麼都沒做就看到新版畫面了？**
+
+正常，代表你在 pilot 名單裡。這就是設計上該有的行為。
+
+**Q：登入的時候畫面閃了好幾下？**
+
+正常。系統在把你導到新版本，中間會多跳轉幾次。
+
+**Q：我剛登入完，馬上又被要求登入一次？**
+
+偶爾會發生，不是故障。切換版本時系統會重新確認一次你的身分，如果那一刻你的
+SSO 登入時效剛好到期，就會要你再登一次。重登即可。
+
 **Q：我切過去之後被要求重新登入？**
 
 正常。新舊版本的登入狀態是分開的。重新登入一次即可，之後就不會再問。
 
-**Q：我按了書籤但畫面沒變化？**
+**Q：我想自己切回舊版看看？**
 
-先做步驟 2 確認 `x-app-track` 的值。如果是 `stable`，代表 cookie 沒設成功，可能是瀏覽器擋掉了 `javascript:` 書籤，請改用方式 B。
+見文末附錄的手動切換方式。正常流程用不到，只有自動切換失效時才需要。
 
 **Q：驗證到一半突然被登出？**
 
@@ -142,4 +124,49 @@ document.cookie = "canary=;path=/;max-age=0"; location.reload();
 
 **Q：其他同事會看到新版本嗎？**
 
-不會。只有設定了 cookie 的人才會看到，其他人完全不受影響。
+不會。只有在 pilot 名單裡的人才會被送到新版本，其他人完全不受影響。
+
+---
+
+## 附錄：手動切換（備援）
+
+> **正常流程用不到這一段。** 只有在自動切換失效、而管理員請你手動試的時候才需要。
+
+### 方式 A：書籤按鈕
+
+1. 在瀏覽器顯示書籤列（Chrome / Edge 按 `Ctrl + Shift + B`）
+2. 在書籤列**點右鍵 → 新增網頁**
+3. 名稱填「**切到新版**」，網址貼上這一整段：
+
+```
+javascript:document.cookie="canary=always;path=/gui_epmmFormQuery;max-age=28800";location.reload();
+```
+
+同樣方式再建一個「**切回舊版**」：
+
+```
+javascript:document.cookie="canary=;path=/gui_epmmFormQuery;max-age=0";location.reload();
+```
+
+> 有些公司的瀏覽器政策會擋掉 `javascript:` 書籤。如果貼上後書籤失效，請改用方式 B。
+
+### 方式 B：開發者工具
+
+`F12` → **Console（主控台）** 分頁，貼上後按 Enter：
+
+```javascript
+document.cookie = "canary=always;path=/gui_epmmFormQuery;max-age=28800"; location.reload();
+```
+
+切回舊版：
+
+```javascript
+document.cookie = "canary=;path=/gui_epmmFormQuery;max-age=0"; location.reload();
+```
+
+> **注意 `path` 改了。** 自動分流發的 cookie 範圍是 `/gui_epmmFormQuery`，
+> 不再是 `/`。手動種的時候要用同一個 path，否則會變成兩個不同的 cookie，
+> 「切回舊版」會清不掉你原本那個。
+>
+> **如果你不在 pilot 名單裡**，手動種了 cookie 也只會被系統立刻送回舊版 ——
+> 名單才是實際的依據。

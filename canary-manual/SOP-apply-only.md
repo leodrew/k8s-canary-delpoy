@@ -1,5 +1,9 @@
 # 上版 SOP — CD 只能 kubectl apply 的版本（可列印）
 
+> ⚠ **已被 [`CANARY-COMPLETE.md`](CANARY-COMPLETE.md) 取代**（apply-only 的版本）。
+> 本文的「canary 不通過」流程是對的，但 **promote 流程（步驟 5a）仍以 `replicas: 0` 收尾**，
+> 那是同一個 503 outage 的另一條路徑。正確的排空順序見總集手冊第 5 章步驟 4a。
+
 > 完整說明見 `../k8s-ecosystem-guide.md` 的 Part 15.8–15.13。
 > **這份適用於：CD pipeline 只能 `kubectl apply`，不能下 `scale` / `patch` / `rollout undo` / `argo rollouts`。**
 > 如果你的 pipeline 能跑任意 kubectl 指令，改用 `SOP.md`（操作簡單很多）。
@@ -243,9 +247,109 @@ track-a/
 |---|---|---|
 | 部署到 canary | 新增 `10-configmap-<新版>.yaml`<br>改 `21-deployment-canary.yaml` | 三處版本號 + `replicas: 0` → `1` |
 | promote | 改 `20-deployment-stable.yaml`<br>改 `21-deployment-canary.yaml` | 三處版本號<br>`replicas: 1` → `0` |
-| canary 不通過 | 改 `21-deployment-canary.yaml` | `replicas: 1` → `0` |
+| **canary 不通過** | 改 `21-deployment-canary.yaml` | **image + 三處版本號改回 stable 版<br>`APP_CANARY_ENABLED` → `"false"`**<br>**不是 `replicas: 0`**，見下方 |
+| 加 / 移除 pilot 使用者 | 改 `runtime/05-configmap-canary-pilot.yaml` | 改名單 → apply → 等 ≤90 秒。**不重啟任何 pod** |
 | promote 後回滾 | `git revert` | — |
 | 改網路設定 | `base/` 底下的檔 | 用單獨的 stage apply |
+
+---
+
+## Pilot 名單維護
+
+名單放在 `track-a/runtime/05-configmap-canary-pilot.yaml`，**跟發布流程完全分開**：
+
+| 目錄 | 變更頻率 | apply 時機 |
+|---|---|---|
+| `base/` | 極低（網路設定變更） | 單獨 stage |
+| `release/` | 每次發布 | 發布 pipeline |
+| **`runtime/`** | **pilot 期間可能一天數次** | **獨立，不經過發布流程** |
+
+```
+改 track-a/runtime/05-configmap-canary-pilot.yaml
+  → commit
+  → kubectl apply -f track-a/runtime/
+  → 等 ≤ 90 秒（kubelet 同步 60s + app reload 30s）
+```
+
+**不需要重啟任何 pod，不影響正式流量。**
+
+| 動作 | 什麼時候生效 |
+|---|---|
+| **加入**一個人 | 他**下次登入**時（已登入的要先登出） |
+| **移除**一個人 | 他**下一次頁面導航**時自動被送回 stable（不用他配合） |
+
+名單一行一個 Keycloak 的 `preferred_username`（使用者登入時打的帳號名），
+不是 OIDC 的 `sub`。確認名單真的讀到了：
+
+```bash
+kubectl logs -n ea-pmc deploy/pmc-epmmformquerygui-stable | grep 'roster reloaded'
+# canary pilot roster reloaded: 3 user(s)
+```
+
+> 讀不到檔案 = **空名單**（沒有人進 canary），不是「全部都是」。這是刻意的 fail-safe。
+
+---
+
+## 【重要】canary 不通過的關閉流程 —— 自動分流上線後已改寫
+
+### 為什麼不能再用 `replicas: 0`
+
+自動分流之前，cookie 是 pilot 使用者自己種的，只有 2、3 個人，而且他們**知道**自己種了。
+現在 cookie 是系統自動發的，持有者可能是幾十個人，**而且他們不知道自己有**。
+
+`replicas: 0` 之後 `subset: canary` 沒有任何 endpoint，但
+`base/03-virtualservice.yaml` 的規則 1 還在：
+
+```
+手上還有 cookie 的人
+  → 規則 1 仍然把他們送進 subset: canary
+  → 沒有 endpoint
+  → 503（access log 的 response_flags = UH）
+  → 他們永遠打不到 stable，app 端「清 cookie」的邏輯根本沒機會執行
+  → 卡死到 cookie 過期為止（8 小時）
+```
+
+**這不是「比較不方便」，這是 outage。**
+
+### 正確做法：換 image，不是 scale 到 0
+
+改 `track-a/release/21-deployment-canary.yaml`：
+
+1. `image` → 改回目前 stable 的版本
+2. `config-version` annotation + `configMap.name` → 一併改回 stable 的版本
+3. `APP_CANARY_ENABLED` → `"false"`
+
+→ commit → apply
+
+效果：
+
+```
+canary pod 仍在跑，但跑的是「好的程式碼」
+  → 使用者不會 503，而且看到的是正確的舊版畫面
+  → CanaryEvictionFilter 看到 enabled=false
+  → 下一次頁面導航：清 cookie + 302
+  → 使用者回到 stable
+```
+
+**一次導航就排空，零 503。** 完全符合 apply-only 的限制 —— 一樣只是改 YAML + apply。
+
+等確定沒有人還帶著 cookie（或過了 8 小時 Max-Age）之後，再從容地把 `replicas` 改回 0。
+
+### 緊急時的第二張牌
+
+如果情況緊急到連「等一次導航」都不能接受，唯一瞬間生效、不依賴 app 的手段是把
+`base/03-virtualservice.yaml` 規則 1 的 destination 改成 `subset: stable`。
+
+它在 `base/`，依規範要用單獨 stage apply，所以列為第二道而不是第一道 ——
+但值班的人要知道有這張牌。
+
+### 三種手段對照
+
+| 手段 | 生效速度 | 對 cookie 持有者 | 適用 |
+|---|---|---|---|
+| `APP_CANARY_ENABLED=false` + image 改回 stable | 下一次導航 | 乾淨排空 | **預設做法** |
+| 規則 1 改指向 `subset: stable` | 瞬間 | 立刻全部回 stable | 緊急 |
+| `replicas: 1 → 0` | 瞬間 | **503 UH，卡到 cookie 過期** | **自動分流上線後不可單獨使用** |
 
 ---
 
@@ -253,9 +357,12 @@ track-a/
 
 | 症狀 | 立刻做 |
 |---|---|
-| pilot 使用者說壞了 | 改 canary `replicas: 0` → commit → apply |
+| pilot 使用者說壞了 | image 改回 stable 版 + `APP_CANARY_ENABLED="false"` → commit → apply。**不要用 `replicas: 0`**，見上方 |
 | promote 後正式使用者說壞了 | `git revert` promote 的 commit → apply |
 | Pod 卡在 `ContainerCreating` | `kubectl describe pod` 看 Events —— 多半是 ConfigMap 不存在（版本號打錯，或被刪了） |
 | 大量 503 | `kubectl get endpoints` —— 多半是 subset 對不到 pod |
 | 帶了 cookie 還是進 stable | 見 guide 14.6 與 README 排查表 |
 | 使用者一直被登出 | canary 開超過 1 個 replica？見 guide 14.5 前提 1 |
+| 在名單裡卻進不了 canary | `kubectl logs deploy/...-stable \| grep 'roster reloaded'` 確認名單有讀到；名單用的是 Keycloak 帳號名（`preferred_username`），不是 sub；改名單後使用者要**重新登入** |
+| pilot 使用者被踢來踢去 | 兩軌讀到的名單不一致（reload 時間差）。等 90 秒後仍如此就查 ConfigMap 是否兩邊都掛到了 |
+| 剛登入完又被要求登入一次 | 跨軌切換會重新認證一次；若那一刻 Keycloak SSO session 剛好過期就會這樣。重登即可，非故障 |

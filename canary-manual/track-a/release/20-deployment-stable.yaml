@@ -133,6 +133,11 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            # Canary pilot 名單。stable 也要掛 —— 發 cookie 的那段程式只有
+            # stable pod 跑得到（沒帶 cookie 的請求 100% 進 stable）。
+            - name: canary-pilot
+              mountPath: /app/canary          # 【關鍵】掛目錄，不是 subPath
+              readOnly: true                  #   subPath 掛的檔案永遠不會更新
 
       volumes:
         - name: config
@@ -140,3 +145,10 @@ spec:
             name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
         - name: tmp
           emptyDir: {}
+        - name: canary-pilot
+          configMap:
+            name: pmc-epmmformquery-canary-pilot   # runtime/05-configmap-canary-pilot.yaml
+            optional: true                  # 【關鍵】ConfigMap 不存在也不能卡住 pod。
+                                            #   少了這行，名字打錯就會讓 stable 卡在
+                                            #   ContainerCreating —— 從「canary 功能壞掉」
+                                            #   升級成「正式環境掛掉」。

@@ -43,7 +43,19 @@ data:
                 client-name: Keycloak Login
             provider:
               keycloak:
-                issuer-uri: ${KEYCLOAK_ISSUER_URI}
+                # 【注意：與 BFF repo 的設定不一致】
+                # spring_oauth2_backend 的 application.yml 現在設的是
+                #   user-name-attribute: sub
+                # 理由寫在那份檔案的註解裡（review F15）：Authentication.getName()
+                # 是 token store 的 key，而 OIDC 不保證 preferred_username 穩定唯一
+                # —— 一個被回收的帳號名會解析到前一個人的 token。
+                #
+                # 這份 ConfigMap 是走 SPRING_CONFIG_ADDITIONAL_LOCATION 合併的，
+                # 【優先權比 jar 裡的 application.yml 高】，所以這一行會把 sub 蓋回去。
+                # 要把兩邊對齊之前，先確認這是有意識的決定，不是漏改。
+                #
+                # canary 分流不受這一行影響：CanaryUsernames 直接讀
+                # OidcUser.getPreferredUsername()，兩種設定下都正確。
                 user-name-attribute: preferred_username
 
     app:
@@ -72,6 +84,22 @@ data:
         resource-location: classpath:/gui_epmmFormQuery/web/
         index-path: /gui_epmmFormQuery/web/index.html
         classpath-base: gui_epmmFormQuery/web
+
+      # 自動分流。這些值跟 jar 內建的預設完全一樣，列在這裡只是為了讓維運
+      # 一眼看得到「這個版本有這個功能、開關在哪」。
+      #
+      # 兩個開關都由 Deployment 的 env 決定，不要在這裡寫死：
+      #   APP_CANARY_ENABLED — 只有 21-deployment-canary.yaml 設 true
+      #   APP_TRACK          — 兩份 Deployment 各自設 stable / canary
+      canary:
+        enabled: ${APP_CANARY_ENABLED:false}
+        track: ${APP_TRACK:stable}
+        cookie-max-age: 8h
+        cookie-path: /gui_epmmFormQuery
+        # 對應 Deployment 的 canary-pilot volumeMount（掛目錄，不是 subPath）
+        roster-file: /app/canary/pilot-users.txt
+        roster-reload-ms: 30000
+        entry-path: /gui_epmmFormQuery/web/
 
     logging:
       level:
