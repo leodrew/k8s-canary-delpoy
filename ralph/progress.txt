@@ -50,4 +50,65 @@ Started: (not yet run)
   the env var is flipped to replace semantics (US-006), and the file is split (US-008) *after*
   its content is correct so both copies inherit the fix. Do not reorder.
 
+- **`scripts/validate.sh` 的擴充方式**（US-001 建立）：腳本裡有一個
+  `# 之後的檢查加在這裡` 標記區段，新檢查以 `== [n] 說明 ==` 區段加在那裡、
+  總結區塊之前。helper 的呼叫慣例是 `check "<名稱>" <指令> [參數...]`，指令以
+  參數陣列直接執行、**不經過 eval**，所以可以原樣傳一整段帶引號的 `node -e` 斷言。
+  需要 pipeline 或 shell 語法時再明確包一層 `bash -c`。
+
+- **解析 ConfigMap 內層設定的標準寫法**（從 repo root 執行，node_modules 在 root）：
+  `const y=require("js-yaml"); const cm=y.load(fs.readFileSync(f,"utf8"));`
+  `const app=y.load(cm.data["application.yml"]);` —— 然後對 `app` 物件下斷言。
+  js-yaml CLI 也支援多文件（`---` 分隔）的 YAML，track-b/base 底下就有幾個。
+
+- **這台機器 `core.autocrlf=true`。** `git add` 噴的 "LF will be replaced by CRLF"
+  是正常的、可以忽略；`*.sh` 已由 `.gitattributes` 釘成 LF，之後新增的腳本自動適用。
+  但工作目錄裡的 `prd.json` / `progress.txt` 實際上是 LF，程式化改寫時沿用原檔行尾。
+---
+
+## 2026-09-06 - US-001 - Bootstrap scripts/validate.sh with YAML syntax checking
+
+- 建立這個 repo 的品質閘門。在此之前 dev/k8s 完全沒有任何自動檢查。
+- Files changed（全部在 dev/k8s repo root，canary-manual/ 底下零修改）:
+  - `package.json`（新增）— private、js-yaml ^4.1.0 為 devDependency、`scripts.validate`
+  - `package-lock.json`（新增，npm install 產生）
+  - `.gitignore` — 加入 `node_modules/`
+  - `.gitattributes`（新增）— `*.sh text eol=lf`
+  - `scripts/validate.sh`（新增）— check runner ＋ 第一項 YAML 語法檢查
+  - `CLAUDE.md`（新增，dev/k8s 層級）— 記錄閘門用法與維護規則
+- 驗證結果：`bash scripts/validate.sh` → 15/15 PASS、exit 0。
+  另外實測過：從 `ralph/` 呼叫 `bash ../scripts/validate.sh` 一樣 exit 0；
+  `npm run validate` exit 0；故意放一個壞掉的 YAML 進 track-a 後 exit 1 且
+  FAIL 那一行指名該檔案 —— 也就是說這個閘門是真的會擋，不是永遠綠燈。
+- 額外做的一件事（非 story 要求）：先用一個 `chore:` commit 把這次 run 開始前
+  就存在於工作目錄的既有內容（CANARY-COMPLETE.md、runbook、tasks/、ralph/ 等）
+  入版控，US-001 的 commit 才能是乾淨的 tooling-only commit。
+
+- **Learnings for future iterations:**
+  - **`check` helper 的呼叫慣例**：`check "<名稱>" <指令> [參數...]`，指令是直接以
+    參數陣列執行（`"$@"`），**不經過 eval**。所以 `check "..." node -e '...'` 可以
+    原樣傳一大段帶引號的 node 斷言進去，不用煩惱 shell 二次解析。需要 pipeline 或
+    shell 語法時再明確包一層 `bash -c '...'`。
+  - **加新檢查的位置**：`scripts/validate.sh` 裡有一個
+    `# 之後的檢查加在這裡` 的標記區段，新的 `== [n] ... ==` 區段加在那裡，
+    總結區塊（ALL PASS / FAILED）之前。`CHECK_COUNT` / `FAIL_COUNT` 會自動累計。
+  - **js-yaml CLI 已實測可用且行為正確**：`node_modules/.bin/js-yaml <file>` 會把
+    YAML 印成 JSON、壞檔 exit 1；**支援多文件（`---` 分隔）**，track-b/base 底下
+    有幾個檔案就是多文件格式，不需要另外處理。
+  - **想在 node 裡解析 ConfigMap 內層設定**，走這個路徑（US-002 開始每個 story 都會用到）：
+    `const y = require("js-yaml"); const cm = y.load(fs.readFileSync(f,"utf8"));`
+    `const app = y.load(cm.data["application.yml"]);` 然後對 `app` 下斷言。
+    從 repo root 執行時 `require("js-yaml")` 直接可解析（node_modules 在 root）。
+  - **`find` 是動態的**：YAML 語法檢查用 `find canary-manual/track-a canary-manual/track-b
+    -type f -name '*.yaml'`，US-008 新增的 `11-configmap-canary.yaml` 會自動被納入，
+    不需要回頭改這段。注意副檔名只吃 `.yaml`（目前這兩個目錄底下沒有 `.yml`）。
+  - **這台機器 `core.autocrlf=true`**：git add 時會一直噴 "LF will be replaced by CRLF"
+    警告，那是正常的、可以忽略。但 shell 腳本已用 `.gitattributes` 釘成 LF，
+    US-009 要新增的 `scripts/sync-config-hash.sh` 會自動套用同一條規則。
+  - **`prd.json` 與 `progress.txt` 在工作目錄裡是 LF**，即使本機 `core.autocrlf=true`。
+    用 node 改寫 `prd.json` 時要沿用「原檔已經在用的行尾」再寫回去，不要無條件轉成 CRLF ——
+    照做的結果是 `git diff --stat` 只有 1 行變更，而不是整檔重寫的假 diff。
+  - **`node_modules/` 不進版控**，但 `scripts/validate.sh` 依賴它。腳本開頭已有 preflight：
+    找不到 `node_modules/.bin/js-yaml` 就直接告訴使用者去跑 `npm install` 並 exit 1，
+    而不是噴出一整排看不懂的 FAIL。
 ---

@@ -19,7 +19,7 @@
         "`bash scripts/validate.sh` exits 0 and its output names every manifest it parsed"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
