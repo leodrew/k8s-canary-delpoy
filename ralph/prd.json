@@ -37,7 +37,7 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Cluster verification deferred to deploy time: `kubectl logs` must show no ConfigDataLocationNotFoundException and no 'Could not resolve placeholder'."
     },
     {

@@ -108,7 +108,71 @@ Started: (not yet run)
   - **`prd.json` 與 `progress.txt` 在工作目錄裡是 LF**，即使本機 `core.autocrlf=true`。
     用 node 改寫 `prd.json` 時要沿用「原檔已經在用的行尾」再寫回去，不要無條件轉成 CRLF ——
     照做的結果是 `git diff --stat` 只有 1 行變更，而不是整檔重寫的假 diff。
+
+- **`validate.sh` 已經有共用 helper，不要重寫樣板**（US-002 建立）：
+  `assert_cm_key <dotted.key.path> [期望值]` 會對 `TRACK_A_CONFIGMAPS` 陣列裡的每一份
+  ConfigMap 各跑一次斷言。US-008 把 ConfigMap 拆成 -stable / -canary 之後，
+  **只要把新檔名加進那個陣列**，US-002..US-005 的所有 key 檢查就會自動對兩份都跑 ——
+  這正是 US-008 驗收條件說的「更新既有檢查而不是複製一份」。
+  省略期望值時只檢查存在；key 沒寫 → 失敗，寫了但沒值（`null`）→ 失敗，
+  空字串 `""` → 通過（`app.security.required-role` 就是刻意的空字串，US-003 會用到）。
+
+- **檢查要比對「值」，不能只檢查 key 存在。** 這個 repo 最危險的一類錯誤不是「key 不見了」，
+  而是「key 不見了之後 Spring 用自己的預設值頂上」—— 設定看起來還在，行為已經變了，
+  而且錯誤訊息不會指向 ConfigMap。`redirect-uri` 是標準案例（少了 /gui_epmmFormQuery
+  前綴，登入 callback 進不來）。US-004 的 `user-name-attribute: sub` 也是同一類。
+
+- **每加一個檢查就反向測一次**：把該值改壞 → 跑 validate.sh → 確認真的 FAIL 且 exit 1 → 還原。
+  一個永遠綠燈的檢查比沒有檢查更糟，因為它讓人以為有防護。改壞的方式要涵蓋
+  「key 刪掉」「值改錯」「key 有但沒值」三種，它們走的是程式裡不同的分支。
+
+- **node 是 Windows 執行檔，看不到 Git Bash 的 `/tmp`**（實測）：node 會把 `/tmp/x`
+  解讀成 `C:\tmp\x`，於是 shell 寫出去的暫存檔在 node 這邊是 ENOENT。
+  shell 自己的 `cp /tmp/...` 備份沒問題（那是 bash 在處理），但**只要路徑會傳進 node
+  就用 repo 內的相對路徑**，用完刪掉。US-009 的 sync-config-hash.sh 會踩到這點。
   - **`node_modules/` 不進版控**，但 `scripts/validate.sh` 依賴它。腳本開頭已有 preflight：
     找不到 `node_modules/.bin/js-yaml` 就直接告訴使用者去跑 `npm install` 並 exit 1，
     而不是噴出一整排看不懂的 FAIL。
+---
+
+## 2026-09-06 - US-002 - Add the three ConfigMap keys whose absence prevents startup
+
+- 往 track-a 的 ConfigMap 補上三個「缺了就會出事」的 key，並在同一個 commit 加上檢查 [2]。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-1.2.3.yaml` — 新增 3 個 key（+31 行，其中大半是註解）
+  - `scripts/validate.sh` — 新增檢查區段 [2]：ConfigMap 必備 key（附錄 C.1）
+  - `CLAUDE.md`（dev/k8s 層級）— 記錄 helper 用法、「比對值而非存在」、反向測試、node//tmp 坑
+- 三個 key 與其失效模式：
+  - `spring...provider.keycloak.issuer-uri: ${KEYCLOAK_ISSUER_URI}`
+    無預設值。jar 裡那份在 `!test` profile 的 document，US-006 換成 replace 語意後
+    完全不會被載入 → OAuth2 client 建不起來 → 啟動失敗。這一行曾被誤刪過。
+  - `app.post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}`
+    後端是 @Value 且**沒有預設值** → Could not resolve placeholder → CrashLoopBackOff。
+  - `spring...registration.keycloak.redirect-uri: "{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}"`
+    Spring **有**預設值，所以缺了不會啟動失敗，而是安靜地少掉前綴、callback 進不來。
+- 驗證結果：`bash scripts/validate.sh` → 18/18 PASS、exit 0（`npm run validate` 同樣 exit 0）。
+  反向測過四種壞法，四種都 FAIL 且 exit 1：刪掉 issuer-uri／redirect-uri 值改成 Spring
+  預設（無前綴）／post-logout-redirect-uri 有 key 但沒值／只留 app.sso.* 的錯 key 路徑。
+  最後一種特別重要：它證明了 app.sso.* 那塊「看起來有設定」的東西救不了這個檢查。
+
+- **Learnings for future iterations:**
+  - **這次的 story 是接手未完成的工作**：上一輪 iteration 把 US-002 的檔案改完、檢查也寫好了，
+    但沒有 commit，還在 repo root 留下 `.claudemd.tmp` / `.patch-claudemd.js` 兩個暫存檔
+    （CLAUDE.md 的 patch 從未被套用）。開工前先看 `git status` 與 `git diff`，
+    不要假設工作目錄是乾淨的，也不要重做一遍已經做完的事。暫存檔已清掉。
+  - **三個值都逐字對照過 CANARY-COMPLETE.md 3.5**（第 364 / 367 / 383 行）。
+    寫死在檢查裡的期望值就是從那裡抄的 —— 之後如果 3.5 改了，validate.sh 要跟著改，
+    這是刻意的耦合：ConfigMap 是環境設定的唯一真相，值變更應該是一個有意識的動作。
+  - **`app.sso.*` / `app.cors` / `app.test-endpoints` 仍留在檔案裡是正確的** ——
+    移除它們是 US-005 的工作，US-002 刻意不碰。附錄 C.1 的 key 補齊了，
+    但 C.2 / C.3 那一大票「會靜默退回錯誤預設值」的 key 還沒補，那是 US-003。
+  - **US-003 可以直接沿用 `assert_cm_key`**，不需要新的樣板；只有
+    「session.cookie.name 等於 __Host-JSESSIONID」「task pool size 等於 2」這種
+    帶期望值的斷言要記得把第二個參數傳進去。注意 pool size 是數字，helper 內部用
+    `String(cur) !== expected` 比對，所以期望值傳 `"2"` 就會過。
+  - **track-b 的 issuer-uri 一直都在**（該檔第 53 行），這次沒有動 track-b。
+    第一個要動 track-b 的 story 是 US-004（user-name-attribute），
+    屆時 `TRACK_A_CONFIGMAPS` 這個名字會顯得不夠用 —— US-004 的檢查要涵蓋兩個 track，
+    可以另開一個涵蓋兩者的陣列，不要硬把 track-b 塞進 TRACK_A_CONFIGMAPS
+    （C.1 的那些 key 檢查目前只適用 track-a）。
 ---
