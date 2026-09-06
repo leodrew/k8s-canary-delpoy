@@ -461,3 +461,82 @@ Started: (not yet run)
     的內容，以及 `kubectl logs` 裡沒有 `ConfigDataLocationNotFoundException`
     和 `Could not resolve placeholder`。這一項已記在 PRD 的 US-006 notes 裡。
 ---
+
+## 2026-09-06 - US-007 - Point the probes at separate liveness and readiness health groups
+
+- track-a 兩份 Deployment 的三個探針從共用的聚合端點 `/gui_epmmFormQuery/actuator/health`
+  拆成兩個 health group：liveness → `health/liveness`，readiness 與 startup →
+  `health/readiness`；ConfigMap 補上 `management.endpoint.health.probes.enabled: true`
+  讓那兩個端點存在。同一個 commit 加上檢查區段 [7]。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-1.2.3.yaml` — `probes.enabled: true` ＋ 註解
+  - `canary-manual/track-a/release/20-deployment-stable.yaml` — 三個探針路徑 ＋ 完整說明註解
+    （含「已知缺口」整段）
+  - `canary-manual/track-a/release/21-deployment-canary.yaml` — 同上（摘要版，指回 stable 那份）
+  - `scripts/validate.sh` — 新增檢查 [7]
+  - `CLAUDE.md`（dev/k8s 層級）— 新增「跨檔案對照要走 metadata.name 索引，推導來源查不到必須 FAIL」
+- 為什麼要拆：共用聚合端點時，Keycloak 或下游 API 抖一下會讓 readiness 和 liveness
+  【同時】掉。readiness 掉只是暫時退出 Endpoints、好了自己回來；liveness 掉是 kubelet
+  【重啟】pod。於是一次幾秒鐘的依賴故障被放大成一次全部 pod 滾動重啟，而重啟會清掉
+  in-memory 的 HttpSession（session 沒有外部儲存）→ 所有人被登出。
+- 驗證結果：`bash scripts/validate.sh` → **75/75 PASS、exit 0**（US-006 之後是 72 項，新增 3 項）。
+  `npm run validate` 同樣 exit 0。反向測七種壞法，全部 FAIL 且 exit 1：
+  ① liveness 改成跟 readiness 同一路徑（路徑斷言與「不得同路徑」斷言兩邊都抓到）
+  ② canary 三個探針全改回聚合端點
+  ③ ConfigMap 的 `probes:` 整塊【被註解掉】—— 這一種證明檢查走的是 YAML 解析
+  ④ `probes.enabled: false`（key 在、值錯）
+  ⑤ 只改 ConfigMap 的 `base-path`、Deployment 不動 —— 這一種只有互相對照才抓得到
+  ⑥ 整個 `livenessProbe` 被刪掉
+  ⑦ Deployment 掛到一份不在 `TRACK_A_CONFIGMAPS` 裡的 ConfigMap 名字（推導失敗必須 FAIL）
+  每一次都先 `grep` 確認壞掉的版本真的寫進檔案了才跑。還原後複驗 exit 0、`git status` 乾淨。
+
+- **【必讀】這個 story 只完成了 k8s 那一半，探針目前仍然是假的。不要說探針問題解決了。**
+  後端 `SecurityConfig` 的 permitAll 清單只有【沒有前綴】的 `/actuator/health`、
+  `/actuator/health/**`，而 ConfigMap 的 `base-path` 把 actuator 搬到
+  `/gui_epmmFormQuery/actuator`。帶前綴的路徑落進 `anyRequest().authenticated()` → 回 **302**，
+  而 **kubelet 把 2xx 和 3xx 都算成功** → 三個探針【無條件通過】，app 整個壞掉也偵測不到，
+  `maxUnavailable: 0` 想保護的東西一起失效。附帶損害：kubelet 跟著 302 走到
+  `oauth2/authorization/keycloak`，那個端點會建 HttpSession 存 in-flight 的 state，
+  三個探針 × 每 10 秒 × 每個 pod = 持續製造沒人用的 session，每個活到 8 小時。
+  修法在 `dev/spring_oauth2_backend`（本次範圍外）：permitAll 補上
+  `contextPrefix + "/actuator/health"` 與 `contextPrefix + "/actuator/health/**"`。
+  這次的改動在那一行上線的當天就會生效，在那之前判斷 pod 好不好要自己
+  `curl -o /dev/null -D - <probe path>` 看真正的 status code。
+
+- **Learnings for future iterations:**
+  - **【US-009 直接會用到】跨檔案推導期望值，要走「Deployment 引用的名字 → ConfigMap 的
+    `metadata.name`」索引，不要靠檔名配對。** 檢查 [7] 的作法：把 `TRACK_A_CONFIGMAPS`
+    每一份的 `metadata.name` 建成 `Map`，再從 Deployment 的 `volumes[config].configMap.name`
+    去查，查到之後才從那份 ConfigMap 讀 `base-path` 推導探針路徑。這樣 US-008 把
+    ConfigMap 拆成 `-stable` / `-canary` 之後，每份 Deployment 會自動對到自己那一軌，
+    檢查【完全不用改】。US-009 的 config-hash 要做的事情一模一樣（雜湊自己那份 ConfigMap
+    的 `data['application.yml']`），直接沿用這段索引程式。
+  - **推導的來源查不到時必須 FAIL，不可以 skip。** 反向測 ⑦ 就是在測這件事：把
+    Deployment 引用的 ConfigMap 名字改成清單裡沒有的，如果程式選擇「找不到就跳過」，
+    這個檢查就會靜靜消失 —— 改個名字就能讓防護不見，是「永遠綠燈的檢查」的另一種長相。
+  - **反向測 ⑤（只改 ConfigMap 的 base-path）是這次最有價值的一項。** 探針路徑同時綁著
+    ConfigMap 的兩個 key（`probes.enabled` 決定端點存不存在、`base-path` 決定前綴），
+    兩邊各自釘一個常數只擋得住「兩邊都改錯」。US-006 的 `SPRING_CONFIG_LOCATION` ↔
+    `mountPath` 是同一個手法，這已經是這個 repo 的第二個案例了 —— 看到「兩個檔案裡
+    必須一致的值」就該想到互相對照。
+  - **同一個檢查裡「路徑必須等於推導值」和「liveness 不得等於 readiness」是刻意重複的。**
+    後者在前者全過的情況下永遠不會觸發，看起來是冗餘 —— 但它防的是不同的東西：
+    前者防打錯字，後者防「有人為了讓探針一致而故意把兩個改成同一個」，而那個改動
+    看起來很無害、也不會有任何立即症狀。專屬的錯誤訊息才有機會攔住那個人。
+  - **track-b 的 `20-rollout.yaml` 三個探針仍然打聚合端點，刻意不動。** 理由跟檢查 [6]
+    的排除清單一樣：track-b 的 ConfigMap 沒有 `probes.enabled`（附錄 C 那批 key 都還沒
+    補齊），在那個狀態下把路徑換成 `health/readiness` 會變成 **404** —— readiness 永遠
+    不過、pod 永遠不進 Endpoints，比現況糟得多。解除條件已寫在檢查 [7] 的區段註解裡：
+    先補齊 track-b 的 ConfigMap，再連探針一起改，同一個 commit。
+  - **改探針前先 grep 全 repo 的 `actuator/health`。** 除了兩份 Deployment 之外還有
+    `canary-manual/scripts/canary.sh`（用聚合端點 curl 看 `x-app-track` header，不受影響、
+    不要順手改）和 track-b 的 rollout（上面那條）。
+  - **寫註解時引用的章節編號要真的查一次。** 這次第一版寫了「見 3.9 的 curl 步驟」，
+    但 3.9 是 PodDisruptionBudget，curl 那段其實在第 4 章與第 9 章的表格裡。
+    `grep -n '^### 3\.\|^## ' canary-manual/CANARY-COMPLETE.md` 一次就能對完整份目錄。
+  - **`probes.enabled` 的註解刻意寫出「Spring Boot 在 K8s 裡會自動打開這個開關」。**
+    寫檢查時很容易把理由誇大成「不寫就一定壞」，但那不是真的（有 `KUBERNETES_SERVICE_HOST`
+    之類的環境偵測）。誇大的註解遲早會被人發現不準，然後連帶不相信旁邊那些是真的
+    警告。正確的寫法是講實話再說明為什麼仍然要寫：隱式偵測換個跑法就沒了，而且
+    replace 語意下這份 ConfigMap 是唯一真相。
+---

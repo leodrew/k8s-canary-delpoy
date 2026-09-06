@@ -129,7 +129,7 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "BLOCKED ON A DIFFERENT REPO: this story only completes the k8s half. Until dev/spring_oauth2_backend adds contextPrefix + \"/actuator/health\" and \"/actuator/health/**\" to SecurityConfig's permitAll list, the probes still return 302 and still pass unconditionally. Do not report the probe problem as solved."
     },
     {
