@@ -62,23 +62,21 @@ data:
     app:
       context-prefix: /gui_epmmFormQuery
 
-      cors:
-        allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
-        allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,PATCH,OPTIONS}
-        allowed-headers: ${CORS_ALLOWED_HEADERS:*}
-        allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
-        max-age: ${CORS_MAX_AGE:3600}
-
-      sso:
-        custom-logout-url: ${SSO_LOGOUT_URL:}
-        post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI}
-        logout-redirect-param-name: ${SSO_LOGOUT_REDIRECT_PARAM:redirectUri}
+      # 【這裡原本有 app.cors.* / app.sso.* / app.test-endpoints.* 三塊，都刪掉了】
+      # 完整說明在 track-a/release/10-configmap-1.2.3.yaml 的同一個位置。摘要：
+      # 後端沒有任何一行程式讀這三塊（CANARY-COMPLETE.md 附錄 C.4）。要找 CORS
+      # 設定的人請看附錄 A —— BFF 是同源架構，SecurityConfig 刻意只留一行
+      # // No .cors()（review F4），該回 Access-Control-Allow-Origin 的是對方的
+      # 伺服器，在這份 ConfigMap 裡加什麼都不會有效果。
+      #
+      # 【track-b 尚未補齊，這不是這次刪除造成的】刪掉 app.sso.* 之後這份檔案
+      # 就完全沒有登出導向的設定了 —— 但那本來就是沒有程式讀的 key，刪掉不改變
+      # 任何行為。正確的 app.post-logout-redirect-uri（以及附錄 C 其餘那一整批
+      # key）目前只補在 track-a；track-b 不在這次的範圍內，真要啟用這一軌之前
+      # 得先照 track-a 那份補齊，否則 pod 會在啟動階段就 CrashLoopBackOff。
 
       privilege:
         enabled: ${PRIVILEGE_CHECK_ENABLED:false}
-
-      test-endpoints:
-        enabled: ${TEST_ENDPOINTS_ENABLED:false}
 
       frontend:
         url-prefix: /gui_epmmFormQuery/web

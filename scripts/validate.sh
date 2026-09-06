@@ -461,6 +461,85 @@ for cm in "${BOTH_TRACK_CONFIGMAPS[@]}"; do
     node -e "$USER_NAME_ATTRIBUTE_SCRIPT" "$cm"
 done
 
+# =============================================================================
+# 檢查 5：死設定不得復活 —— app.cors / app.sso / app.test-endpoints（兩個 track）
+# =============================================================================
+# 為什麼要有這一項：
+#   這三塊是從兩份 ConfigMap 裡刪掉的「死設定」—— 後端【沒有任何一行程式讀它們】
+#   （CANARY-COMPLETE.md 附錄 C.4）。刪掉它們不會改變任何行為，而這正是它們危險
+#   的地方：加回來也一樣不會改變任何行為，所以不會有任何症狀讓人發現加錯了。
+#   檢查 [2]/[3] 防的是「key 消失」，這一項防的是反方向 ——「key 長回來」。
+#
+#   死設定比沒有設定更糟，因為它會主動把查問題的人帶往錯誤的方向：
+#     - app.cors.*   出 CORS 問題時一定有人回來改 allowed-origins。但 BFF 是同源
+#                    架構，SecurityConfig 只有一行 // No .cors()（review F4），
+#                    該回 Access-Control-Allow-Origin 的是【對方的伺服器】——
+#                    在這裡改什麼都不會有效果，而查錯方向花掉的時間就是故障時間
+#                    （附錄 A.1）。
+#     - app.sso.*    錯的 key 路徑。這一塊最陰險：它「看起來」把登出導向設定好了，
+#                    於是沒有人會去懷疑那個真正沒有 Java 預設值、缺了就
+#                    CrashLoopBackOff 的 app.post-logout-redirect-uri（檢查 [2]）。
+#     - app.test-endpoints.*  沒有任何程式讀它。
+#
+#   最可能讓它們復活的路徑是「從舊版本、或從另一個 track 整段複製設定過來」，
+#   所以這一項跟檢查 [4] 一樣涵蓋【兩個 track】—— 只擋 track-a 的話，哪天有人
+#   從 track-b 抄設定過來就原樣搬回來了。
+#
+# 為什麼是解析 YAML 而不是 grep：
+#   兩份檔案裡現在都有一段解釋「為什麼刪掉」的註解，而那段註解本身就寫著
+#   app.cors.* / app.sso.* 這幾個字。grep 會被它打到，於是這個檢查會永遠 FAIL，
+#   然後被人改成「先 grep -v 掉註解」那種一碰就碎的寫法。解析後的物件上不存在
+#   註解，問「這個 key 在不在」才是問對問題。
+echo "== [5] 死設定不得復活：app.cors / app.sso / app.test-endpoints（兩個 track）=="
+
+# 跟前面幾個斷言腳本相反：路徑走得到就是失敗。
+# 注意「走不到」有兩種都算通過（key 完全沒寫、父層根本不存在），
+# 而「寫了 key 但沒有值」（例如只留一行 `cors:`）算【失敗】—— 那仍然是一個
+# 會被讀到的 key，也仍然會把下一個人引到錯的地方去。
+CM_KEY_ABSENT_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file, keyPath, why] = process.argv.slice(1);
+const cm = y.load(fs.readFileSync(file, "utf8"));
+const raw = cm && cm.data && cm.data["application.yml"];
+if (typeof raw !== "string") {
+  console.error(file + ": 沒有 data[\"application.yml\"]，這不是一份預期中的 ConfigMap");
+  process.exit(1);
+}
+let cur = y.load(raw);
+for (const seg of keyPath.split(".")) {
+  if (cur === null || typeof cur !== "object" || !(seg in cur)) {
+    process.exit(0);
+  }
+  cur = cur[seg];
+}
+console.error(file + ": " + keyPath + " 又出現了 —— 這是一塊沒有任何程式讀的死設定。");
+console.error("  " + why);
+console.error("  把它加回來不會改變任何行為，所以不會有症狀提醒你加錯了；");
+console.error("  但下一個查問題的人會先在它身上花掉時間。請把它刪掉。");
+console.error("  見 CANARY-COMPLETE.md 附錄 C.4（不要寫進 ConfigMap 的）。");
+process.exit(1);
+'
+
+# 用法：assert_cm_key_absent <dotted.key.path> <為什麼不能有>
+# 跟檢查 [4] 一樣跑 BOTH_TRACK_CONFIGMAPS，而且一樣用 cm_label 而不是 basename ——
+# 兩個 track 的檔名一模一樣，用 basename 的話兩行輸出會長得完全相同，
+# FAIL 時看不出是哪一份壞了。
+assert_cm_key_absent() {
+  local key="$1" why="$2"
+  local cm
+  for cm in "${BOTH_TRACK_CONFIGMAPS[@]}"; do
+    check "cm-key-absent $key ($(cm_label "$cm"))" \
+      node -e "$CM_KEY_ABSENT_SCRIPT" "$cm" "$key" "$why"
+  done
+}
+
+assert_cm_key_absent "app.cors" \
+  "BFF 是同源架構，SecurityConfig 刻意沒有 .cors()（review F4），而且有測試守著；CORS 該由對方的伺服器回，見附錄 A.1。"
+assert_cm_key_absent "app.sso" \
+  "錯的 key 路徑，後端沒有一行程式讀它。正確的是 app.post-logout-redirect-uri（app.* 頂層），由檢查 [2] 釘住。"
+assert_cm_key_absent "app.test-endpoints" \
+  "沒有任何程式讀它；測試端點的開關不在 ConfigMap 裡。"
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then

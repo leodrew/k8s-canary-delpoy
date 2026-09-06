@@ -128,9 +128,9 @@ data:
       # → 啟動失敗、CrashLoopBackOff。
       #
       # 【注意 key 的路徑】正確的是 app.post-logout-redirect-uri（app.* 頂層），
-      # 不是底下那塊 app.sso.post-logout-redirect-uri —— 那是錯的 key 路徑，
-      # 後端沒有任何一行程式讀它，看起來有設定其實等於沒設定。
-      # （app.sso.* 整塊會在後續的清理裡移除，見 CANARY-COMPLETE.md 附錄 C.4。）
+      # 不是 app.sso.post-logout-redirect-uri —— 那是錯的 key 路徑，後端沒有任何
+      # 一行程式讀它，看起來有設定其實等於沒設定。
+      # （app.sso.* 整塊已經移除了，見底下 privilege 上方那段說明與附錄 C.4。）
       #
       # 這裡的 ${...:預設} 是 Spring 的佔位語法：環境變數 POST_LOGOUT_REDIRECT_URI
       # 沒設時，退回冒號後面那個字面值。見 CANARY-COMPLETE.md 3.5 與附錄 C.1。
@@ -177,23 +177,26 @@ data:
       third-party:
         base-url: ${THIRD_PARTY_API_URL:https://partner.example.com}
 
-      cors:
-        allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
-        allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,PATCH,OPTIONS}
-        allowed-headers: ${CORS_ALLOWED_HEADERS:*}
-        allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
-        max-age: ${CORS_MAX_AGE:3600}
-
-      sso:
-        custom-logout-url: ${SSO_LOGOUT_URL:}
-        post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI}
-        logout-redirect-param-name: ${SSO_LOGOUT_REDIRECT_PARAM:redirectUri}
+      # 【這裡原本有 app.cors.* / app.sso.* / app.test-endpoints.* 三塊，都刪掉了】
+      # 三塊的共同點是【後端沒有任何一行程式讀它們】（CANARY-COMPLETE.md 附錄 C.4）。
+      # 死設定比沒有設定更糟：出 CORS 問題時一定有人回來改 allowed-origins，改完
+      # 什麼都不會變，然後往錯的方向查半天 —— 而那半天正好是出事的時候。
+      #
+      #   - app.cors.*            BFF 是同源架構：React SPA 被打包進 jar，由 Spring
+      #                           從 /gui_epmmFormQuery/web/** 供應，跟後端同源，
+      #                           所以 SecurityConfig 只留一行 // No .cors()
+      #                           （review F4），而且有測試守著。要找 CORS 設定的人
+      #                           請看 CANARY-COMPLETE.md 附錄 A —— 該回
+      #                           Access-Control-Allow-Origin 的是【對方的伺服器】，
+      #                           不是這份 ConfigMap，在這裡加什麼都不會有效果。
+      #   - app.sso.*             錯的 key 路徑。正確的那個是上面的
+      #                           app.post-logout-redirect-uri（app.* 頂層）。
+      #   - app.test-endpoints.*  沒有任何程式讀；測試端點的開關不在這裡。
+      #
+      # 這三塊不要加回來：scripts/validate.sh 的檢查 [5] 會擋，而且兩個 track 都擋。
 
       privilege:
         enabled: ${PRIVILEGE_CHECK_ENABLED:false}
-
-      test-endpoints:
-        enabled: ${TEST_ENDPOINTS_ENABLED:false}
 
       frontend:
         url-prefix: /gui_epmmFormQuery/web

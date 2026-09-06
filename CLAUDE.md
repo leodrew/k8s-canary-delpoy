@@ -48,6 +48,12 @@ bash scripts/validate.sh      # 或 npm run validate
   刻意跟 `TRACK_A_CONFIGMAPS` 分開：後者的語意是「track-a 必須完整」，把 track-b
   塞進去會讓附錄 C 的每一項 key 檢查都跑到 track-b 上，噴出一整排假失敗
   —— track-b 這次沒有被補齊。
+- **`assert_cm_key_absent <dotted.key.path> <為什麼不能有>`** —— 反方向的斷言：這個 key
+  **存在就是失敗**。給「已經刪掉、而且不可以長回來」的死設定用（`app.cors`、`app.sso`、
+  `app.test-endpoints`）。跑的是 `BOTH_TRACK_CONFIGMAPS`。第二個參數會原樣印進 FAIL
+  訊息，寫「為什麼這塊是死的」，讓想加回來的人在錯誤訊息裡就讀到理由。
+  注意「寫了 key 但沒有值」（只留一行 `cors:`）算**失敗** —— 那仍然是一個會被讀到的
+  key，語意跟 `assert_cm_key` 那邊「空字串算通過」是不同的判斷，不要混用。
 - **`cm_label <檔案路徑>`** —— 兩個 track 的 ConfigMap 檔名一模一樣（都叫
   `10-configmap-1.2.3.yaml`），所以跨 track 的檢查名稱不能用 `basename`：
   兩行 PASS 會長得完全一樣，失敗時看不出是哪一份壞了。這個 helper 印出
@@ -63,8 +69,17 @@ bash scripts/validate.sh      # 或 npm run validate
 Spring 用自己的預設值頂上」—— 設定看起來還在，行為已經變了。`redirect-uri` 就是標準
 案例：少了 `/gui_epmmFormQuery` 前綴，登入 callback 進不來，而錯誤訊息不會指向 ConfigMap。
 
+**刪掉設定也是一種修改，一樣要加檢查 —— 而且是反方向的那種。** 刪除死設定
+（沒有任何程式讀的 key）之後，唯一會出事的方式是有人把它加回來；而加回來同樣不會
+產生任何症狀，所以沒有人會發現。這種情況用 `assert_cm_key_absent`，並且把「為什麼
+這塊是死的」寫進 FAIL 訊息裡。復活最常見的路徑是「從舊版本或另一個 track 整段複製
+設定過來」，所以這類檢查要跑 `BOTH_TRACK_CONFIGMAPS` 而不是只擋一個 track。
+
 加完檢查一定要**反向測一次**：把該 key 改壞、跑一次確認真的 FAIL、再還原。
 一個永遠綠燈的檢查比沒有檢查更糟，因為它會讓人以為有防護。
+反向測「不得存在」這類檢查時，除了「整塊加回來」，記得也測
+「只留一行 `cors:`（key 有、值是 null）」和「整塊被註解掉」—— 後者必須維持 PASS，
+那正是這個檢查解析 YAML 而不是 grep 的意義。
 
 ## 工具限制
 
