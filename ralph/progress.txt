@@ -82,6 +82,24 @@ Started: (not yet run)
 - **這台機器 `core.autocrlf=true`。** `git add` 噴的 "LF will be replaced by CRLF"
   是正常的、可以忽略；`*.sh` 已由 `.gitattributes` 釘成 LF，之後新增的腳本自動適用。
   但工作目錄裡的 `prd.json` / `progress.txt` 實際上是 LF，程式化改寫時沿用原檔行尾。
+
+- **兩個互相綁定的欄位，要拿它們互相對照，不要各自釘一個常數。** manifest 裡有幾組值
+  是必須一致的（`SPRING_CONFIG_LOCATION` 的路徑 ↔ `config` volumeMount 的 `mountPath`；
+  US-008 之後還會有 Deployment 引用的 configMap 名字 ↔ ConfigMap 檔案裡的 `metadata.name`）。
+  兩邊各自跟寫死的字串比對，只擋得住「兩邊都改錯」；真正會發生的是「改了其中一邊，
+  忘了另一邊」。正確寫法是從 manifest 讀出 A、推出 B 應該長什麼樣，再跟實際的 B 比
+  —— 任何一邊被單獨改動都會 FAIL。
+
+- **「某個字串不得出現」的檢查，也要解析之後再看，不要 grep 原始檔。** 對 YAML 來說是
+  `y.loadAll()` 之後對整份結果 `JSON.stringify` 再找子字串（keys / values 都掃得到，
+  註解掃不到）。理由不是潔癖：這個 repo 的慣例就是在改掉一個設定的地方留一整段註解
+  解釋「原本是什麼、為什麼那樣是錯的」，所以 grep 版本會被「自己剛寫的說明註解」打到、
+  變成永遠 FAIL。對 shell 腳本（US-010 的 `canary.sh`）沒有 parser 可用，要另想辦法
+  （先剝掉 `#` 註解再比對），同樣不能直接 grep 整個檔案。
+
+- **反向測之前，先確認「壞掉的版本真的寫進檔案了」。** US-006 有一次 `sed` 沒改到任何
+  東西，於是閘門照樣 exit 0，看起來像是「這個檢查沒防護力」，其實是根本沒測到。
+  改壞之後先 `grep` 一下改動處，再跑 validate.sh。
 ---
 
 ## 2026-09-06 - US-001 - Bootstrap scripts/validate.sh with YAML syntax checking
@@ -375,4 +393,71 @@ Started: (not yet run)
     檢查 [4]/[5] 掛在後者。只更新其中一個的話，另一組檢查會靜靜地不再涵蓋新檔案 ——
     而且因為舊檔名被 `git mv` 掉了，陣列裡指向不存在的檔案時 `js-yaml` 會噴 ENOENT
     變成 FAIL，那還算好的；漏加新檔名則是無聲地少檢查，那才是真正危險的。
+---
+
+## 2026-09-06 - US-006 - Switch both Deployments to SPRING_CONFIG_LOCATION at the real mount path
+
+- 把 track-a 兩份 Deployment 的設定載入 env 從 `SPRING_CONFIG_ADDITIONAL_LOCATION`
+  改成 `SPRING_CONFIG_LOCATION`，值 `file:/app/config/application.yml` ——
+  對上兩份檔案裡本來就有的 `config` volumeMount（`mountPath: /app/config`）。
+  這是「pod 現在為什麼起不來」的直接修正，而且不需要重建 image：Deployment 的 env
+  會覆蓋 image 的 ENV（Dockerfile:120 的 `SPRING_CONFIG_LOCATION=file:/config/application.yaml`
+  指向一個這個 repo 從來不掛東西的路徑）。`dev/spring_oauth2_backend` 完全沒有動。
+- Files changed:
+  - `canary-manual/track-a/release/20-deployment-stable.yaml` — env 改名改路徑 ＋ 完整說明註解
+  - `canary-manual/track-a/release/21-deployment-canary.yaml` — 同上（較短版本，指回 stable 那份）
+  - `scripts/validate.sh` — 新增檢查區段 [6]
+  - `CLAUDE.md`（dev/k8s 層級）— 補上 `TRACK_A_DEPLOYMENTS`、「互相綁定的欄位要互相對照」、
+    「掃描字串型檢查一樣要解析 YAML」三條
+- 驗證結果：`bash scripts/validate.sh` → **72/72 PASS、exit 0**（US-005 之後是 56 項，新增 16 項）。
+  反向測五種，前四種都 FAIL 且 exit 1、第五種維持 PASS：
+  ① env 名字改回 `SPRING_CONFIG_ADDITIONAL_LOCATION` → 正向檢查與掃描同時 FAIL
+  ② 值改成 image 內建的 `file:/config/application.yaml` → 值不符 ＋ 與 mountPath 對不上
+  ③ 只把 `mountPath` 改成 `/app/conf`、env 不動 → FAIL（這一種是寫死常數抓不到的）
+  ④ 在 `track-a/base/01-service.yaml` 貼上一段含該 env 的內容 → 掃描 FAIL
+  ⑤ 只在 YAML **註解**裡提到那個變數名 → 維持 PASS
+  第一次跑 ③ 時 sed 其實沒改到檔案、拿到一個假的 exit=0；重跑並先 `grep` 確認檔案真的
+  變了之後才 FAIL。**反向測要先確認「壞掉的版本真的寫進檔案了」**，否則測到的是空氣。
+
+- **Learnings for future iterations:**
+  - **驗收條件寫「no file under canary-manual/ contains the string」，實際做不到字面上那樣，
+    這是刻意的偏離，兩個排除都寫在 validate.sh 的註解裡：**
+    - `*.md` 沒有掃。`CANARY-COMPLETE.md` 3.1 / 5.x 提到這個變數名是在**解釋它為什麼是錯的**，
+      掃進來等於要求刪掉那段說明。
+    - `canary-manual/track-b/release/20-rollout.yaml` **仍然在用** `SPRING_CONFIG_ADDITIONAL_LOCATION`，
+      刻意沒改。track-b 的 ConfigMap 沒有被 US-002/US-003 補齊（附錄 C.2 / C.3 那一批 key
+      都還沒寫），在那個狀態下把它翻成 replace 語意會讓 session timeout 悄悄縮成 30 分鐘、
+      cookie 改回 JSESSIONID、CSP header 整個不送 —— 跟 US-006 排在 US-002..US-005 後面
+      是同一個理由。解除條件已寫在排除清單旁：先補齊 track-b 的 ConfigMap，再把它從
+      `SPRING_CONFIG_SWEEP_SKIP` 拿掉，兩件事同一個 commit。
+  - **`scripts/validate.sh` 現在有 `TRACK_A_DEPLOYMENTS` 陣列**（20-deployment-stable.yaml
+    ／21-deployment-canary.yaml）。**US-007（探針路徑）與 US-009（config-hash 註解）直接沿用它**，
+    不要再複製一份清單。這兩個檔名彼此不同，所以檢查名稱用 `basename` 就夠，
+    不必走 `cm_label`（那是給檔名一模一樣的兩份 ConfigMap 用的）。
+  - **兩個互相綁定的欄位要互相對照，不要各自釘一個常數。** 這次最有價值的一項設計：
+    env 的值不只跟寫死的字串比，還從 manifest 自己讀出 `config` volumeMount 的 `mountPath`
+    再推出 env 應該長什麼樣。反向測 ③ 證明了差別 —— 只改 `mountPath` 的話，
+    「跟常數比對」那半邊完全沒感覺，是這半邊抓到的。US-008 改 `configMap.name` 時
+    也是同一類：Deployment 引用的名字要跟 ConfigMap 檔案裡的 `metadata.name` 互相對照，
+    不要兩邊各寫死一次。
+  - **「某字串不得出現」的掃描，一樣要解析 YAML 之後再看**（對整份解析結果
+    `JSON.stringify` 再找子字串就夠了，keys 和 values 都掃得到，註解掃不到）。
+    這不是潔癖：這個 repo 的慣例就是在改掉一個設定的地方留一整段註解解釋
+    「原本是什麼、為什麼那樣是錯的」，所以 grep 版本會被**自己剛寫的說明註解**打到、
+    變成永遠 FAIL。US-010 要檢查 `canary.sh` 不得含 `--replicas=0` / `rollout undo` 時
+    會遇到同一個問題 —— 那是 shell 腳本不是 YAML，js-yaml 解析不了，
+    所以得另想辦法（例如先剝掉 `#` 註解再比對，或只看實際會執行的那幾行）。
+    **不要直接 grep 整個檔案**：US-010 同樣會要求在移除的地方留註解說明為什麼禁止。
+  - **深走整棵樹找 `containers` 比寫死 `spec.template.spec.containers` 好。** 檢查 [6] 的
+    node 斷言用一個小的 `collect(node, key, out)` 遞迴，所以同一段程式對 Deployment
+    和 track-b 的 Rollout（`spec.template.spec.containers` 路徑其實一樣，但 Rollout 還有
+    `spec.strategy.canary` 那一層）都適用。之後如果要對 Rollout 下斷言可以直接沿用。
+  - **多文件 YAML 用 `y.loadAll(...).filter(Boolean)`**，不要用 `y.load()` ——
+    後者遇到 `---` 分隔的多文件會丟例外。track-b/base 底下有幾份是多文件格式，
+    而檢查 [6] 的掃描會跑到它們身上。`.filter(Boolean)` 是為了濾掉尾端多餘 `---`
+    產生的 null document。
+  - **叢集驗證仍然待辦（這台機器沒有 kubectl）**：部署後要跑
+    `kubectl exec <pod> -- head -3 /app/config/application.yml` 確認印出的是 ConfigMap
+    的內容，以及 `kubectl logs` 裡沒有 `ConfigDataLocationNotFoundException`
+    和 `Could not resolve placeholder`。這一項已記在 PRD 的 US-006 notes 裡。
 ---

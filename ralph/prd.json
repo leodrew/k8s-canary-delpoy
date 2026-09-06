@@ -111,7 +111,7 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Cluster verification deferred: `kubectl exec <pod> -- head -3 /app/config/application.yml` must print the ConfigMap contents."
     },
     {
