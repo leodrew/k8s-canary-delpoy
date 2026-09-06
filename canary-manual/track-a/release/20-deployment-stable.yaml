@@ -125,16 +125,58 @@ spec:
             requests: { memory: "512Mi", cpu: "250m" }
             limits:   { memory: "1Gi",   cpu: "1000m" }
 
+          # --- 探針：liveness 與 readiness 打【不同】的端點 ----------------------
+          # 原本三個探針都打 /gui_epmmFormQuery/actuator/health，也就是那個「把所有
+          # 依賴都算進去」的聚合端點。共用它的後果是：Keycloak 或下游 API 抖一下，
+          # readiness 掉的【同時】liveness 也掉 —— readiness 掉只是暫時退出 Endpoints、
+          # 好了就自己回來，liveness 掉卻是讓 kubelet 直接【重啟】pod。於是一次幾秒鐘
+          # 的依賴故障被放大成一次全部 pod 的滾動重啟，而重啟會清掉 in-memory 的
+          # HttpSession（session 沒有外部儲存，見 3.3）→ 所有人被登出。
+          #
+          # 分開之後：liveness 只問「JVM 還活著嗎」（livenessState），readiness 才看
+          # 依賴（readinessState）。startup 用 readiness 群組 —— 啟動階段要等的正是
+          # 「依賴都好了沒」，而且 startupProbe 沒過之前 kubelet 不會跑 liveness，
+          # 慢啟動不會被誤判成當機。
+          #
+          # 這三個路徑不是可以隨便改的字串，它們同時綁著 ConfigMap 的兩個 key：
+          #   - management.endpoint.health.probes.enabled: true  → 這兩個端點才存在
+          #   - management.endpoints.web.base-path              → 決定前綴
+          # 改了 ConfigMap 那兩個 key 卻沒回頭改這裡（或反過來）就是 404 探針。
+          # validate.sh 的檢查 [7] 會從 ConfigMap 推出這裡應該長什麼樣再對照。
+          #
+          # ⚠【已知缺口：這三個探針目前是假的，而且在這個 repo 裡修不掉】
+          #   （CANARY-COMPLETE.md 3.6、第 9 章第 9 項）
+          #
+          #   後端 SecurityConfig 的 permitAll 清單裡只有【沒有前綴】的
+          #   /actuator/health 與 /actuator/health/**，但上面那個 base-path 已經把
+          #   actuator 整組搬到 /gui_epmmFormQuery/actuator。帶前綴的路徑因此落進
+          #   anyRequest().authenticated() → 回 302 導去 Keycloak。
+          #   而 kubelet 把 2xx 和 3xx 都算成功，所以底下這三個探針【無條件通過】——
+          #   app 整個壞掉也偵測不到，maxUnavailable: 0 想保護的東西一起失效。
+          #
+          #   附帶損害：kubelet 會跟著那個 302 走到
+          #   /gui_epmmFormQuery/oauth2/authorization/keycloak，而該端點會建立一個
+          #   HttpSession 來存 in-flight 的 OAuth2 state。三個探針 × 每 10 秒 ×
+          #   每個 pod，等於持續製造沒有人用的 session，每個活到 session.timeout
+          #   （8 小時）才消失。
+          #
+          #   修法在【另一個 repo】（dev/spring_oauth2_backend），不在這次的範圍內：
+          #   permitAll 要補上 contextPrefix + "/actuator/health" 與
+          #   contextPrefix + "/actuator/health/**"。把路徑分成 liveness / readiness
+          #   本身仍然是對的（那一行上線的當天就會生效），但在它上線之前，
+          #   【不要相信這三個探針的綠燈】—— 判斷 pod 好不好要自己 curl 一次看真正的
+          #   status code（第 9 章那一列：curl -o /dev/null -D - <probe path>，
+          #   302 就是打到了認證牆）。
           startupProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              path: /gui_epmmFormQuery/actuator/health/readiness
               port: 8080
             failureThreshold: 30
             periodSeconds: 10               # 最多給 300 秒啟動
 
           readinessProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              path: /gui_epmmFormQuery/actuator/health/readiness
               port: 8080
             periodSeconds: 10
             timeoutSeconds: 3
@@ -142,7 +184,9 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              # 【不要】把這一行改回 readiness 或改回不帶 /liveness 的聚合端點 ——
+              # 那正是上面整段在講的那個放大效應。
+              path: /gui_epmmFormQuery/actuator/health/liveness
               port: 8080
             periodSeconds: 30
             timeoutSeconds: 5

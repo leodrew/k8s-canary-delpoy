@@ -113,16 +113,31 @@ spec:
             requests: { memory: "512Mi", cpu: "250m" }
             limits:   { memory: "1Gi",   cpu: "1000m" }
 
+          # --- 探針：liveness 與 readiness 打【不同】的端點 ----------------------
+          # 跟 stable 那份完全一樣，理由的完整版寫在 20-deployment-stable.yaml 的同一段，
+          # 這裡只留摘要：三個探針共用聚合端點 /actuator/health 的話，依賴抖一下會讓
+          # readiness 和 liveness 同時掉，而 liveness 掉 = kubelet 重啟 pod，
+          # 把幾秒鐘的依賴故障放大成一次重啟（並清掉 in-memory 的 HttpSession）。
+          # 路徑前綴綁著 ConfigMap 的 management.endpoints.web.base-path，
+          # 端點本身則要 management.endpoint.health.probes.enabled: true 才存在；
+          # validate.sh 的檢查 [7] 會從 canary 這一軌自己掛的那份 ConfigMap 推導後對照。
+          #
+          # ⚠【已知缺口】後端 SecurityConfig 的 permitAll 只有沒有前綴的
+          #   /actuator/health(**)，帶前綴的路徑會回 302，而 kubelet 把 3xx 算成功
+          #   → 這三個探針目前【無條件通過】。修法在另一個 repo，不在這次範圍內，
+          #   詳見 20-deployment-stable.yaml 的那一段與 CANARY-COMPLETE.md 3.6。
+          #   canary 這一軌尤其不能靠探針把關：它只有 1 個 replica、而且是拿真實
+          #   pilot 使用者在跑，探針說綠燈不代表新版本是好的 —— 看第 6 章的驗收步驟。
           startupProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              path: /gui_epmmFormQuery/actuator/health/readiness
               port: 8080
             failureThreshold: 30
             periodSeconds: 10
 
           readinessProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              path: /gui_epmmFormQuery/actuator/health/readiness
               port: 8080
             periodSeconds: 10
             timeoutSeconds: 3
@@ -130,7 +145,8 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: /gui_epmmFormQuery/actuator/health
+              # 【不要】改回跟 readiness 相同的路徑，見上面那段。
+              path: /gui_epmmFormQuery/actuator/health/liveness
               port: 8080
             periodSeconds: 30
             timeoutSeconds: 5

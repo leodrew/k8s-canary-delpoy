@@ -708,6 +708,162 @@ while IFS= read -r manifest; do
     node -e "$SPRING_CONFIG_ADDITIONAL_ABSENT_SCRIPT" "$manifest"
 done < <(find canary-manual -type f -name '*.yaml' | sort)
 
+# =============================================================================
+# 檢查 7：探針 —— liveness 與 readiness 必須是不同的端點，且路徑對得上 ConfigMap
+# =============================================================================
+# 為什麼要有這一項：
+#   原本三個探針都打 /gui_epmmFormQuery/actuator/health（把所有依賴都算進去的聚合
+#   端點）。共用它的失效模式是：Keycloak 或下游 API 抖一下 → readiness 掉的同時
+#   liveness 也掉 → kubelet 直接【重啟】pod。一次幾秒鐘的依賴故障被放大成一次全部
+#   pod 的滾動重啟，而重啟會清掉 in-memory 的 HttpSession → 所有人被登出。
+#   把它改回去不會有任何立即症狀（探針照樣綠燈），要等到某天依賴真的抖一下才會炸，
+#   而那時候沒有人會把「大家被登出」聯想到這三行路徑 —— 所以要用檢查釘住。
+#
+# 為什麼是從 ConfigMap【推導】期望值，而不是各自釘一個常數：
+#   這三個路徑同時綁著 ConfigMap 的兩個 key（CANARY-COMPLETE.md 3.6）：
+#     - management.endpoint.health.probes.enabled: true  → 這兩個端點才存在
+#     - management.endpoints.web.base-path              → 決定路徑前綴
+#   兩邊各自跟寫死的字串比對，只擋得住「兩邊都改錯」；真正會發生的是「改了
+#   base-path 卻沒回頭改 Deployment」—— 而改 base-path 的人根本不會想到探針也綁著
+#   這個值。所以底下是先從 Deployment 讀出它自己掛的是哪一份 ConfigMap（走 config
+#   volume 的 configMap.name，再用 metadata.name 去 TRACK_A_CONFIGMAPS 裡找），
+#   從那份 ConfigMap 讀出 base-path，推出探針路徑應該長什麼樣，再跟實際的比。
+#   任何一邊被單獨改動都會 FAIL。US-008 把 ConfigMap 拆成 -stable / -canary 之後，
+#   這段程式會自動各自對到自己那一軌，不需要修改。
+#
+# 刻意不涵蓋 track-b：
+#   canary-manual/track-b/release/20-rollout.yaml 的三個探針仍然打聚合端點，而且
+#   刻意不動 —— track-b 的 ConfigMap 沒有 probes.enabled（附錄 C 那一批 key 都還沒
+#   補齊，見檢查 [6] 的排除說明），在那個狀態下把路徑換成 health/readiness 會變成
+#   404，readiness 永遠不過、pod 永遠不進 Endpoints，那比現況糟得多。
+#   解除條件跟檢查 [6] 一樣：先補齊 track-b 的 ConfigMap，再把它的探針一起改。
+echo "== [7] 探針：liveness / readiness 分開，且對得上 ConfigMap =="
+
+# 先釘住 ConfigMap 這一半：沒有這個開關，health/liveness 與 health/readiness
+# 這兩個端點根本不會被註冊，探針會拿到 404 —— readiness 404 = pod 永遠不進
+# Endpoints，滾動更新會卡死在第一個新 pod 上。
+# （Spring Boot 在 K8s 裡會自動打開這個開關，所以漏掉「可能」還是會動 ——
+#  正因為如此更要釘住：那是隱式的環境偵測，換個跑法就沒了。）
+assert_cm_key "management.endpoint.health.probes.enabled" "true"
+
+PROBE_PATHS_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file, ...cmFiles] = process.argv.slice(1);
+
+function collect(node, key, out) {
+  if (Array.isArray(node)) { for (const v of node) collect(v, key, out); return out; }
+  if (node && typeof node === "object") {
+    for (const k of Object.keys(node)) {
+      if (k === key) out.push(node[k]);
+      collect(node[k], key, out);
+    }
+  }
+  return out;
+}
+
+// ConfigMap 索引：metadata.name -> 解析後的 application.yml。
+// Deployment 引用的是【名字】不是檔名，所以要先建這個索引才對得起來。
+const byName = new Map();
+for (const f of cmFiles) {
+  const cm = y.load(fs.readFileSync(f, "utf8"));
+  if (!cm || !cm.metadata || !cm.data || typeof cm.data["application.yml"] !== "string") continue;
+  byName.set(cm.metadata.name, { file: f, app: y.load(cm.data["application.yml"]) });
+}
+
+const docs = y.loadAll(fs.readFileSync(file, "utf8")).filter(Boolean);
+const containers = [].concat(...collect(docs, "containers", []));
+const volumes = [].concat(...collect(docs, "volumes", []));
+if (containers.length === 0) {
+  console.error(file + ": 找不到任何 container，這不是一份預期中的 workload manifest");
+  process.exit(1);
+}
+
+const cfgVol = volumes.find(v => v && v.name === "config");
+if (!cfgVol || !cfgVol.configMap || !cfgVol.configMap.name) {
+  console.error(file + ": 找不到名為 config 的 volume（或它不是 configMap）");
+  process.exit(1);
+}
+const cmName = cfgVol.configMap.name;
+const entry = byName.get(cmName);
+if (!entry) {
+  console.error(file + ": 它掛的 ConfigMap 叫 " + cmName + "，但那個名字不在已知的");
+  console.error("  track-a ConfigMap 清單裡（validate.sh 的 TRACK_A_CONFIGMAPS）。");
+  console.error("  探針路徑的期望值是從那份 ConfigMap 的 base-path 推導出來的，");
+  console.error("  對不到檔案就無從檢查。改 ConfigMap 名字時要一起更新那個陣列。");
+  process.exit(1);
+}
+
+const app = entry.app;
+const mgmt = (app && app.management) || {};
+const basePath = mgmt.endpoints && mgmt.endpoints.web && mgmt.endpoints.web["base-path"];
+if (typeof basePath !== "string") {
+  console.error(entry.file + ": 讀不到 management.endpoints.web.base-path");
+  console.error("  （檢查 [3] 也會抓到這一項，先修那邊。）");
+  process.exit(1);
+}
+const probesEnabled = mgmt.endpoint && mgmt.endpoint.health &&
+  mgmt.endpoint.health.probes && mgmt.endpoint.health.probes.enabled;
+if (probesEnabled !== true) {
+  console.error(entry.file + ": management.endpoint.health.probes.enabled 不是 true，");
+  console.error("  但 " + file + " 的探針打的是 health/liveness、health/readiness。");
+  console.error("  這兩個端點只有在那個開關打開時才存在 → 探針會拿到 404 →");
+  console.error("  readiness 永遠不過 → pod 永遠不進 Endpoints。兩邊要一起改。");
+  process.exit(1);
+}
+
+const WANT = {
+  startupProbe:   basePath + "/health/readiness",
+  readinessProbe: basePath + "/health/readiness",
+  livenessProbe:  basePath + "/health/liveness",
+};
+
+let failed = false;
+for (const c of containers) {
+  const where = file + " (container " + c.name + ")";
+  for (const p of ["startupProbe", "readinessProbe", "livenessProbe"]) {
+    const probe = c[p];
+    if (!probe || !probe.httpGet || typeof probe.httpGet.path !== "string") {
+      console.error(where + ": 缺少 " + p + " 的 httpGet.path");
+      console.error("  三個探針都要有。少了 liveness，卡死（但沒 crash）的 JVM 不會被重啟；");
+      console.error("  少了 readiness，滾動更新會把還沒暖機完的 pod 直接放進 Endpoints。");
+      failed = true;
+      continue;
+    }
+    if (probe.httpGet.path !== WANT[p]) {
+      console.error(where + ": " + p + " 的路徑不對");
+      console.error("  期望: " + WANT[p]);
+      console.error("  實際: " + probe.httpGet.path);
+      console.error("  期望值是從 " + entry.file + " 的");
+      console.error("  management.endpoints.web.base-path (" + basePath + ") 推導出來的 ——");
+      console.error("  改了 base-path 就要回頭改這裡，反之亦然。見 CANARY-COMPLETE.md 3.6。");
+      failed = true;
+    }
+  }
+
+  // 即使上面每一項都對，這一段還是獨立寫出來：它要防的不是「路徑打錯字」，
+  // 而是有人（例如為了「讓探針一致」）把 liveness 改成跟 readiness 同一個端點。
+  // 那個改動看起來很無害、而且不會有任何立即症狀。
+  const lp = c.livenessProbe && c.livenessProbe.httpGet && c.livenessProbe.httpGet.path;
+  const rp = c.readinessProbe && c.readinessProbe.httpGet && c.readinessProbe.httpGet.path;
+  if (typeof lp === "string" && lp === rp) {
+    console.error(where + ": liveness 與 readiness 打【同一個】路徑 (" + lp + ")");
+    console.error("  這兩個問的是不同的問題，不能共用端點：");
+    console.error("    readiness 掉 = 暫時退出 Endpoints，依賴好了就自己回來；");
+    console.error("    liveness  掉 = kubelet 【重啟】pod。");
+    console.error("  共用之後，Keycloak 或下游抖一下就會讓全部 pod 滾動重啟，");
+    console.error("  而重啟會清掉 in-memory 的 HttpSession —— 所有人被登出。");
+    console.error("  見 CANARY-COMPLETE.md 3.6。");
+    failed = true;
+  }
+}
+process.exit(failed ? 1 : 0);
+'
+
+for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
+  check "probe-paths $(basename "$dep")" \
+    node -e "$PROBE_PATHS_SCRIPT" "$dep" "${TRACK_A_CONFIGMAPS[@]}"
+done
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then

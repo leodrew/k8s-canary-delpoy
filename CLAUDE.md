@@ -86,6 +86,16 @@ env 也綁著這個值。正確的寫法是從 manifest 讀出 `mountPath`、推
 這塊是死的」寫進 FAIL 訊息裡。復活最常見的路徑是「從舊版本或另一個 track 整段複製
 設定過來」，所以這類檢查要跑 `BOTH_TRACK_CONFIGMAPS` 而不是只擋一個 track。
 
+**跨檔案的對照要走「Deployment 引用的名字 → ConfigMap 的 `metadata.name`」，不要靠檔名。**
+Deployment 不認識檔案，它引用的是 `volumes[config].configMap.name`。所以要拿 ConfigMap 的
+內容來推導 Deployment 應該長什麼樣時（探針路徑推自 `management.endpoints.web.base-path`，
+US-009 的 config-hash 推自 `data['application.yml']`），正確的做法是先把
+`TRACK_A_CONFIGMAPS` 每一份的 `metadata.name` 建成索引，再用 Deployment 讀到的名字去查。
+這樣 US-008 把 ConfigMap 拆成 `-stable` / `-canary` 之後，每一份 Deployment 會自動對到
+自己那一軌，檢查完全不用改。**推導的來源查不到時必須 FAIL**（印出「這個名字不在
+`TRACK_A_CONFIGMAPS` 裡」），不可以 skip —— 查不到就跳過等於改個名字就能讓檢查靜靜消失，
+那正是「永遠綠燈的檢查」的另一種長相。
+
 加完檢查一定要**反向測一次**：把該 key 改壞、跑一次確認真的 FAIL、再還原。
 一個永遠綠燈的檢查比沒有檢查更糟，因為它會讓人以為有防護。
 「某個字串不得出現在任何 manifest 裡」這類掃描檢查，一樣要解析 YAML 之後再看

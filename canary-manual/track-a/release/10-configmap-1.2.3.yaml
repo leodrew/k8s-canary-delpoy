@@ -240,3 +240,27 @@ data:
       endpoint:
         health:
           show-details: when-authorized
+          # 【US-007】打開 liveness / readiness 兩個獨立的 health group，
+          # Deployment 上的探針才有東西可以打：打開之後才會有
+          #   /gui_epmmFormQuery/actuator/health/liveness
+          #   /gui_epmmFormQuery/actuator/health/readiness
+          # 這兩個端點（路徑前綴跟著上面的 endpoints.web.base-path 走，
+          # 兩者是綁在一起的，validate.sh 的檢查 [7] 會拿它們互相對照）。
+          #
+          # Spring Boot 在偵測到自己跑在 Kubernetes 裡（KUBERNETES_SERVICE_HOST
+          # 這類環境變數）時會自動打開這個開關，所以「不寫也可能會動」。
+          # 即使如此還是要寫出來，兩個理由：
+          #   1. 那是隱式的環境偵測。換一種跑法（本機、docker run 做對照測試、
+          #      或未來換到別的 orchestrator）就沒有了，而症狀是探針 404 ——
+          #      錯誤訊息只會說路徑不存在，不會指向這一行。
+          #   2. US-006 之後是 replace 語意，jar 裡的 application.yml 完全不會被
+          #      載入，這份 ConfigMap 是這個環境設定的唯一真相。讀的人要能只看
+          #      這個檔案就知道那兩個端點存在（同附錄 C.3 的理由）。
+          #
+          # 為什麼一定要分成兩個群組（CANARY-COMPLETE.md 3.6）：liveness 只回答
+          # 「JVM 還活著嗎」，readiness 才把依賴算進去。三個探針共用同一個聚合端點
+          # 的話，Keycloak 或下游 API 抖一下 → readiness 掉的同時 liveness 也掉 →
+          # kubelet 直接【重啟】pod，把一次幾秒鐘的依賴故障放大成一次滾動重啟，
+          # 而重啟會清掉 in-memory 的 HttpSession（所有人被登出）。
+          probes:
+            enabled: true
