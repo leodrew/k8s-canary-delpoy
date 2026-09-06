@@ -283,10 +283,9 @@ assert_cm_key "app.canary.cookie-path" "/gui_epmmFormQuery"
 #   → 404。US-007 會把探針改成 health/liveness、health/readiness，更依賴這一行。
 assert_cm_key "management.endpoints.web.base-path" "/gui_epmmFormQuery/actuator"
 
-# user-name-attribute：這裡【刻意只檢查存在】。值的斷言是 US-004 的工作 —— 這份
-#   檔案現在還寫著 preferred_username，US-004 才會改成 sub 並在這裡把它釘死。先放
-#   一個存在檢查，是為了讓這個 key 不會在 US-004 動手之前就先被人整行刪掉。
-assert_cm_key "spring.security.oauth2.client.provider.keycloak.user-name-attribute"
+# user-name-attribute 不在這一段裡，它有自己的檢查 [4]。原因有兩個：它的斷言要
+#   同時涵蓋 track-a 與 track-b（TRACK_A_CONFIGMAPS 只有 track-a），而且它的失效
+#   模式特殊到值得一段專屬的錯誤訊息 —— 見底下檢查 [4]。
 
 # csp-policy 不能用 assert_cm_key 直接比對整串：附錄 A.2 與 3.5.1 都明說這條政策
 # 是會被改的（canary 那份可以先加一個新 origin 再回頭改 stable），把整串釘死等於
@@ -372,6 +371,95 @@ done
 # CanaryEvictionFilter 的 pass-through 三處讀取。值寫錯不是「退回預設」，而是三處
 # 對不上、逃生門安靜地失效 —— 而它存在的意義正好是「其他東西都壞了的時候」。
 assert_cm_key "app.canary.leave-path" "/gui_epmmFormQuery/canary/leave"
+
+# =============================================================================
+# 檢查 4：user-name-attribute 必須是 sub（track-a 與 track-b 兩份都要）
+# =============================================================================
+# 為什麼這一項要獨立成一段，而不是併進檢查 [3]：
+#
+#   1. 它的涵蓋範圍不一樣。上面 TRACK_A_CONFIGMAPS 裡的 key（附錄 C.1/C.2/C.3）
+#      是「track-a 的 ConfigMap 必須完整」這件事，track-b 不在這次的範圍內。
+#      但 preferred_username 這個回歸【兩份檔案裡都有】，所以這一項的斷言必須
+#      同時打到兩個 track —— 只修 track-a 的話，哪天有人從 track-b 複製設定過來，
+#      就把它原樣搬回來了。
+#
+#   2. 它的失效模式值得一段專屬的錯誤訊息。這個 key 的危險不是「漏掉」——
+#      Spring 自己的預設剛好就是 sub，漏掉反而是對的。危險的是有人【寫回】
+#      preferred_username（這兩份檔案上一版就是那樣）。所以底下的腳本會特別
+#      認出那個值，並且把「為什麼不行」整段印出來，而不是只說「值不對」。
+#
+# 這個回歸會造成什麼：
+#   user-name-attribute 決定 Authentication.getName() 回傳哪個 claim，而
+#   InMemoryOAuth2AuthorizedClientService 拿那個字串當 key 存 access / refresh
+#   token。OIDC 只保證 sub 穩定且唯一；Keycloak 的 preferred_username 可以被改、
+#   也可以在帳號刪除後回收給新人 —— 回收之後新的人算出同一個 key，會拿到前一個人
+#   的 token，然後以那個身分呼叫下游。這是 review F15 的結論，
+#   CANARY-COMPLETE.md 附錄 C.2 也把它列為「絕對不能寫成 preferred_username」。
+#
+# 為什麼不能只檢查 key 存在：存在檢查對這一項完全沒有防護力 ——
+#   preferred_username 是一個「存在而且有值」的合法設定，只是值是錯的。
+echo "== [4] user-name-attribute 必須是 sub（兩個 track）=="
+
+# 涵蓋兩個 track 的清單。刻意不跟 TRACK_A_CONFIGMAPS 合併：那個陣列的語意是
+# 「track-a 必須完整的那幾份 ConfigMap」，把 track-b 塞進去會讓附錄 C 的每一項
+# key 檢查都跑到 track-b 上，而 track-b 這次沒有被補齊，會噴出一整排假失敗。
+BOTH_TRACK_CONFIGMAPS=(
+  "canary-manual/track-a/release/10-configmap-1.2.3.yaml"
+  "canary-manual/track-b/release/10-configmap-1.2.3.yaml"
+)
+
+# 兩個 track 的 ConfigMap 檔名一模一樣（都叫 10-configmap-1.2.3.yaml），
+# 所以這裡不能用 basename 當檢查名稱 —— 兩行 PASS 會長得完全一樣，
+# 失敗時看不出是哪一份壞了。這個 helper 把 track 名字一起帶出來：
+#   canary-manual/track-a/release/10-configmap-1.2.3.yaml → track-a/10-configmap-1.2.3.yaml
+cm_label() {
+  printf '%s/%s' "$(basename "$(dirname "$(dirname "$1")")")" "$(basename "$1")"
+}
+
+USER_NAME_ATTRIBUTE_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file] = process.argv.slice(1);
+const KEY = "spring.security.oauth2.client.provider.keycloak.user-name-attribute";
+const cm = y.load(fs.readFileSync(file, "utf8"));
+const raw = cm && cm.data && cm.data["application.yml"];
+if (typeof raw !== "string") {
+  console.error(file + ": 沒有 data[\"application.yml\"]，這不是一份預期中的 ConfigMap");
+  process.exit(1);
+}
+const app = y.load(raw);
+let cur = app;
+for (const seg of KEY.split(".")) {
+  if (cur === null || typeof cur !== "object" || !(seg in cur)) {
+    console.error(file + ": 缺少 key  " + KEY);
+    console.error("  Spring 的預設剛好就是 sub，所以漏掉不會馬上壞 —— 但 US-006 之後是");
+    console.error("  replace 語意，這份 ConfigMap 是這個環境設定的唯一真相，而這一行的");
+    console.error("  存在本身就是給下一個人的說明（review F15）。請把它寫回來。");
+    process.exit(1);
+  }
+  cur = cur[seg];
+}
+if (cur === "preferred_username") {
+  console.error(file + ": user-name-attribute 又被寫回 preferred_username 了。");
+  console.error("  這是 review F15 明確禁止的值，不是風格問題：");
+  console.error("    Authentication.getName() 是 InMemoryOAuth2AuthorizedClientService");
+  console.error("    存 access / refresh token 用的 key。OIDC 只保證 sub 穩定且唯一；");
+  console.error("    Keycloak 的 preferred_username 可以被改、也可以在帳號刪除後回收給");
+  console.error("    新人 —— 回收之後新的人會算出同一個 key，拿到【前一個人的 token】。");
+  console.error("  正確的值是 sub。詳見 CANARY-COMPLETE.md 附錄 C.2 與該檔案裡的註解。");
+  process.exit(1);
+}
+if (cur !== "sub") {
+  console.error(file + ": user-name-attribute 的值不對");
+  console.error("  期望: sub");
+  console.error("  實際: " + JSON.stringify(cur));
+  process.exit(1);
+}
+'
+
+for cm in "${BOTH_TRACK_CONFIGMAPS[@]}"; do
+  check "user-name-attribute=sub ($(cm_label "$cm"))" \
+    node -e "$USER_NAME_ATTRIBUTE_SCRIPT" "$cm"
+done
 
 # --- 總結 --------------------------------------------------------------------
 echo

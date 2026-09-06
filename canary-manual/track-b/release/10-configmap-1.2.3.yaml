@@ -51,7 +51,13 @@ data:
             provider:
               keycloak:
                 issuer-uri: ${KEYCLOAK_ISSUER_URI}
-                user-name-attribute: preferred_username
+                # 【必須是 sub】完整說明在 track-a/release/10-configmap-1.2.3.yaml。
+                # 摘要：Authentication.getName() 是 InMemoryOAuth2AuthorizedClientService
+                # 的 key，而 OIDC 不保證 preferred_username 穩定或唯一 —— Keycloak 的
+                # 帳號名可以改、也可以被回收給新人，一旦回收，新的人會解析到前一個人的
+                # token（review F15）。Spring 的預設就是 sub，這一行寫出來是為了讓它
+                # 不會再被改掉。見 CANARY-COMPLETE.md 附錄 C.2。
+                user-name-attribute: sub
 
     app:
       context-prefix: /gui_epmmFormQuery

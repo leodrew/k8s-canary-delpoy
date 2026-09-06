@@ -43,6 +43,15 @@ bash scripts/validate.sh      # 或 npm run validate
 - **`TRACK_A_CONFIGMAPS`** —— ConfigMap 檔案清單。ConfigMap 拆成 `-stable` / `-canary`
   兩份之後，把新檔名加進這個陣列就好，所有既有的 key 檢查會自動對兩份都跑，
   不需要把檢查複製一遍。
+- **`BOTH_TRACK_CONFIGMAPS`** —— 涵蓋 track-a ＋ track-b 兩份 ConfigMap 的清單，
+  給「兩個 track 都有同一個回歸」的檢查用（目前是 `user-name-attribute`）。
+  刻意跟 `TRACK_A_CONFIGMAPS` 分開：後者的語意是「track-a 必須完整」，把 track-b
+  塞進去會讓附錄 C 的每一項 key 檢查都跑到 track-b 上，噴出一整排假失敗
+  —— track-b 這次沒有被補齊。
+- **`cm_label <檔案路徑>`** —— 兩個 track 的 ConfigMap 檔名一模一樣（都叫
+  `10-configmap-1.2.3.yaml`），所以跨 track 的檢查名稱不能用 `basename`：
+  兩行 PASS 會長得完全一樣，失敗時看不出是哪一份壞了。這個 helper 印出
+  `track-a/10-configmap-1.2.3.yaml`。
 - **`check "<名稱>" <指令> [參數...]`** —— 指令以參數陣列直接執行，**不經過 eval**，
   所以可以原樣傳一整段帶引號的 `node -e` 斷言進去。需要 pipeline 或 shell 語法時
   再明確包一層 `bash -c`。
