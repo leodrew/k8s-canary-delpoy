@@ -41,8 +41,24 @@ data:
                 authorization-grant-type: authorization_code
                 scope: [openid, profile, email]
                 client-name: Keycloak Login
+                # 【必要，缺了不會啟動失敗但登入一定壞】
+                # Spring 自己的預設是 {baseUrl}/login/oauth2/code/{registrationId} ——
+                # 【沒有 /gui_epmmFormQuery 前綴】。那個值跟 SecurityConfig 設定的
+                # redirectionEndpoint.baseUri 對不上，結果是 Keycloak 回 redirect_uri
+                # 不符、或是 callback 根本進不到 app，而且錯誤訊息不會指向這一行。
+                # 這一類「漏掉會靜默出錯」的 key 清單見 CANARY-COMPLETE.md 附錄 C.2。
+                redirect-uri: "{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}"
             provider:
               keycloak:
+                # 【必要，缺了 pod 起不來】無預設值。
+                # jar 裡的 application.yml 確實有這個 key，但它在 !test profile 的
+                # document 裡，而 US-006 之後 Deployment 用的是 SPRING_CONFIG_LOCATION
+                # （replace 語意）—— jar 那份【完全不會被載入】，所以沒有東西可以退回。
+                # 缺了這一行，OAuth2 client 在啟動階段就建不起來，log 會噴
+                #   Unable to resolve Configuration with the provided Issuer
+                # 這一行曾經從這份檔案裡被誤刪過（track-b 那份還在，見該檔第 53 行）。
+                # 見 CANARY-COMPLETE.md 3.1 與附錄 C.1。
+                issuer-uri: ${KEYCLOAK_ISSUER_URI}
                 # 【注意：與 BFF repo 的設定不一致】
                 # spring_oauth2_backend 的 application.yml 現在設的是
                 #   user-name-attribute: sub
@@ -60,6 +76,21 @@ data:
 
     app:
       context-prefix: /gui_epmmFormQuery
+
+      # 【必要，缺了 pod 起不來】後端讀的是
+      #   @Value("${app.post-logout-redirect-uri}")   ← 【沒有預設值】
+      # 所以這個 key 缺席不是「退回某個預設」，而是 Spring 在 bean 建立階段直接丟
+      #   Could not resolve placeholder 'app.post-logout-redirect-uri'
+      # → 啟動失敗、CrashLoopBackOff。
+      #
+      # 【注意 key 的路徑】正確的是 app.post-logout-redirect-uri（app.* 頂層），
+      # 不是底下那塊 app.sso.post-logout-redirect-uri —— 那是錯的 key 路徑，
+      # 後端沒有任何一行程式讀它，看起來有設定其實等於沒設定。
+      # （app.sso.* 整塊會在後續的清理裡移除，見 CANARY-COMPLETE.md 附錄 C.4。）
+      #
+      # 這裡的 ${...:預設} 是 Spring 的佔位語法：環境變數 POST_LOGOUT_REDIRECT_URI
+      # 沒設時，退回冒號後面那個字面值。見 CANARY-COMPLETE.md 3.5 與附錄 C.1。
+      post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}
 
       cors:
         allowed-origins: ${CORS_ALLOWED_ORIGINS:*}

@@ -27,6 +27,31 @@ bash scripts/validate.sh      # 或 npm run validate
 另一份 YAML 的 YAML。要先解析外層檔案、再解析那個字串、最後對物件下斷言。
 直接 grep 原始檔會被「被註解掉的行」騙過去（這些檔案裡有好幾處這種行），給出假的 PASS。
 
+## 擴充 `scripts/validate.sh` 的既有工具
+
+不要每加一個 key 就重寫一次「解析外層 → 解析內層 → 下斷言」的樣板。腳本裡已經有：
+
+- **`assert_cm_key <dotted.key.path> [期望值]`** —— 對 `TRACK_A_CONFIGMAPS` 陣列裡的
+  每一份 ConfigMap 各跑一次檢查。省略期望值時只檢查 key 存在。行為上有三種結果要分清楚：
+  key 沒寫 → 失敗；寫了 key 但沒有值（解析成 `null`）→ 失敗；寫成空字串 `""` → 通過
+  （`app.security.required-role` 就是刻意的空字串）。
+- **`TRACK_A_CONFIGMAPS`** —— ConfigMap 檔案清單。ConfigMap 拆成 `-stable` / `-canary`
+  兩份之後，把新檔名加進這個陣列就好，所有既有的 key 檢查會自動對兩份都跑，
+  不需要把檢查複製一遍。
+- **`check "<名稱>" <指令> [參數...]`** —— 指令以參數陣列直接執行，**不經過 eval**，
+  所以可以原樣傳一整段帶引號的 `node -e` 斷言進去。需要 pipeline 或 shell 語法時
+  再明確包一層 `bash -c`。
+
+新檢查加在腳本的 `# 之後的檢查加在這裡` 標記區段、總結區塊之前，開一個
+`== [n] 說明 ==` 區段並寫清楚「這個檢查在防什麼」。
+
+**盡量比對「值」而不只是「key 存在」。** 這個 repo 最危險的一類錯誤是「key 被刪掉之後
+Spring 用自己的預設值頂上」—— 設定看起來還在，行為已經變了。`redirect-uri` 就是標準
+案例：少了 `/gui_epmmFormQuery` 前綴，登入 callback 進不來，而錯誤訊息不會指向 ConfigMap。
+
+加完檢查一定要**反向測一次**：把該 key 改壞、跑一次確認真的 FAIL、再還原。
+一個永遠綠燈的檢查比沒有檢查更糟，因為它會讓人以為有防護。
+
 ## 工具限制
 
 這台機器上只有 node / npm。**沒有** kubectl、**沒有** yq、**沒有**可用的 python
@@ -35,6 +60,10 @@ bash scripts/validate.sh      # 或 npm run validate
 YAML 一律用本地的 `node_modules/.bin/js-yaml` 解析，不要用 `npx --yes js-yaml`：
 後者每次執行都要連網，斷網就整個閘門失效，那就不叫閘門了。
 需要雜湊時用 `node -e` 搭配 `require('crypto')`，不要假設 `sha256sum` 在 Git Bash 下存在。
+
+**node 是 Windows 執行檔，Git Bash 的 `/tmp` 它看不到** —— node 會把 `/tmp/x` 解讀成
+`C:\tmp\x`，於是 shell 那邊寫出去的暫存檔在 node 這邊是 `ENOENT`（實測過）。
+要在 shell 與 node 之間傳檔案，用 repo 內的相對路徑，用完刪掉。
 
 ## 範圍
 

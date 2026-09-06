@@ -111,6 +111,106 @@ done < <(find canary-manual/track-a canary-manual/track-b -type f -name '*.yaml'
 #     直接 grep 原始檔會被「被註解掉的行」騙過去（這些檔案裡有好幾處），
 #     給出假的 PASS。
 
+# =============================================================================
+# 檢查 2：ConfigMap 必備 key（CANARY-COMPLETE.md 附錄 C.1）
+# =============================================================================
+# 為什麼要有這一項：
+#   US-006 之後 Deployment 會改用 SPRING_CONFIG_LOCATION，那是 **replace** 語意 ——
+#   jar 裡的 application.yml 完全不會被載入。所以 ConfigMap 漏掉的每一個 key，
+#   都不是「退回 jar 裡的設定」，而是退回 Java 的 @Value 預設值；沒有預設值的
+#   那幾個則是直接讓 pod 起不來，而且錯誤訊息不會指向 ConfigMap。
+#
+#   這一段釘住的是附錄 C.1 裡「漏掉 pod 就起不來」的那幾個 key。它們曾經真的
+#   從這份檔案裡消失過（issuer-uri 就被誤刪過一次，track-b 那份還留著），
+#   而在沒有這個檢查之前，那種刪除要等到 kubectl apply、Pod 進 CrashLoopBackOff
+#   才會被發現。
+#
+# 為什麼比對「值」而不只是「存在」：
+#   redirect-uri 最典型 —— 把它刪掉，Spring 會用自己的預設值頂上，key 看起來
+#   還是「有設定」，但少了 /gui_epmmFormQuery 前綴，登入 callback 就進不來。
+#   這一類錯誤只有比對實際值才抓得到。
+#   值改了就要連這裡一起改，這是刻意的：這份 ConfigMap 是環境設定的唯一真相。
+echo "== [2] ConfigMap 必備 key（附錄 C.1：漏掉 pod 起不來）=="
+
+# 之後 US-008 會把 track-a 的 ConfigMap 拆成 -stable / -canary 兩份。
+# 到時候只要把新檔名加進這個陣列，底下每一項 key 檢查就會自動對兩份各跑一次，
+# 不需要把檢查複製貼上一遍。
+TRACK_A_CONFIGMAPS=(
+  "canary-manual/track-a/release/10-configmap-1.2.3.yaml"
+)
+
+# 共用的斷言腳本。用法：
+#   node -e "$CM_KEY_SCRIPT" <configmap 檔> <dotted.key.path> [期望值]
+#
+# 它做的事情正是這個 repo 的規則：先解析外層 ConfigMap，再把
+# data["application.yml"] 這個「字串形式的 YAML」解析成物件，最後對物件下斷言。
+# 不要改成 grep 原始檔 —— 這些檔案裡有好幾段被註解掉的設定，grep 會給出假的 PASS。
+#
+# 省略「期望值」時只檢查 key 存在。注意兩者的差別：
+#   key 完全沒寫       → 路徑走不到，失敗
+#   寫了 key 但沒有值  → 解析成 null，也算失敗（`issuer-uri:` 後面空白就是這種）
+#   寫成空字串 ""      → 通過（app.security.required-role 就是刻意的空字串）
+CM_KEY_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file, keyPath, expected] = process.argv.slice(1);
+const cm = y.load(fs.readFileSync(file, "utf8"));
+const raw = cm && cm.data && cm.data["application.yml"];
+if (typeof raw !== "string") {
+  console.error(file + ": 沒有 data[\"application.yml\"]，這不是一份預期中的 ConfigMap");
+  process.exit(1);
+}
+const app = y.load(raw);
+let cur = app;
+for (const seg of keyPath.split(".")) {
+  if (cur === null || typeof cur !== "object" || !(seg in cur)) {
+    console.error(file + ": 缺少 key  " + keyPath);
+    process.exit(1);
+  }
+  cur = cur[seg];
+}
+if (cur === null) {
+  console.error(file + ": key " + keyPath + " 有寫但沒有值（解析成 null）");
+  process.exit(1);
+}
+if (expected !== undefined && String(cur) !== expected) {
+  console.error(file + ": key " + keyPath + " 的值不對");
+  console.error("  期望: " + expected);
+  console.error("  實際: " + String(cur));
+  process.exit(1);
+}
+'
+
+# 用法：assert_cm_key <dotted.key.path> [期望值]
+# 對 TRACK_A_CONFIGMAPS 裡的每一份 ConfigMap 各跑一次。
+assert_cm_key() {
+  local key="$1"
+  shift
+  local cm
+  for cm in "${TRACK_A_CONFIGMAPS[@]}"; do
+    check "cm-key $key ($(basename "$cm"))" node -e "$CM_KEY_SCRIPT" "$cm" "$key" "$@"
+  done
+}
+
+# --- 附錄 C.1：這三個漏掉 pod 直接起不來 -------------------------------------
+# issuer-uri：無預設值。jar 裡那份在 !test profile 的 document，replace 語意下
+#   不會被載入，所以沒有東西可以退回 → OAuth2 client 建不起來，啟動失敗。
+assert_cm_key "spring.security.oauth2.client.provider.keycloak.issuer-uri" \
+  '${KEYCLOAK_ISSUER_URI}'
+
+# post-logout-redirect-uri：後端是 @Value("${app.post-logout-redirect-uri}")，
+#   【沒有預設值】→ Could not resolve placeholder → 啟動失敗。
+#   注意這裡釘的是 app.* 頂層的 key；app.sso.post-logout-redirect-uri 是錯的
+#   key 路徑，沒有任何程式讀它，所以那個路徑存在與否都救不了這個檢查。
+assert_cm_key "app.post-logout-redirect-uri" \
+  '${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}'
+
+# redirect-uri：Spring 有預設值，所以缺了不會啟動失敗 —— 它會安靜地變成
+#   {baseUrl}/login/oauth2/code/{registrationId}（沒有 /gui_epmmFormQuery 前綴），
+#   跟 redirectionEndpoint.baseUri 對不上，登入 callback 進不來。
+#   這就是為什麼這一項一定要比對完整的值，光檢查 key 存在沒有意義。
+assert_cm_key "spring.security.oauth2.client.registration.keycloak.redirect-uri" \
+  '{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}'
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then
