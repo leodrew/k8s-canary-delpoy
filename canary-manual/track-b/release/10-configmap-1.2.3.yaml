@@ -51,7 +51,7 @@ data:
             provider:
               keycloak:
                 issuer-uri: ${KEYCLOAK_ISSUER_URI}
-                # 【必須是 sub】完整說明在 track-a/release/10-configmap-1.2.3.yaml。
+                # 【必須是 sub】完整說明在 track-a/release/10-configmap-stable.yaml。
                 # 摘要：Authentication.getName() 是 InMemoryOAuth2AuthorizedClientService
                 # 的 key，而 OIDC 不保證 preferred_username 穩定或唯一 —— Keycloak 的
                 # 帳號名可以改、也可以被回收給新人，一旦回收，新的人會解析到前一個人的
@@ -63,7 +63,7 @@ data:
       context-prefix: /gui_epmmFormQuery
 
       # 【這裡原本有 app.cors.* / app.sso.* / app.test-endpoints.* 三塊，都刪掉了】
-      # 完整說明在 track-a/release/10-configmap-1.2.3.yaml 的同一個位置。摘要：
+      # 完整說明在 track-a/release/10-configmap-stable.yaml 的同一個位置。摘要：
       # 後端沒有任何一行程式讀這三塊（CANARY-COMPLETE.md 附錄 C.4）。要找 CORS
       # 設定的人請看附錄 A —— BFF 是同源架構，SecurityConfig 刻意只留一行
       # // No .cors()（review F4），該回 Access-Control-Allow-Origin 的是對方的

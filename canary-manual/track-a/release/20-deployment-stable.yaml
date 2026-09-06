@@ -38,8 +38,17 @@ spec:
         app: pmc-epmmformquerygui
         version: stable          # Service 用 app 選中；DestinationRule 用 version 分 subset
       annotations:
-        # 改 ConfigMap 版本時這個值要跟著改，才會觸發滾動更新
-        config-version: "1.2.3"                  # 改 ConfigMap 版本會改動 template → 觸發滾動更新
+        # 【這個 annotation 已經失效了，US-009 會把它換成 config-hash】
+        # 它原本的作用是「改 ConfigMap 版本 → 改這個值 → pod template 變了 →
+        # 觸發滾動更新」。但 ConfigMap 的名稱現在固定成 ...-config-stable，
+        # 改設定不再會改到版本號，於是這一行變成一個永遠不動的常數：
+        # 改了設定內容、apply 了，pod template 沒變 → 沒有任何 pod 重啟 →
+        # Spring 只在啟動時讀一次設定檔，所以【設定 apply 了卻沒有生效】，
+        # 而且沒有任何錯誤訊息，kubectl get 也看不出異常。
+        # 正解是改成 ConfigMap data 內容的 sha256 前 8 碼、由
+        # scripts/sync-config-hash.sh 回寫（CANARY-COMPLETE.md 2.2 / 3.6）。
+        # 在那之前，改完設定要自己 kubectl rollout restart。
+        config-version: "1.2.3"
         # 確保 sidecar 先就緒再啟動 app，避免啟動瞬間的連線失敗
         proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
     spec:
@@ -219,7 +228,19 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
+            # 固定名稱、不帶版本號，而且是【stable 專屬】的那一份
+            # （canary 掛的是 ...-config-canary，兩軌不再共用同一份設定）。
+            #
+            # 這裡認的是 ConfigMap 的 metadata.name，不是檔名 —— 對應的檔案是
+            # release/10-configmap-stable.yaml，兩邊必須一字不差。名字對不上時
+            # kubelet 不會說「設定錯了」，而是讓 pod 停在 ContainerCreating
+            # （FailedMount），而 maxUnavailable: 0 會讓滾動更新就這樣卡住。
+            #
+            # 這個 volume 刻意【沒有】optional: true（跟底下的 canary-pilot 相反）：
+            # 設定檔沒掛上就啟動，等於用 SPRING_CONFIG_LOCATION 指向一個不存在的
+            # 路徑跑正式流量 —— 那是 CrashLoopBackOff，而卡在 ContainerCreating
+            # 至少舊 pod 還活著。
+            name: pmc-epmmformquery-config-stable
         - name: tmp
           emptyDir: {}
         - name: canary-pilot

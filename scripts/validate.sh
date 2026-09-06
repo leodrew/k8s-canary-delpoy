@@ -150,11 +150,13 @@ done < <(find canary-manual/track-a canary-manual/track-b -type f -name '*.yaml'
 #   值改了就要連這裡一起改，這是刻意的：這份 ConfigMap 是環境設定的唯一真相。
 echo "== [2] ConfigMap 必備 key（附錄 C.1：漏掉 pod 起不來）=="
 
-# 之後 US-008 會把 track-a 的 ConfigMap 拆成 -stable / -canary 兩份。
-# 到時候只要把新檔名加進這個陣列，底下每一項 key 檢查就會自動對兩份各跑一次，
-# 不需要把檢查複製貼上一遍。
+# track-a 的 ConfigMap（US-008 之後是 -stable / -canary 兩份）。
+# 底下每一項 key 檢查都對這個陣列裡的【每一份】各跑一次 —— 拆檔案時只要把新檔名
+# 加進來，附錄 C 的所有 key 檢查就自動涵蓋兩份，不需要把檢查複製貼上一遍。
+# 反過來說：忘記加，就是無聲地少檢查一整份 ConfigMap。
 TRACK_A_CONFIGMAPS=(
-  "canary-manual/track-a/release/10-configmap-1.2.3.yaml"
+  "canary-manual/track-a/release/10-configmap-stable.yaml"
+  "canary-manual/track-a/release/11-configmap-canary.yaml"
 )
 
 # 共用的斷言腳本。用法：
@@ -400,18 +402,24 @@ assert_cm_key "app.canary.leave-path" "/gui_epmmFormQuery/canary/leave"
 #   preferred_username 是一個「存在而且有值」的合法設定，只是值是錯的。
 echo "== [4] user-name-attribute 必須是 sub（兩個 track）=="
 
-# 涵蓋兩個 track 的清單。刻意不跟 TRACK_A_CONFIGMAPS 合併：那個陣列的語意是
+# 涵蓋兩個 track 的清單 —— US-008 之後是三份：track-a 的 -stable / -canary
+# 加上 track-b 那一份。刻意不跟 TRACK_A_CONFIGMAPS 合併：那個陣列的語意是
 # 「track-a 必須完整的那幾份 ConfigMap」，把 track-b 塞進去會讓附錄 C 的每一項
 # key 檢查都跑到 track-b 上，而 track-b 這次沒有被補齊，會噴出一整排假失敗。
+# 新增 track-a 的 ConfigMap 時【兩個陣列都要加】：漏掉 TRACK_A_CONFIGMAPS 會少掉
+# 附錄 C 的 key 檢查，漏掉這個陣列則會少掉「不得寫回 preferred_username」和
+# 「死設定不得復活」—— 兩種都是無聲地少檢查一整份檔案。
 BOTH_TRACK_CONFIGMAPS=(
-  "canary-manual/track-a/release/10-configmap-1.2.3.yaml"
+  "canary-manual/track-a/release/10-configmap-stable.yaml"
+  "canary-manual/track-a/release/11-configmap-canary.yaml"
   "canary-manual/track-b/release/10-configmap-1.2.3.yaml"
 )
 
-# 兩個 track 的 ConfigMap 檔名一模一樣（都叫 10-configmap-1.2.3.yaml），
-# 所以這裡不能用 basename 當檢查名稱 —— 兩行 PASS 會長得完全一樣，
-# 失敗時看不出是哪一份壞了。這個 helper 把 track 名字一起帶出來：
-#   canary-manual/track-a/release/10-configmap-1.2.3.yaml → track-a/10-configmap-1.2.3.yaml
+# 檢查名稱要帶上 track，不能只用 basename。US-008 把 track-a 那份改名成
+# 10-configmap-stable.yaml 之後檔名不再撞（track-b 那份還叫 10-configmap-1.2.3.yaml），
+# 但「哪一軌」仍然是讀 FAIL 訊息時第一個要知道的事，而且 track-b 哪天照附錄 C
+# 補齊、跟著改名成 -stable 的話就又撞回去了。這個 helper 把 track 名字帶出來：
+#   canary-manual/track-a/release/10-configmap-stable.yaml → track-a/10-configmap-stable.yaml
 cm_label() {
   printf '%s/%s' "$(basename "$(dirname "$(dirname "$1")")")" "$(basename "$1")"
 }
@@ -862,6 +870,231 @@ process.exit(failed ? 1 : 0);
 for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
   check "probe-paths $(basename "$dep")" \
     node -e "$PROBE_PATHS_SCRIPT" "$dep" "${TRACK_A_CONFIGMAPS[@]}"
+done
+
+# =============================================================================
+# 檢查 8：ConfigMap 拆成 -stable / -canary 之後的四件事
+# =============================================================================
+# 為什麼要有這一項：
+#   US-008 把「一份共用、名稱帶版本號、immutable」的 ConfigMap 換成「每軌一份、
+#   名稱固定、可覆寫」。這個換法解掉了三個問題（CANARY-COMPLETE.md 2.1 / 2.2），
+#   但也開了四個新的失效方式，而且四個都不會產生指向真正原因的錯誤訊息：
+#
+#     1. immutable: true 長回來。名稱固定代表這個物件會被反覆 apply 覆寫，
+#        而 immutable 的 ConfigMap 連 data 都不能改 —— kubectl apply 直接以
+#        "field is immutable" 失敗。它失敗的時間點是【發布當下】，而唯一的出路
+#        是先 delete 再 create：那個空窗期裡任何一個掛著它的 pod 只要重啟，
+#        就會卡在 ContainerCreating。
+#     2. 名稱又帶上版本號。那會把「三處版本號人工同步」整套問題帶回來，
+#        而且跟 cleanup 互咬：cleanup 只留 3 份舊 ConfigMap，回滾深度超過 3 版時
+#        那一份已經被刪掉 → pod 卡在 ContainerCreating，回不去。
+#     3. 兩份的 data 開始漂移。拆檔案這個動作本身不該引進任何設定差異；
+#        允許分歧的 key 只有 3.5.1 那幾個，而且必須是刻意的動作。
+#     4. Deployment 掛到【別軌】的那一份。這是四個裡最安靜的一個：pod 正常起來、
+#        探針正常綠燈，只是讀著另一軌的設定 —— 症狀是「改了 canary 的設定卻沒有
+#        生效」，而拆成兩份的意義整個消失。
+#
+# 為什麼第 4 項用推導而不是各自釘一個常數：
+#   Deployment 引用的是 ConfigMap 的 metadata.name（不是檔名），而「該掛哪一份」
+#   由這份 Deployment 自己的 version label 決定。所以底下的做法是：從 Deployment
+#   讀出 version（stable / canary）→ 推出它該掛哪一軌 → 用 configMap.name 去
+#   TRACK_A_CONFIGMAPS 建的索引裡查 → 比對那份 ConfigMap 的 labels.track。
+#   任何一邊被單獨改動都會 FAIL，跟檢查 [6]（env ↔ mountPath）和檢查 [7]
+#   （探針 ↔ base-path）是同一個手法。查不到名字時【必須 FAIL】而不是 skip ——
+#   查不到就跳過，等於改個名字就能讓這個檢查靜靜消失。
+echo "== [8] ConfigMap 拆軌：固定名稱、可覆寫、兩份相同、各掛各的 =="
+
+# --- 8a. 兩份檔案都要在 ------------------------------------------------------
+# 底下所有斷言（以及檢查 [2]/[3] 的每一個 key）都靠這兩個檔案存在。檔案不見時
+# js-yaml 會噴 ENOENT，那也算 FAIL —— 但那是一整串堆疊，不如在這裡先明講
+# 「這一份不見了」。改檔名時漏改 TRACK_A_CONFIGMAPS 也是撞這一項。
+for cm in "${TRACK_A_CONFIGMAPS[@]}"; do
+  check "cm-exists $(cm_label "$cm")" test -f "$cm"
+done
+
+# --- 8b. 結構：沒有 immutable、名稱不帶版本號、track label 對得上名稱 --------
+CONFIGMAP_SPLIT_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file] = process.argv.slice(1);
+const cm = y.load(fs.readFileSync(file, "utf8"));
+if (!cm || cm.kind !== "ConfigMap" || !cm.metadata) {
+  console.error(file + ": 這不是一份 ConfigMap");
+  process.exit(1);
+}
+let failed = false;
+
+if ("immutable" in cm) {
+  console.error(file + ": 又出現 immutable 了（值：" + JSON.stringify(cm.immutable) + "）。");
+  console.error("  這份 ConfigMap 的名稱是【固定】的，代表它會被同一個名字反覆 apply 覆寫，");
+  console.error("  而 immutable 的 ConfigMap 建立之後連 data 都不能改 —— kubectl apply 會");
+  console.error("  直接以 field is immutable 失敗。那不是設定錯誤，是【發布當下】才會炸出");
+  console.error("  來的失敗，而唯一的出路是先 delete 再 create：那個空窗期裡任何一個掛著");
+  console.error("  它的 pod 只要重啟，就會卡在 ContainerCreating。");
+  console.error("  固定名稱與 immutable 不能並存。見 CANARY-COMPLETE.md 2.2。");
+  failed = true;
+}
+
+const name = cm.metadata.name;
+if (typeof name !== "string" || !name) {
+  console.error(file + ": 沒有 metadata.name");
+  process.exit(1);
+}
+if (/[0-9]+\.[0-9]+\.[0-9]+/.test(name)) {
+  console.error(file + ": metadata.name 又帶上版本號了（" + name + "）。");
+  console.error("  版本號只能出現在一個地方：container 的 image tag。ConfigMap 名稱帶版本號");
+  console.error("  代表每次發布都要人工同步三處（image、volumes[config].configMap.name、");
+  console.error("  pod template 的 annotation），漏改一處就是【新版程式配到舊版設定】，");
+  console.error("  而那件事不會報錯。而且版本化命名跟 cleanup 互咬：只留 3 份舊 ConfigMap，");
+  console.error("  回滾深度超過 3 版時那一份已經被刪掉 → pod 卡在 ContainerCreating。");
+  console.error("  正確的名稱是 pmc-epmmformquery-config-stable / -canary。見第 2 章與 3.5。");
+  failed = true;
+}
+
+const labels = cm.metadata.labels || {};
+if ("config-version" in labels) {
+  console.error(file + ": labels 裡又出現 config-version（" + JSON.stringify(labels["config-version"]) + "）。");
+  console.error("  名稱都不帶版本號了，label 還帶著只會讓人以為版本化那一套還在。");
+  console.error("  這裡要的維度是 track（kubectl get cm -l track=canary）。見 3.5.1。");
+  failed = true;
+}
+const track = labels.track;
+if (track !== "stable" && track !== "canary") {
+  console.error(file + ": labels.track 必須是 stable 或 canary，實際是 " + JSON.stringify(track));
+  console.error("  這是「這份設定屬於哪一軌」的唯一標記，而 Deployment 有沒有掛對，");
+  console.error("  底下 8d 就是拿它來比對的。");
+  failed = true;
+} else if (!name.endsWith("-config-" + track)) {
+  console.error(file + ": metadata.name 與 labels.track 對不上");
+  console.error("  name  = " + name);
+  console.error("  track = " + track + " → name 應該以 -config-" + track + " 結尾");
+  console.error("  兩者不一致時，kubectl get cm -l track=... 撈到的東西會跟 Deployment");
+  console.error("  實際掛的那一份不同 —— 而那正是查「改了設定卻沒生效」時會用的指令。");
+  failed = true;
+}
+process.exit(failed ? 1 : 0);
+'
+
+for cm in "${TRACK_A_CONFIGMAPS[@]}"; do
+  check "cm-split-shape $(cm_label "$cm")" node -e "$CONFIGMAP_SPLIT_SCRIPT" "$cm"
+done
+
+# --- 8c. 兩份的 data["application.yml"] 必須逐字相同 -------------------------
+# 拆檔案本身不該引進任何設定差異：引進了的話，之後 canary 行為跟 stable 不一樣時
+# 會同時有兩個嫌疑犯（拆檔案、改設定），而 canary 的問題本來就比較難重現 ——
+# 只有 pilot 使用者打得到，重現一次的成本高得多。
+#
+# 這條斷言【預期會有壽命】：canary 遲早要分歧（3.5.1 允許 csp-policy、
+# downstream/third-party base-url、logging.level 不同）。那一天要做的是把它改成
+# 「只有那幾個 key 可以不同」，不是整段刪掉 —— 刪掉之後兩份會開始無聲漂移，
+# 而 promote（把 canary 的 data 整段複製進 stable）會把不該帶過去的東西一起帶過去。
+CONFIGMAP_IDENTICAL_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const files = process.argv.slice(1);
+const read = f => {
+  const cm = y.load(fs.readFileSync(f, "utf8"));
+  const raw = cm && cm.data && cm.data["application.yml"];
+  if (typeof raw !== "string") {
+    console.error(f + ": 沒有 data[application.yml]，這不是一份預期中的 ConfigMap");
+    process.exit(1);
+  }
+  return raw;
+};
+const [a, b] = files.map(read);
+if (a === b) process.exit(0);
+
+const la = a.split("\n"), lb = b.split("\n");
+let i = 0;
+while (i < la.length && i < lb.length && la[i] === lb[i]) i++;
+console.error("兩份 ConfigMap 的 data[application.yml] 不一樣了：");
+console.error("  " + files[0]);
+console.error("  " + files[1]);
+console.error("  第一個不同的地方在第 " + (i + 1) + " 行：");
+console.error("    A: " + JSON.stringify(la[i] === undefined ? null : la[i]));
+console.error("    B: " + JSON.stringify(lb[i] === undefined ? null : lb[i]));
+console.error("  拆檔案本身不該引進設定差異。如果這是【刻意】要讓 canary 分歧：");
+console.error("    可以分歧的 key 只有 app.security.csp-policy、app.downstream.base-url、");
+console.error("    app.third-party.base-url、logging.level.*（CANARY-COMPLETE.md 3.5.1），");
+console.error("    而且要把這條斷言改成「只有那幾個 key 可以不同」，不要整段刪掉。");
+process.exit(1);
+'
+
+check "cm-data-identical stable==canary" \
+  node -e "$CONFIGMAP_IDENTICAL_SCRIPT" "${TRACK_A_CONFIGMAPS[@]}"
+
+# --- 8d. 每一份 Deployment 要掛【自己那一軌】的 ConfigMap --------------------
+DEPLOYMENT_TRACK_CONFIGMAP_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file, ...cmFiles] = process.argv.slice(1);
+
+function collect(node, key, out) {
+  if (Array.isArray(node)) { for (const v of node) collect(v, key, out); return out; }
+  if (node && typeof node === "object") {
+    for (const k of Object.keys(node)) {
+      if (k === key) out.push(node[k]);
+      collect(node[k], key, out);
+    }
+  }
+  return out;
+}
+
+// ConfigMap 索引：metadata.name -> { file, track }。
+// Deployment 認的是名字不是檔名，所以一定要先建這個索引才對得起來（同檢查 [7]）。
+const byName = new Map();
+for (const f of cmFiles) {
+  const cm = y.load(fs.readFileSync(f, "utf8"));
+  if (!cm || !cm.metadata || !cm.metadata.name) continue;
+  byName.set(cm.metadata.name, { file: f, track: (cm.metadata.labels || {}).track });
+}
+
+const docs = y.loadAll(fs.readFileSync(file, "utf8")).filter(Boolean);
+const dep = docs.find(d => d && d.kind === "Deployment");
+if (!dep) {
+  console.error(file + ": 找不到 Deployment");
+  process.exit(1);
+}
+
+// 這份 Deployment 屬於哪一軌，是 pod template 的 version label 說了算 ——
+// 那也是 DestinationRule 分 subset 的依據，所以它是全 repo 對「軌」最權威的來源。
+const tmplLabels = (dep.spec && dep.spec.template && dep.spec.template.metadata &&
+  dep.spec.template.metadata.labels) || {};
+const track = tmplLabels.version;
+if (track !== "stable" && track !== "canary") {
+  console.error(file + ": pod template 的 version label 不是 stable/canary（" + JSON.stringify(track) + "）");
+  console.error("  那個 label 是 DestinationRule 分 subset 的依據，也是這裡推導「該掛哪一份");
+  console.error("  ConfigMap」的來源。推導不出來就不能放行 —— 跳過等於這個檢查消失。");
+  process.exit(1);
+}
+
+const volumes = [].concat(...collect(dep, "volumes", []));
+const cfgVol = volumes.find(v => v && v.name === "config");
+if (!cfgVol || !cfgVol.configMap || !cfgVol.configMap.name) {
+  console.error(file + ": 找不到名為 config 的 volume（或它不是 configMap）");
+  process.exit(1);
+}
+const cmName = cfgVol.configMap.name;
+const entry = byName.get(cmName);
+if (!entry) {
+  console.error(file + ": 它掛的 ConfigMap 叫 " + cmName + "，但那個名字不在已知的");
+  console.error("  track-a ConfigMap 清單裡（validate.sh 的 TRACK_A_CONFIGMAPS）。");
+  console.error("  沒有對應檔案的名字，代表 apply 之後叢集裡不會有這個物件 →");
+  console.error("  pod 卡在 ContainerCreating（FailedMount）。改名字時兩邊要一起改。");
+  process.exit(1);
+}
+if (entry.track !== track) {
+  console.error(file + ": 這是 " + track + " 那一軌的 Deployment，卻掛了 " + entry.track + " 的 ConfigMap");
+  console.error("  掛的是 " + cmName + "（" + entry.file + "）");
+  console.error("  應該掛 labels.track = " + track + " 的那一份。");
+  console.error("  這個錯【不會有任何錯誤訊息】：pod 正常起來、探針正常綠燈，只是讀著另一軌");
+  console.error("  的設定 —— 症狀是「改了 canary 的 CSP / downstream base-url 卻沒有生效」，");
+  console.error("  而拆成兩份 ConfigMap 的意義整個消失。見 CANARY-COMPLETE.md 2.1 / 3.5.1。");
+  process.exit(1);
+}
+process.exit(0);
+'
+
+for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
+  check "deployment-own-track-configmap $(basename "$dep")" \
+    node -e "$DEPLOYMENT_TRACK_CONFIGMAP_SCRIPT" "$dep" "${TRACK_A_CONFIGMAPS[@]}"
 done
 
 # --- 總結 --------------------------------------------------------------------

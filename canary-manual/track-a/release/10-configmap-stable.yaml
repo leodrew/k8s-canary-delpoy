@@ -1,0 +1,306 @@
+# =============================================================================
+# Track A — STABLE 的應用設定 ConfigMap（固定名稱，不帶版本號）
+#
+# 這份檔案原本叫 10-configmap-1.2.3.yaml，物件名稱是 ...-config-1.2.3，
+# 而且【兩軌共用同一份】。現在拆成兩份、名稱固定：
+#
+#   10-configmap-stable.yaml → pmc-epmmformquery-config-stable（本檔，stable 掛）
+#   11-configmap-canary.yaml → pmc-epmmformquery-config-canary（canary 掛）
+#
+# 【為什麼要拆成兩份】共用一份的時候，canary 想多加一個 CSP connect-src origin、
+#   或想把 app.downstream.base-url 指到 canary 後端，都必須改到 stable 也在讀的
+#   那一份 —— 於是「只想動 canary」變成「連正式流量的 pod 一起滾動更新」。
+#   canary 這一軌存在的意義就是「先讓少數人踩」，而共用設定讓它做不到這件事。
+#   見 CANARY-COMPLETE.md 2.1。
+#
+# 【為什麼名稱不再帶版本號】舊做法有三處版本號要人工同步（image tag、
+#   Deployment 的 volumes[config].configMap.name、pod template 的 config-version
+#   annotation），少改一處就是「新版程式配到舊版設定」，而那件事不會報錯。
+#   更糟的是版本化命名跟 cleanup 會互咬：canary.sh cleanup 預設只留 3 份舊
+#   ConfigMap，回滾深度超過 3 版時那份 ConfigMap 已經被刪掉 → pod 卡在
+#   ContainerCreating，你就回不去了。名稱固定之後，整個 repo 只剩 image tag
+#   一處帶版本號。見 CANARY-COMPLETE.md 第 2 章。
+#
+# 【為什麼沒有 immutable: true】名稱固定代表這個物件會被反覆 apply 覆寫，而
+#   immutable 的 ConfigMap 建立後連 data 都不能改 —— kubectl apply 會直接以
+#   "field is immutable" 失敗，唯一的路是先 delete 再 create，而那個空窗期裡
+#   任何一個掛著它的 pod 只要重啟就會卡在 ContainerCreating。固定名稱與
+#   immutable 不能並存，這裡拿掉的是 immutable。見 CANARY-COMPLETE.md 2.2。
+#
+# 【拿掉 immutable 換來的代價，以及補回來的三條規則】設定不再是「一版一份、
+#   建立後永不變動」，所以 kubectl rollout undo 不再能回滾設定：它還原的是
+#   pod template（含當時的 config-hash annotation），但 ConfigMap 的內容已經
+#   是新的了 —— pod 帶著舊 annotation 重啟、掛到【新】設定，形成沒有任何錯誤
+#   訊息的 code/config 錯配。補回來的方式（CANARY-COMPLETE.md 2.2）：
+#     1. ConfigMap 與 Deployment 的改動【必須在同一個 commit】，回滾一律是
+#        git revert 那個 commit 之後重跑 apply，不是 rollout undo。
+#     2. kubectl rollout undo 列入禁止動作，跟 replicas: 0 並列（第 8 章）。
+#     3. pod template 的 config-hash annotation 由 scripts/sync-config-hash.sh
+#        依 data 的內容算出來回寫，內容變 → hash 變 → 觸發滾動更新。
+#        那是 US-009 的工作；在它完成之前，改了這份檔案的內容【不會】自動
+#        重啟 pod，要自己 kubectl rollout restart。
+#
+# 【這份與 11-configmap-canary.yaml 的關係】除了 metadata.name 與 labels.track
+#   之外，data 區塊目前【逐字相同】，而且 scripts/validate.sh 有一條斷言在比對
+#   兩者的 data["application.yml"] 是不是一模一樣。讓 canary 分歧是一個【刻意的
+#   動作】—— 可以分歧的 key 只有 CANARY-COMPLETE.md 3.5.1 列的那幾個
+#   （csp-policy、downstream/third-party base-url、logging.level）。真的要分歧時，
+#   連同那條斷言一起改成「只有那幾個 key 可以不同」，不要把斷言刪掉：promote 的
+#   做法是把 canary 那份的 data 整段複製進這一份，差異越少越不容易複製錯。
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # 固定名稱，不帶版本號。Deployment 的 volumes[config].configMap.name 認的是
+  # 這個字串（不是檔名），兩邊對不上時 kubelet 不會說「設定錯了」，而是讓 pod
+  # 卡在 ContainerCreating。validate.sh 會拿 Deployment 讀到的名字回頭對這一行。
+  name: pmc-epmmformquery-config-stable
+  namespace: ea-pmc
+  labels:
+    app: pmc-epmmformquerygui
+    # 原本這裡是 config-version: "1.2.3"。名稱與 label 都不再帶版本號 ——
+    # 真正需要的維度是「這是哪一軌的設定」：kubectl get cm -l track=canary
+    # 一眼就能確認 canary 掛的是哪一份，而版本號現在只存在於 image tag。
+    track: stable
+data:
+  application.yml: |
+    server:
+      port: 8080
+      forward-headers-strategy: framework
+      servlet:
+        session:
+          # 【漏掉會靜默出錯】Spring 的預設是 30 分鐘 —— 使用者 30 分鐘沒動作就被
+          # 登出，而這裡預期的是 8 小時。這一行也撐著「Keycloak SSO Session Idle
+          # 必須 >= servlet session timeout」這條規則：servlet session 先過期時，
+          # 使用者會被送回 Keycloak，而 Keycloak 那邊還認得他 —— 症狀是畫面閃一下
+          # 就回來了，沒有任何錯誤訊息可以查。見 CANARY-COMPLETE.md 附錄 C.2。
+          timeout: 8h
+          cookie:
+            # 【漏掉會靜默出錯】少了這一行會退回 Spring 預設的 JSESSIONID，
+            # 一次失去兩件事：
+            #   1. __Host- 前綴的保護 —— 這個前綴是瀏覽器強制的契約（必須 Secure、
+            #      必須 Path=/、不得帶 Domain），子網域因此無法覆寫這個 cookie。
+            #   2. 名字不再跟 Envoy 的親和 cookie 撞。DestinationRule 的
+            #      consistentHash 也是拿 cookie 做 session affinity（見 3.3），
+            #      兩邊叫同一個名字時誰蓋誰不可預測，而症狀是「偶爾掉登入」
+            #      —— 這個 repo 裡最難查的一種問題。
+            name: __Host-JSESSIONID
+            # lax 不能改成 strict：Keycloak 導回來的 callback 是跨站發起的
+            # 頂層導向，strict 會讓瀏覽器不帶 session cookie，登入永遠走不完。
+            same-site: lax
+            secure: true     # __Host- 前綴的硬性要求，少了瀏覽器直接拒收整個 cookie
+            http-only: true  # 擋掉 document.cookie，XSS 偷不到 session
+
+    spring:
+      application:
+        name: pmc-epmmformquerygui
+      task:
+        scheduling:
+          pool:
+            # 【漏掉會靜默出錯】預設是 1 —— 一條執行緒要輪流跑兩件事：
+            # 60 秒一次的 Keycloak token refresh（app.token-refresh.schedule-rate-ms），
+            # 以及 30 秒一次的 canary 名單 reload（app.canary.roster-reload-ms）。
+            # 名單 reload 會排在 token refresh 後面，於是「改了 pilot 名單多久生效」
+            # 變得不可預測 —— 而改名單正是維運最常做的事（見 7.1）。
+            # 這個問題不會報錯，只會慢，所以它只會被當成「感覺怪怪的」。
+            # 見 CANARY-COMPLETE.md 附錄 C.2。
+            size: 2
+      security:
+        oauth2:
+          client:
+            registration:
+              keycloak:
+                client-id: ${KEYCLOAK_CLIENT_ID}
+                client-secret: ${KEYCLOAK_CLIENT_SECRET}
+                authorization-grant-type: authorization_code
+                scope: [openid, profile, email]
+                client-name: Keycloak Login
+                # 【必要，缺了不會啟動失敗但登入一定壞】
+                # Spring 自己的預設是 {baseUrl}/login/oauth2/code/{registrationId} ——
+                # 【沒有 /gui_epmmFormQuery 前綴】。那個值跟 SecurityConfig 設定的
+                # redirectionEndpoint.baseUri 對不上，結果是 Keycloak 回 redirect_uri
+                # 不符、或是 callback 根本進不到 app，而且錯誤訊息不會指向這一行。
+                # 這一類「漏掉會靜默出錯」的 key 清單見 CANARY-COMPLETE.md 附錄 C.2。
+                redirect-uri: "{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}"
+            provider:
+              keycloak:
+                # 【必要，缺了 pod 起不來】無預設值。
+                # jar 裡的 application.yml 確實有這個 key，但它在 !test profile 的
+                # document 裡，而 US-006 之後 Deployment 用的是 SPRING_CONFIG_LOCATION
+                # （replace 語意）—— jar 那份【完全不會被載入】，所以沒有東西可以退回。
+                # 缺了這一行，OAuth2 client 在啟動階段就建不起來，log 會噴
+                #   Unable to resolve Configuration with the provided Issuer
+                # 這一行曾經從這份檔案裡被誤刪過（track-b 那份還在，見該檔第 53 行）。
+                # 見 CANARY-COMPLETE.md 3.1 與附錄 C.1。
+                issuer-uri: ${KEYCLOAK_ISSUER_URI}
+                # 【必須是 sub，不要再改回 preferred_username】
+                # 這一行決定 Authentication.getName() 回傳哪一個 claim，而
+                # InMemoryOAuth2AuthorizedClientService 就是拿那個字串當 key，
+                # 存放每個使用者的 access / refresh token。
+                #
+                # OIDC 規範只保證 `sub` 在同一個 issuer 底下【穩定且唯一】。
+                # preferred_username 兩者都不保證：Keycloak 允許改使用者名稱，也允許
+                # 把離職者的帳號名回收給新人。回收一旦發生，新的人登入後算出來的 key
+                # 跟前一個人一模一樣 —— 他會拿到【前一個人的 token】，然後以那個身分
+                # 呼叫下游。這是 review F15 的結論，也是這一行從 preferred_username
+                # 改回來的原因。
+                #
+                # Spring 自己的預設剛好就是 sub，所以「整行漏掉」反而不會出事；真正
+                # 會出事的是有人把 preferred_username 寫【回來】—— 這份檔案上一版就是
+                # 那樣，而且沒有任何錯誤訊息會指向這裡。scripts/validate.sh 的檢查 [4]
+                # 因此比對的是「值」本身、而不只是 key 存在，而且 track-a 與 track-b
+                # 兩份都比對。
+                #
+                # canary 分流不受這一行影響：CanaryUsernames 直接讀
+                # OidcUser.getPreferredUsername() 這個 claim，不經過
+                # Authentication.getName()，所以 log 裡 canary EVICT_TO_STABLE 的
+                # user= 仍然是帳號名而不是 UUID（見 runtime/05-configmap-canary-pilot.yaml）。
+                # 見 CANARY-COMPLETE.md 3.5 與附錄 C.2。
+                user-name-attribute: sub
+
+    app:
+      context-prefix: /gui_epmmFormQuery
+
+      # 【必要，缺了 pod 起不來】後端讀的是
+      #   @Value("${app.post-logout-redirect-uri}")   ← 【沒有預設值】
+      # 所以這個 key 缺席不是「退回某個預設」，而是 Spring 在 bean 建立階段直接丟
+      #   Could not resolve placeholder 'app.post-logout-redirect-uri'
+      # → 啟動失敗、CrashLoopBackOff。
+      #
+      # 【注意 key 的路徑】正確的是 app.post-logout-redirect-uri（app.* 頂層），
+      # 不是 app.sso.post-logout-redirect-uri —— 那是錯的 key 路徑，後端沒有任何
+      # 一行程式讀它，看起來有設定其實等於沒設定。
+      # （app.sso.* 整塊已經移除了，見底下 privilege 上方那段說明與附錄 C.4。）
+      #
+      # 這裡的 ${...:預設} 是 Spring 的佔位語法：環境變數 POST_LOGOUT_REDIRECT_URI
+      # 沒設時，退回冒號後面那個字面值。見 CANARY-COMPLETE.md 3.5 與附錄 C.1。
+      post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}
+
+      security:
+        # 【漏掉會靜默出錯】後端讀的是 @Value("${app.security.csp-policy:}") ——
+        # 【冒號後面是空的】，也就是預設值是空字串。而空字串的結果不是「套用一條
+        # 寬鬆的政策」，是【連 Content-Security-Policy-Report-Only 這個 header
+        # 都不會送出去】。漏掉這一行不會有任何報錯、任何日誌，CSP 就是整個消失。
+        # 見 CANARY-COMPLETE.md 附錄 A.2 與附錄 C.2。
+        #
+        # 【這條政策今天擋不了任何東西，這是已知狀態】csp-report-only: true 代表
+        # 只送 Report-Only 版本的 header；而政策裡又沒有 report-uri / report-to，
+        # 所以它「不擋、也不收」—— 違規發生時你不會知道。要切成 enforce 的步驟
+        # 寫在附錄 A.2，照順序走，不要直接把 csp-report-only 改成 false。
+        csp-policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        csp-report-only: true
+        # 【刻意的空字串，不是漏填】空字串代表「不要求任何角色」。寫出來是為了讓
+        # 讀的人知道「這裡有一個開關，而它現在是關的」—— 不寫的話，下一個人得去翻
+        # Java 原始碼才能確認沒有隱藏的角色檢查。
+        required-role: ""
+
+      # 底下這幾塊的值跟 Java 的 @Value 預設相同（附錄 C.3），列出來不是多餘的：
+      # US-006 之後走的是 SPRING_CONFIG_LOCATION（replace 語意），jar 裡那份
+      # application.yml 完全不會被載入，這份 ConfigMap 就是這個環境設定的唯一真相。
+      # 讀的人應該只看這個檔案就知道 app 怎麼跑，而不是去翻另一個 repo 的原始碼。
+      token-refresh:
+        enabled: true
+        skew-seconds: 60         # 提早 60 秒視為過期，避免「剛好在換 token 的瞬間打過去」
+        schedule-rate-ms: 60000  # 排程間隔；跟上面 spring.task 的 pool size: 2 是同一件事的兩半
+
+      silent-auth:
+        enabled: true                         # 註：目前沒有任何程式讀這個 toggle
+        hint-cookie-name: ea_login_hint
+        hint-cookie-max-age-seconds: 2592000  # 30 天
+        cookie-secure: true
+
+      # 下游服務位址。ConfigMap 拆成 -stable / -canary 兩份之後（US-008），
+      # canary 那份可以指到 canary 後端而完全不動 stable —— 那正是拆兩份才做得到
+      # 的事，見 3.5.1 與附錄 A。
+      downstream:
+        base-url: ${DOWNSTREAM_API_URL:http://internal-api:8080}
+      third-party:
+        base-url: ${THIRD_PARTY_API_URL:https://partner.example.com}
+
+      # 【這裡原本有 app.cors.* / app.sso.* / app.test-endpoints.* 三塊，都刪掉了】
+      # 三塊的共同點是【後端沒有任何一行程式讀它們】（CANARY-COMPLETE.md 附錄 C.4）。
+      # 死設定比沒有設定更糟：出 CORS 問題時一定有人回來改 allowed-origins，改完
+      # 什麼都不會變，然後往錯的方向查半天 —— 而那半天正好是出事的時候。
+      #
+      #   - app.cors.*            BFF 是同源架構：React SPA 被打包進 jar，由 Spring
+      #                           從 /gui_epmmFormQuery/web/** 供應，跟後端同源，
+      #                           所以 SecurityConfig 只留一行 // No .cors()
+      #                           （review F4），而且有測試守著。要找 CORS 設定的人
+      #                           請看 CANARY-COMPLETE.md 附錄 A —— 該回
+      #                           Access-Control-Allow-Origin 的是【對方的伺服器】，
+      #                           不是這份 ConfigMap，在這裡加什麼都不會有效果。
+      #   - app.sso.*             錯的 key 路徑。正確的那個是上面的
+      #                           app.post-logout-redirect-uri（app.* 頂層）。
+      #   - app.test-endpoints.*  沒有任何程式讀；測試端點的開關不在這裡。
+      #
+      # 這三塊不要加回來：scripts/validate.sh 的檢查 [5] 會擋，而且兩個 track 都擋。
+
+      privilege:
+        enabled: ${PRIVILEGE_CHECK_ENABLED:false}
+
+      frontend:
+        url-prefix: /gui_epmmFormQuery/web
+        resource-location: classpath:/gui_epmmFormQuery/web/
+        index-path: /gui_epmmFormQuery/web/index.html
+        classpath-base: gui_epmmFormQuery/web
+
+      # 自動分流。這些值跟 jar 內建的預設完全一樣，列在這裡只是為了讓維運
+      # 一眼看得到「這個版本有這個功能、開關在哪」。
+      #
+      # 兩個開關都由 Deployment 的 env 決定，不要在這裡寫死：
+      #   APP_CANARY_ENABLED — 只有 21-deployment-canary.yaml 設 true
+      #   APP_TRACK          — 兩份 Deployment 各自設 stable / canary
+      canary:
+        enabled: ${APP_CANARY_ENABLED:false}
+        track: ${APP_TRACK:stable}
+        cookie-max-age: 8h
+        cookie-path: /gui_epmmFormQuery
+        # 對應 Deployment 的 canary-pilot volumeMount（掛目錄，不是 subPath）
+        roster-file: /app/canary/pilot-users.txt
+        roster-reload-ms: 30000
+        entry-path: /gui_epmmFormQuery/web/
+        # 【三處共用同一個值】這一行同時被 CanaryLeaveController 的 @GetMapping、
+        # SecurityConfig 的 permitAll 清單、CanaryEvictionFilter 的 pass-through
+        # 讀取。三處只要有一處對不上，逃生門就會安靜地失效 —— 而它存在的意義正好
+        # 是「其他東西都壞掉的時候，使用者還有辦法自己離開 canary」。
+        # 值跟 Java 預設相同，但不能因此省略，見附錄 C.3。
+        leave-path: /gui_epmmFormQuery/canary/leave
+
+    logging:
+      level:
+        com.example: INFO
+        org.springframework.web.servlet.DispatcherServlet: DEBUG
+
+    management:
+      endpoints:
+        web:
+          base-path: /gui_epmmFormQuery/actuator
+          exposure:
+            include: health,info,mappings
+      endpoint:
+        health:
+          show-details: when-authorized
+          # 【US-007】打開 liveness / readiness 兩個獨立的 health group，
+          # Deployment 上的探針才有東西可以打：打開之後才會有
+          #   /gui_epmmFormQuery/actuator/health/liveness
+          #   /gui_epmmFormQuery/actuator/health/readiness
+          # 這兩個端點（路徑前綴跟著上面的 endpoints.web.base-path 走，
+          # 兩者是綁在一起的，validate.sh 的檢查 [7] 會拿它們互相對照）。
+          #
+          # Spring Boot 在偵測到自己跑在 Kubernetes 裡（KUBERNETES_SERVICE_HOST
+          # 這類環境變數）時會自動打開這個開關，所以「不寫也可能會動」。
+          # 即使如此還是要寫出來，兩個理由：
+          #   1. 那是隱式的環境偵測。換一種跑法（本機、docker run 做對照測試、
+          #      或未來換到別的 orchestrator）就沒有了，而症狀是探針 404 ——
+          #      錯誤訊息只會說路徑不存在，不會指向這一行。
+          #   2. US-006 之後是 replace 語意，jar 裡的 application.yml 完全不會被
+          #      載入，這份 ConfigMap 是這個環境設定的唯一真相。讀的人要能只看
+          #      這個檔案就知道那兩個端點存在（同附錄 C.3 的理由）。
+          #
+          # 為什麼一定要分成兩個群組（CANARY-COMPLETE.md 3.6）：liveness 只回答
+          # 「JVM 還活著嗎」，readiness 才把依賴算進去。三個探針共用同一個聚合端點
+          # 的話，Keycloak 或下游 API 抖一下 → readiness 掉的同時 liveness 也掉 →
+          # kubelet 直接【重啟】pod，把一次幾秒鐘的依賴故障放大成一次滾動重啟，
+          # 而重啟會清掉 in-memory 的 HttpSession（所有人被登出）。
+          probes:
+            enabled: true

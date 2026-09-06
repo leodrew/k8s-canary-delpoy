@@ -45,7 +45,10 @@ spec:
         app: pmc-epmmformquerygui
         version: canary
       annotations:
-        config-version: "1.2.3"                  # 【三處之一】要跟 image / configMap 版本一致
+        # 【已失效，US-009 會換成 config-hash】完整說明在 20-deployment-stable.yaml
+        # 的同一個位置。摘要：ConfigMap 名稱固定之後這一行不再會跟著設定變動，
+        # 改了設定不會觸發滾動更新，於是新設定 apply 了卻沒有生效、也沒有錯誤訊息。
+        config-version: "1.2.3"
         proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
     spec:
       serviceAccountName: pmc-epmmformquerygui
@@ -178,7 +181,16 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: pmc-epmmformquery-config-1.2.3   # 【三處之一】
+            # 固定名稱、不帶版本號，而且是【canary 專屬】的那一份
+            # （檔案是 release/11-configmap-canary.yaml；stable 掛的是
+            #  ...-config-stable，完整說明在 20-deployment-stable.yaml 的同一處）。
+            #
+            # 這一行寫錯成 ...-config-stable 的話【不會有任何錯誤訊息】：
+            # canary pod 會正常起來、探針正常綠燈，只是安靜地讀 stable 的設定 ——
+            # 於是「改了 canary 的 CSP / downstream base-url 卻沒有生效」，
+            # 而拆成兩份 ConfigMap 的意義也一起消失。validate.sh 會從這份
+            # Deployment 的 version label 推出它該掛哪一份來擋這件事。
+            name: pmc-epmmformquery-config-canary
         - name: tmp
           emptyDir: {}
         - name: canary-pilot

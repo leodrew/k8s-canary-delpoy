@@ -40,10 +40,14 @@ bash scripts/validate.sh      # 或 npm run validate
   （附錄 A.2、3.5.1 說 canary 那份可以先加新 origin），整串釘死等於每次調政策都要改
   腳本；但只檢查 key 存在又擋不住 `csp-policy: ""` —— 空字串正好就是「CSP header
   完全不送」的那個值，而 `assert_cm_key` 會放它過。
-- **`TRACK_A_CONFIGMAPS`** —— ConfigMap 檔案清單。ConfigMap 拆成 `-stable` / `-canary`
-  兩份之後，把新檔名加進這個陣列就好，所有既有的 key 檢查會自動對兩份都跑，
-  不需要把檢查複製一遍。
-- **`BOTH_TRACK_CONFIGMAPS`** —— 涵蓋 track-a ＋ track-b 兩份 ConfigMap 的清單，
+- **`TRACK_A_CONFIGMAPS`** —— track-a 的 ConfigMap 檔案清單，US-008 之後是兩份
+  （`10-configmap-stable.yaml` / `11-configmap-canary.yaml`）。所有 key 檢查都對這個
+  陣列裡的每一份各跑一次，所以新增一份 track-a ConfigMap 時只要把檔名加進來，
+  附錄 C 的檢查就自動涵蓋它，不需要把檢查複製一遍。
+  **加的時候 `BOTH_TRACK_CONFIGMAPS` 也要一起加**：漏掉前者會少掉附錄 C 的 key 檢查，
+  漏掉後者會少掉「不得寫回 `preferred_username`」和「死設定不得復活」——
+  兩種都是無聲地少檢查一整份檔案，不會有任何 FAIL 提醒你漏了。
+- **`BOTH_TRACK_CONFIGMAPS`** —— 涵蓋 track-a（`-stable` / `-canary` 兩份）＋ track-b 的清單，
   給「兩個 track 都有同一個回歸」的檢查用（目前是 `user-name-attribute`）。
   刻意跟 `TRACK_A_CONFIGMAPS` 分開：後者的語意是「track-a 必須完整」，把 track-b
   塞進去會讓附錄 C 的每一項 key 檢查都跑到 track-b 上，噴出一整排假失敗
@@ -58,10 +62,12 @@ bash scripts/validate.sh      # 或 npm run validate
   ／`21-deployment-canary.yaml`）的清單，給「兩份 Deployment 都要有同一項設定」的
   檢查用（目前是 `SPRING_CONFIG_LOCATION`；探針路徑、`config-hash` 註解也會用到）。
   這兩個檔名彼此不同，所以這一組的檢查名稱直接用 `basename` 就夠，不必走 `cm_label`。
-- **`cm_label <檔案路徑>`** —— 兩個 track 的 ConfigMap 檔名一模一樣（都叫
-  `10-configmap-1.2.3.yaml`），所以跨 track 的檢查名稱不能用 `basename`：
-  兩行 PASS 會長得完全一樣，失敗時看不出是哪一份壞了。這個 helper 印出
-  `track-a/10-configmap-1.2.3.yaml`。
+- **`cm_label <檔案路徑>`** —— ConfigMap 的檢查名稱要帶上 track，不要只用 `basename`。
+  US-008 之前兩個 track 的檔名一模一樣（都叫 `10-configmap-1.2.3.yaml`），兩行 PASS
+  會長得完全相同、失敗時看不出是哪一份壞了；現在 track-a 那兩份改名成 `-stable`／
+  `-canary` 之後檔名不再撞，但「哪一軌」仍然是讀 FAIL 訊息時第一個要知道的事，
+  而且 track-b 哪天照附錄 C 補齊、跟著改名就又撞回去了。這個 helper 印出
+  `track-a/10-configmap-stable.yaml`。
 - **`check "<名稱>" <指令> [參數...]`** —— 指令以參數陣列直接執行，**不經過 eval**，
   所以可以原樣傳一整段帶引號的 `node -e` 斷言進去。需要 pipeline 或 shell 語法時
   再明確包一層 `bash -c`。
@@ -86,6 +92,25 @@ env 也綁著這個值。正確的寫法是從 manifest 讀出 `mountPath`、推
 這塊是死的」寫進 FAIL 訊息裡。復活最常見的路徑是「從舊版本或另一個 track 整段複製
 設定過來」，所以這類檢查要跑 `BOTH_TRACK_CONFIGMAPS` 而不是只擋一個 track。
 
+**ConfigMap 拆成 `-stable` / `-canary` 之後有四條不能破的規則**（檢查 [8] 各釘一條，
+四條被破壞時都不會有指向真正原因的錯誤訊息）：
+
+1. **不得有 `immutable: true`。** 名稱固定代表這個物件會被同一個名字反覆 apply 覆寫，
+   而 immutable 的 ConfigMap 建立後連 `data` 都不能改 —— `kubectl apply` 會直接以
+   `field is immutable` 失敗，時間點是**發布當下**，唯一的出路是先 delete 再 create，
+   那個空窗期裡任何一個掛著它的 pod 只要重啟就卡在 `ContainerCreating`。
+2. **`metadata.name` 不得帶版本號**（連 label 也不要留 `config-version`）。版本號只留在
+   image tag 一處；帶回來就是把「三處人工同步」整套問題帶回來，而且跟 cleanup 互咬。
+3. **兩份的 `data['application.yml']` 目前必須逐字相同。** 拆檔案本身不該引進設定差異。
+   這條斷言**預期會有壽命** —— canary 遲早要分歧（3.5.1 允許 `csp-policy`、
+   `downstream`／`third-party` 的 `base-url`、`logging.level.*` 不同）。那一天要把它
+   **改寫成「只有那幾個 key 可以不同」，不是刪掉**：刪掉之後兩份開始無聲漂移，而 promote
+   的做法是把 canary 的 `data` 整段複製進 stable，差異越多越容易把不該帶的一起帶過去。
+4. **每份 Deployment 掛自己那一軌的 ConfigMap。** 掛錯軌是這四條裡最安靜的一種：pod
+   正常起來、探針正常綠燈，只是讀著另一軌的設定 —— 症狀是「改了 canary 的設定卻沒生效」。
+   檢查的寫法不是各自釘常數，而是從 Deployment 的 pod template `version` label 推出
+   它屬於哪一軌（那個 label 也是 DestinationRule 分 subset 的依據，是全 repo 對「軌」
+   最權威的來源），再拿 `volumes[config].configMap.name` 去查 ConfigMap 的 `labels.track`。
 **跨檔案的對照要走「Deployment 引用的名字 → ConfigMap 的 `metadata.name`」，不要靠檔名。**
 Deployment 不認識檔案，它引用的是 `volumes[config].configMap.name`。所以要拿 ConfigMap 的
 內容來推導 Deployment 應該長什麼樣時（探針路徑推自 `management.endpoints.web.base-path`，
