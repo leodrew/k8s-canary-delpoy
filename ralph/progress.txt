@@ -250,3 +250,59 @@ Started: (not yet run)
     這次新增的區塊插在 `post-logout-redirect-uri` 之後、`cors:` 之前，所以 US-005
     把那三塊刪掉之後，剩下的順序會剛好等於 CANARY-COMPLETE.md 3.5 的順序。
 ---
+
+## 2026-09-06 - US-004 - Change user-name-attribute from preferred_username back to sub
+
+- 兩個 track 的 ConfigMap 都把 `spring...provider.keycloak.user-name-attribute`
+  從 `preferred_username` 改成 `sub`，並在同一個 commit 加上檢查區段 [4]。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-1.2.3.yaml` — 值改成 sub，
+    整段「與 BFF repo 不一致」的舊註解換成說明「為什麼必須是 sub」的新註解
+  - `canary-manual/track-b/release/10-configmap-1.2.3.yaml` — 值改成 sub ＋ 摘要註解
+  - `scripts/validate.sh` — 檢查 [3] 移除佔位的存在檢查；新增檢查 [4]、
+    `BOTH_TRACK_CONFIGMAPS` 陣列、`cm_label` helper
+  - `CLAUDE.md`（dev/k8s 層級）— 記錄 `BOTH_TRACK_CONFIGMAPS` 與 `cm_label`
+- 為什麼要改：這個值決定 `Authentication.getName()` 回傳哪個 claim，而
+  `InMemoryOAuth2AuthorizedClientService` 拿那個字串當 key 存 access / refresh token。
+  OIDC 只保證 `sub` 在同一個 issuer 底下穩定且唯一；Keycloak 的 preferred_username
+  可以被改、也可以在帳號刪除後回收給新人 —— 回收之後新的人算出同一個 key，
+  會拿到【前一個人的 token】並以那個身分呼叫下游（review F15、附錄 C.2）。
+- 驗證結果：`bash scripts/validate.sh` → 50/50 PASS、exit 0
+  （`npm run validate` 與從 `ralph/` 呼叫 `bash ../scripts/validate.sh` 同樣 exit 0）。
+  反向測六種壞法，六種都 FAIL 且 exit 1：track-a 改回 preferred_username／
+  track-b 改回 preferred_username／整行刪掉／key 有但沒值（null）／改成 email／
+  只留被註解掉的 `# user-name-attribute: sub`（最後這種證明檢查走的是 YAML 解析，
+  grep 會被它騙過去）。還原後複驗 exit 0、`git status` 乾淨。
+
+- **Learnings for future iterations:**
+  - **【US-005 直接會用到】跨 track 的檢查用新的 `BOTH_TRACK_CONFIGMAPS` 陣列，
+    不要把 track-b 塞進 `TRACK_A_CONFIGMAPS`。** 後者的語意是「track-a 的 ConfigMap
+    必須完整」，附錄 C.1/C.2/C.3 的每一項都掛在它上面；track-b 這次沒有被補齊，
+    塞進去會一次噴出二十幾個假失敗。US-005 要對兩個 track 斷言「app 底下沒有
+    cors / sso / test-endpoints」，正好用 `BOTH_TRACK_CONFIGMAPS`。
+    US-008 的 `-stable` / `-canary` 兩份都是 track-a，那個要加進 `TRACK_A_CONFIGMAPS`
+    —— 兩個陣列的用途不要搞混。
+  - **兩個 track 的 ConfigMap 檔名完全一樣**（都叫 `10-configmap-1.2.3.yaml`），
+    所以跨 track 的檢查名稱不能用 `basename`，否則兩行輸出長得一模一樣、
+    FAIL 時看不出是哪一份壞了。新增了 `cm_label`（取上上層目錄名 + 檔名 →
+    `track-a/10-configmap-1.2.3.yaml`）。US-008 之後 track-a 那兩份檔名才會分開。
+  - **「值錯」比「key 不見」危險，這一項是最極端的例子。** Spring 對
+    `user-name-attribute` 的預設【剛好就是 sub】，所以整行漏掉反而是對的行為 ——
+    真正會出事的只有「有人把 preferred_username 寫回來」。這代表存在檢查對這一項
+    零防護力。檢查 [4] 因此為那個特定的值寫了一段專屬錯誤訊息，把 F15 的理由整段
+    印出來，而不是只說「值不對」—— 目的是讓下一個想改回去的人在 FAIL 訊息裡就讀到
+    原因，不用去翻文件。這個手法值得用在其他「有人會出於好意改回去」的設定上。
+  - **舊註解本身也可能是待清理的技術債。** track-a 那段被換掉的註解不只是過時，
+    它還把這件事描述成「未決事項」（「先確認這是有意識的決定」），並且引用了
+    `SPRING_CONFIG_ADDITIONAL_LOCATION` —— US-006 就要把那個 env var 換掉。
+    改值的時候如果只改值、留著舊註解，檔案會自相矛盾。**grep 一下即將被 US-006
+    改掉的字串**（`SPRING_CONFIG_ADDITIONAL_LOCATION`）看看還有多少註解提到它，
+    US-006 的驗收條件裡本來就有「canary-manual/ 底下不得出現這個字串」。
+  - **fragment 檔 + node 錨點替換這套做法也適用「整段替換」**，不只插入：
+    把舊區塊原樣寫進 `a-old.txt`、新區塊寫進 `a-new.txt`，用
+    `src.split(oldText).length !== 2` 確認錨點唯一再替換。中文、`${...}`、
+    單引號都不會被 shell 或 sed 吃掉。暫存目錄用 repo 內相對路徑（`.tmp-us004/`），
+    收工前 `rm -rf` 掉 —— node 看不到 Git Bash 的 `/tmp`。
+  - **反向測試備份也放 repo 內相對路徑**（`.tmp-us004/A.bak`），`cp` 還原後
+    一定要複驗一次 exit 0 並看 `git status`，確認沒有殘留的破壞。
+---

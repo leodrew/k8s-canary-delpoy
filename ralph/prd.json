@@ -75,7 +75,7 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "track-b is otherwise out of scope for this run; only this one line is changed there because the same regression exists in both files."
     },
     {
