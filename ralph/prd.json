@@ -149,8 +149,8 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "叢集驗證留到部署時：apply 之後 kubectl get cm -n ea-pmc -l app=pmc-epmmformquerygui 要看到 -stable 與 -canary 兩份、且 apply 不再噴 field is immutable；kubectl get deploy ... -o jsonpath 確認兩份 Deployment 各掛各的 ConfigMap。config-hash（US-009）之前，改設定內容不會自動觸發滾動更新，要自己 kubectl rollout restart。"
     },
     {
       "id": "US-009",

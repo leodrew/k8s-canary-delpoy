@@ -97,6 +97,26 @@ Started: (not yet run)
   變成永遠 FAIL。對 shell 腳本（US-010 的 `canary.sh`）沒有 parser 可用，要另想辦法
   （先剝掉 `#` 註解再比對），同樣不能直接 grep 整個檔案。
 
+- **一份 Deployment 屬於哪一軌，以 pod template 的 `version` label 為準**（不是檔名、
+  也不是 `metadata.name`）。DestinationRule 是拿它分 subset 的，所以改了它 Istio 立刻
+  分不出流量；檔名與物件名稱改了則什麼都不會壞。要從 Deployment 推導「該掛哪一份
+  ConfigMap」「該用哪一段設定」時，一律從這個 label 出發。
+
+- **「兩份檔案必須相同」這類斷言，要在註解裡寫明它預期會有壽命、以及到期時該怎麼改。**
+  例：track-a 的 `-stable` / `-canary` 兩份 ConfigMap 目前 `data` 逐字相同，但 3.5.1
+  允許 `csp-policy`、`downstream`／`third-party` 的 `base-url`、`logging.level.*` 分歧。
+  沒寫的話，第一個要讓 canary 分歧的人會直接把斷言刪掉，兩份從此無聲漂移。
+  正確的到期處理是**改寫成「只有那幾個 key 可以不同」**，不是刪掉。
+
+- **`cat > file <<'FRAG'` 寫「內容含 ASCII 單引號」的 fragment 會整段 parse 失敗**
+  （`unexpected EOF while looking for matching '`），即使結束標記已經加了單引號。
+  validate.sh 的 `XXX_SCRIPT='...'` node 斷言正好都含單引號。那種 fragment 改用 Write
+  工具直接寫檔，再用 node 拼接（記得 `.replace(/\r\n/g, "\n")`，腳本是 LF）。
+  只有中文與 `${...}` 的 fragment 用 heredoc 沒問題 —— 前幾個 story 就是那樣過的。
+
+- **改名或刪檔之後 grep 一次舊檔名。** 這個 repo 用「完整說明在 `<另一個檔案>` 的同一個
+  位置」這種指路註解來避免重複，代價是每次改名都會留下死連結
+  （`git mv` 之後 track-b 就有 2 處指向 track-a 的舊檔名）。
 - **反向測之前，先確認「壞掉的版本真的寫進檔案了」。** US-006 有一次 `sed` 沒改到任何
   東西，於是閘門照樣 exit 0，看起來像是「這個檢查沒防護力」，其實是根本沒測到。
   改壞之後先 `grep` 一下改動處，再跑 validate.sh。
@@ -539,4 +559,89 @@ Started: (not yet run)
     之類的環境偵測）。誇大的註解遲早會被人發現不準，然後連帶不相信旁邊那些是真的
     警告。正確的寫法是講實話再說明為什麼仍然要寫：隱式偵測換個跑法就沒了，而且
     replace 語意下這份 ConfigMap 是唯一真相。
+---
+
+## 2026-09-06 - US-008 - Split the shared ConfigMap into per-track stable and canary copies
+
+- 把 track-a 那份「兩軌共用、名稱帶版本號、immutable」的 ConfigMap 換成「每軌一份、
+  名稱固定、可覆寫」：`10-configmap-1.2.3.yaml` → `10-configmap-stable.yaml`
+  （`git mv`，metadata.name = `pmc-epmmformquery-config-stable`），另建
+  `11-configmap-canary.yaml`（`...-config-canary`）。兩份的 `data['application.yml']`
+  **逐字相同**（實測 `a === b`，9855 bytes），拆檔案這個動作沒有引進任何設定差異。
+  兩份 Deployment 各掛各的。同一個 commit 加上檢查區段 [8]。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-stable.yaml`（由 1.2.3 那份 rename）——
+    新檔頭（為什麼拆兩份／為什麼名稱不帶版本號／為什麼沒有 immutable／拿掉它之後
+    靠哪三條規則補回來）、`metadata.name`、label `config-version` → `track: stable`、
+    刪掉 `immutable: true`
+  - `canary-manual/track-a/release/11-configmap-canary.yaml`（新增）—— 檔頭指回 stable
+    那份、列出 3.5.1 允許分歧的 key、`track: canary`
+  - `canary-manual/track-a/release/20-deployment-stable.yaml` /
+    `21-deployment-canary.yaml` —— `volumes[config].configMap.name` 改成各自那一軌
+    ＋ 說明註解；`config-version` annotation 加註「已失效，US-009 換成 config-hash」
+  - `canary-manual/track-b/release/10-configmap-1.2.3.yaml` —— 2 處指向
+    `track-a/release/10-configmap-1.2.3.yaml` 的註解改成新檔名（改名後那是死連結）
+  - `scripts/validate.sh` —— `TRACK_A_CONFIGMAPS` 換成新的兩份、`BOTH_TRACK_CONFIGMAPS`
+    變三份、`cm_label` 與陣列的說明註解更新、新增檢查 [8]（8a~8d）
+  - `CLAUDE.md`（dev/k8s 層級）—— helper 說明更新 ＋ 新增「拆軌之後的四條規則」
+- 為什麼要拆：共用一份時，canary 想多加一個 CSP `connect-src` origin 或把
+  `app.downstream.base-url` 指到 canary 後端，都得改到 stable 也在讀的那份 ——
+  「只想動 canary」變成「連正式流量一起滾動更新」，canary 這一軌就失去意義
+  （CANARY-COMPLETE.md 2.1）。名稱不再帶版本號則是為了消掉「三處版本號人工同步」
+  以及「cleanup 只留 3 份 → 回滾超過 3 版時 ConfigMap 已被刪 → ContainerCreating」。
+- 驗證結果：`bash scripts/validate.sh` → **122/122 PASS、exit 0**（US-007 之後是 75 項；
+  附錄 C 的 key 檢查現在對兩份 ConfigMap 各跑一次 ＋ 檢查 [8] 的 7 項）。
+  `npm run validate` 同樣 exit 0。反向測九種，前八種 FAIL 且 exit 1、第九種維持 PASS：
+  ① canary 那份加回 `immutable: true` ② stable 的 `metadata.name` 改回帶版本號
+  ③ 兩份 data 漂移（canary 的 session timeout 改 7h）④ canary Deployment 掛到
+  `...-config-stable`（**最重要的一種**：這是唯一完全沒有症狀的錯法）
+  ⑤ canary 那份的 `track` label 改成 stable（name ↔ label 對不上）
+  ⑥ stable 加回 `config-version` label ⑦ `track:` 那一行被註解掉
+  ⑧ `11-configmap-canary.yaml` 整份不見（46 個 FAIL，8a 那行直接指名檔案）
+  ⑨ 只在【註解】裡出現 `immutable: true` → 維持 PASS（證明走的是 YAML 解析不是 grep）
+  每一次都先 `grep` 確認壞掉的版本真的寫進檔案了才跑。還原後複驗 exit 0、`git status` 乾淨。
+
+- **【給 US-009】這個 commit 留下一個已知缺口，不要當成沒事。** ConfigMap 名稱固定之後，
+  兩份 Deployment 的 `config-version: "1.2.3"` annotation 變成一個永遠不動的常數：
+  改設定內容 → apply → pod template 沒變 → **沒有任何 pod 重啟**，而 Spring 只在啟動時
+  讀一次設定檔，於是「設定 apply 了卻沒有生效」，沒有錯誤訊息、`kubectl get` 也看不出來。
+  這個缺口已經寫進兩份 Deployment 的 annotation 註解裡（US-009 要換成 `config-hash`）。
+  在 US-009 完成之前，改完設定要自己 `kubectl rollout restart`。
+
+- **Learnings for future iterations:**
+  - **【US-009 直接沿用】檢查 [8d] 的推導鏈是「Deployment 的 pod template `version` label
+    → 該掛哪一軌 → `volumes[config].configMap.name` → ConfigMap 的 `labels.track`」。**
+    US-009 的 config-hash 走的是同一條鏈的另一半（`configMap.name` → 那份 ConfigMap 的
+    `data['application.yml']` → sha256 前 8 碼 → 比對 annotation），檢查 [7] 已經有現成的
+    `metadata.name → 檔案` 索引程式可以整段抄。**查不到名字時一律 FAIL，不要 skip。**
+  - **`version` label 是全 repo 對「這是哪一軌」最權威的來源**，因為 DestinationRule 是拿它
+    分 subset 的。要判斷一份 Deployment 屬於哪一軌時用它，不要用檔名或 `metadata.name`
+    —— 那兩個都只是慣例，改了不會有任何東西壞掉，而 `version` 改了 Istio 立刻分不出流量。
+  - **「兩份檔案必須相同」這種斷言要在註解裡寫明它預期會有壽命，以及到期時該怎麼改。**
+    canary 遲早要分歧（3.5.1 允許 `csp-policy`、`downstream`／`third-party` 的 `base-url`、
+    `logging.level.*`）。沒寫的話，第一個要讓 canary 分歧的人會直接把斷言刪掉，然後兩份
+    開始無聲漂移；註解裡寫「改寫成『只有那幾個 key 可以不同』，不要刪掉」才擋得住。
+  - **複製一份 manifest 時，用 node 從原檔切出 `data:` 之後的部分原樣接上新檔頭**，
+    不要手動重打或整檔重寫：驗收條件要求兩份 byte-identical，而中文註解 ＋ `${...}`
+    ＋ CSP 裡的單引號手改一定會出錯。做法是
+    `src.split("\ndata:\n")` 先確認錨點唯一（`.length !== 2` 就丟錯），再
+    `新檔頭 + "data:\n" + 後半`。
+  - **【工具坑，這次卡了一次】用 `cat > file <<'FRAG'` 寫「內容含 ASCII 單引號」的
+    fragment 會整段 parse 失敗**（`unexpected EOF while looking for matching '`），
+    即使 heredoc 的結束標記有加單引號。檢查 [8] 那段有一堆 `SCRIPT='...'` 的 node 斷言，
+    正好踩到。前幾個 story 的 fragment 只有中文與 `${...}`，所以一直沒遇到。
+    解法：那種 fragment 改用 Write 工具直接寫檔，再用 node 拼接（順手
+    `.replace(/\r\n/g, "\n")`，因為 `scripts/validate.sh` 是 LF）。
+  - **改名 / 刪檔之後 grep 一次舊檔名。** track-b 的 ConfigMap 有 2 處註解寫著
+    「完整說明在 `track-a/release/10-configmap-1.2.3.yaml`」，`git mv` 之後那是死連結。
+    這種指向另一個檔案的「說明在那邊」註解，是這個 repo 減少重複的手法，也因此每次
+    改名都要回頭修 —— `grep -rn "<舊檔名>" canary-manual/` 一次就找得完。
+  - **檢查數字從 75 跳到 122，其中 46 項是「同一批 key 檢查多跑一份 ConfigMap」。**
+    這正是 `TRACK_A_CONFIGMAPS` 設計的用意：US-008 一行檔名加下去，附錄 C 的每一項
+    就自動涵蓋新的那一份，不用複製任何檢查。反過來說，漏加就是無聲地少檢查一整份檔案
+    —— 所以反向測 ⑧（把檔案移走）值得測，它證明漏檔會炸得很大聲。
+  - **US-010 要動的 `canary-manual/scripts/canary.sh` 現在已經跟現實脫節了**：它的
+    `CM_PREFIX="pmc-epmmformquery-config"` ＋ `${CM_PREFIX}-${ver}` 組出來的是
+    `...-config-1.2.3`，那個名字現在【不存在】；`cmd_cleanup` 要刪的舊版 ConfigMap
+    也不再有。這不是 US-010 順手做的事，那正是它驗收條件的第 4、5 項。
 ---
