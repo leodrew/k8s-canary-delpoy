@@ -58,7 +58,7 @@
         "`bash scripts/validate.sh` run from the repo root exits 0"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Cluster verification deferred: after deploy, the session cookie in the browser must be named __Host-JSESSIONID and a Content-Security-Policy-Report-Only header must be present."
     },
     {

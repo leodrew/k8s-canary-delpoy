@@ -20,6 +20,16 @@ Started: (not yet run)
   YAML is parsed with the local `node_modules/.bin/js-yaml` CLI, pinned as a devDependency.
   Do not use `npx --yes js-yaml`: it needs network on every run and cannot be a quality gate.
 
+- **Git Bash 會竄改傳給 node 的參數 —— `export MSYS2_ARG_CONV_EXCL='*'` 不要拿掉。**
+  MSYS2 在把參數交給原生的 node.exe 之前，會把長得像 POSIX 絕對路徑的字串翻譯成
+  Windows 路徑：`node -e '...' "/gui_epmmFormQuery"` → node 收到
+  `"C:/Program Files/Git/gui_epmmFormQuery"`。這個 repo 的設定值一大半是
+  `/gui_epmmFormQuery` 開頭，所以任何把期望值當參數傳進 node 比對的斷言都會永遠
+  FAIL，而錯誤訊息會印出 `C:\Program Files`，看起來像是 ConfigMap 被寫壞了。
+  改用環境變數傳值也救不了（環境變數的值一樣被轉換，實測）。
+  `scripts/validate.sh` 開頭已經關掉整支腳本的轉換；在腳本外面手動跑 `node -e`
+  驗證時要自己記得在前面加 `MSYS2_ARG_CONV_EXCL='*'`。
+
 - **Assert on parsed YAML, not on grep.** The interesting content lives inside a ConfigMap's
   `data["application.yml"]` — a YAML document embedded as a string inside another YAML
   document. Parse the outer file, then parse that string, then assert on the object.
@@ -175,4 +185,68 @@ Started: (not yet run)
     屆時 `TRACK_A_CONFIGMAPS` 這個名字會顯得不夠用 —— US-004 的檢查要涵蓋兩個 track，
     可以另開一個涵蓋兩者的陣列，不要硬把 track-b 塞進 TRACK_A_CONFIGMAPS
     （C.1 的那些 key 檢查目前只適用 track-a）。
+---
+
+## 2026-09-06 - US-003 - Add the ConfigMap keys that silently fall back to Java defaults
+
+- 補齊 track-a ConfigMap 裡「漏掉不會報錯、只會靜默換掉行為」的那一批 key（附錄 C.2 / C.3），
+  並在同一個 commit 加上檢查區段 [3]。純新增，0 刪除（+81 行，其中大半是註解）。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-1.2.3.yaml` — 新增 C.2/C.3 的 key
+  - `scripts/validate.sh` — 檢查 [2] 補 client-id/client-secret；新增檢查 [3]；
+    新增 `assert_cm_key_contains` helper；開頭 `export MSYS2_ARG_CONV_EXCL='*'`
+  - `CLAUDE.md`（dev/k8s 層級）— 記錄 MSYS2 參數轉換坑與新 helper
+- 加了什麼、為什麼：
+  - C.2（預設值跟我們要的不一樣 → 一律比對值）：`server.servlet.session.timeout: 8h`
+    （預設 30 分鐘）、`server.servlet.session.cookie.name: __Host-JSESSIONID`
+    （預設 JSESSIONID，會跟 Envoy 親和 cookie 撞名）＋ same-site/secure/http-only、
+    `app.security.csp-policy`（@Value 預設是空字串 → 連 Report-Only header 都不送）、
+    `spring.task.scheduling.pool.size: 2`（預設 1 → 名單 reload 排在 token refresh 後面）。
+  - C.3（值等於 Java 預設，但 replace 語意下這份檔案是設定的唯一真相）：
+    `app.security.{csp-report-only,required-role}`、`app.token-refresh.*`（3）、
+    `app.silent-auth.*`（4）、`app.downstream.base-url`、`app.third-party.base-url`、
+    `app.canary.leave-path`。
+- 驗證結果：`bash scripts/validate.sh` → 49/49 PASS、exit 0（`npm run validate` 同樣 exit 0）。
+  反向測七種壞法全部 FAIL 且 exit 1：刪 key／cookie name 退回 JSESSIONID／pool size 退回 1／
+  csp-policy 改成空字串／C.3 的 key 整行刪掉／required-role 有 key 但無值／leave-path 少前綴。
+
+- **Learnings for future iterations:**
+  - **【最重要，US-006 / US-007 一定會踩】Git Bash 會竄改傳給 node 的參數。**
+    MSYS2 把長得像 POSIX 絕對路徑的參數翻成 Windows 路徑再交給原生 node.exe：
+    `node -e '...' "/gui_epmmFormQuery"` → node 收到的是
+    `"C:/Program Files/Git/gui_epmmFormQuery"`。這個 repo 的期望值一大半是
+    `/gui_epmmFormQuery` 開頭，所以那些斷言會【永遠 FAIL】，而錯誤訊息印出的
+    「期望: C:/Program Files/...」會讓人以為是 ConfigMap 被寫壞。**改用環境變數傳值
+    也救不了**（實測：環境變數的值一樣會被轉換）。正解是
+    `export MSYS2_ARG_CONV_EXCL='*'`，已經加在 `scripts/validate.sh` 開頭，
+    整支腳本涵蓋，**不要拿掉那一行**。US-006 的 `file:/app/config/application.yml`
+    與 US-007 的 `/gui_epmmFormQuery/actuator/health/liveness` 都吃這一條。
+    在腳本外面手動跑 `node -e` 驗證時要自己記得前面加 `MSYS2_ARG_CONV_EXCL='*'`。
+  - **新增了 `assert_cm_key_contains <key> <子字串>`**，跟 `assert_cm_key` 一樣會對
+    `TRACK_A_CONFIGMAPS` 裡的每一份各跑一次。用在「值會演進、但骨架不能掉」的設定，
+    目前只有 `csp-policy`。為什麼不整串釘死：附錄 A.2 與 3.5.1 都明說那條政策會被改
+    （canary 那份可以先加新 origin）。為什麼不能只檢查存在：`csp-policy: ""` 是合法
+    YAML，而空字串正好就是「header 完全不送」的失效值，`assert_cm_key` 會放它過
+    （空字串通過是刻意的設計，`required-role` 靠它）。
+  - **C.2 比對值、C.3 只檢查存在，這個分工是刻意的。** C.3 的值本來就等於 Java 預設，
+    把它們釘死等於把另一個 repo 的預設值抄一份進來 —— 對方改了預設，這裡就變成假警報。
+    唯一的例外是 `app.canary.leave-path`（附錄 C.3 特別點名）：它被後端三處讀取，
+    值錯不是「退回預設」而是三處對不上、逃生門安靜失效，所以那一個釘死值。
+  - **`user-name-attribute` 這次刻意只檢查存在。** 檔案裡現在還是 `preferred_username`，
+    US-004 才會改成 `sub` 並把值釘死。先放存在檢查，是為了讓那個 key 不會在 US-004
+    動手之前先被人整行刪掉。US-004 要做的是把它升級成帶期望值的斷言，並且【涵蓋
+    track-b】—— `TRACK_A_CONFIGMAPS` 只有 track-a，US-004 需要另開一個涵蓋兩軌的陣列，
+    不要把 track-b 塞進 `TRACK_A_CONFIGMAPS`（C.1/C.2/C.3 的那些 key 檢查目前只適用 track-a）。
+  - **改 YAML 用「fragment 檔 + node 錨點插入」比 sed 可靠。** 要插入的區塊裡同時有
+    `${...}`、單引號（CSP 的 `'self'`）和中文，直接用 sed 或 JS 樣板字串都會被吃掉。
+    做法：用 `<<'FRAG'`（單引號 heredoc，不做任何展開）把區塊寫進 repo 內的暫存檔，
+    再用 node 讀檔、以「錨點字串必須剛好出現一次」的方式插入，插完把暫存目錄刪掉。
+    錨點唯一性用 `split(anchor).length !== 2` 檢查 —— 錨點不唯一時直接丟錯，
+    比默默插到錯的地方好。
+  - **`git diff --stat` 應該是純新增。** 這個 story 結束時是 `81 insertions(+)`、
+    0 deletions —— 反向測試如果沒還原乾淨，這裡會立刻看出來。每次反向測試都用
+    `cp` 備份到 repo 內的相對路徑（不要用 `/tmp`），跑完馬上還原並複驗 exit 0。
+  - **US-005 要刪的 `app.cors` / `app.sso` / `app.test-endpoints` 仍在檔案裡，這是對的。**
+    這次新增的區塊插在 `post-logout-redirect-uri` 之後、`cors:` 之前，所以 US-005
+    把那三塊刪掉之後，剩下的順序會剛好等於 CANARY-COMPLETE.md 3.5 的順序。
 ---
