@@ -40,6 +40,24 @@ cd "$REPO_ROOT" || exit 1
 
 JS_YAML="node_modules/.bin/js-yaml"
 
+# --- Git Bash 的 argv 路徑轉換陷阱（實測過，不要拿掉這一行）------------------
+# 這台機器上的 node 是 Windows 原生執行檔，而這支腳本跑在 MSYS2（Git Bash）底下。
+# MSYS2 在把參數交給原生執行檔之前，會「好心地」把長得像 POSIX 絕對路徑的參數
+# 翻譯成 Windows 路徑。於是：
+#
+#     node -e '...' "/gui_epmmFormQuery"
+#         → node 收到的 argv 其實是 "C:/Program Files/Git/gui_epmmFormQuery"
+#
+# 這件事對這支腳本是致命的：底下每一個「期望值」都是靠 argv 傳進 node 的，而這個
+# repo 的設定值有一大半是 /gui_epmmFormQuery 開頭的路徑。沒有這一行的話，那些
+# 斷言會拿一個被竄改過的期望值去比對，結果是【永遠 FAIL】—— 而且錯誤訊息裡印出來
+# 的「期望」長得像是有人在 ConfigMap 裡寫了 C:\Program Files，足以讓人查很久。
+#
+# 改用環境變數傳值也救不了（實測：MSYS2 連環境變數的值也會轉換）。
+# MSYS2_ARG_CONV_EXCL='*' 是官方的關閉開關，意思是「所有參數都不要轉換」。
+# 在 Linux / macOS 上這個變數不存在意義，設了也完全無害。
+export MSYS2_ARG_CONV_EXCL='*'
+
 # --- check helper ------------------------------------------------------------
 # 用法：check <名稱> <指令> [參數...]
 #
@@ -210,6 +228,150 @@ assert_cm_key "app.post-logout-redirect-uri" \
 #   這就是為什麼這一項一定要比對完整的值，光檢查 key 存在沒有意義。
 assert_cm_key "spring.security.oauth2.client.registration.keycloak.redirect-uri" \
   '{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}'
+
+# client-id / client-secret：附錄 C.1 一併列了這兩個。它們的「值」是從 Secret 經
+#   envFrom 注入的，所以 ConfigMap 裡【只能是 ${...} 佔位符】（附錄 C.4）。把期望值
+#   釘成佔位符本身有兩個作用：key 被刪掉會 FAIL，而且有人把真的 client secret 貼進
+#   這份檔案時也會 FAIL —— ConfigMap 是明文的，任何拿得到 `kubectl get cm -o yaml`
+#   的人都看得到它。
+assert_cm_key "spring.security.oauth2.client.registration.keycloak.client-id" \
+  '${KEYCLOAK_CLIENT_ID}'
+assert_cm_key "spring.security.oauth2.client.registration.keycloak.client-secret" \
+  '${KEYCLOAK_CLIENT_SECRET}'
+
+# =============================================================================
+# 檢查 3：ConfigMap 必備 key（附錄 C.2 / C.3：漏掉會靜默退回錯誤的預設值）
+# =============================================================================
+# 為什麼要有這一項：
+#   檢查 [2] 釘住的是「漏掉 pod 起不來」那一類 —— 那一類其實是最安全的，因為它
+#   會當場炸給你看。這一段釘住的是更危險的一類：漏掉之後 Spring 拿【自己的預設值】
+#   頂上，pod 照樣起來、探針照樣綠燈，只有行為悄悄變了。session 從 8 小時縮成
+#   30 分鐘、cookie 從 __Host-JSESSIONID 變回 JSESSIONID 去跟 Envoy 的親和 cookie
+#   撞名、CSP header 整個不送 —— 這三件事都不會產生任何一行錯誤訊息，也不會有人
+#   在 review 時看出來，因為「設定看起來還在」。
+#
+# 這一段的分工（對應 CANARY-COMPLETE.md 附錄 C）：
+#   C.2 —— 預設值跟我們要的【不一樣】，所以一律比對「值」；光檢查 key 存在沒有用。
+#   C.3 —— 預設值跟我們要的【剛好一樣】，漏掉不會改變行為，只會讓這份檔案不再是
+#          設定的唯一真相（replace 語意下，讀的人沒有別的地方可以查）。所以這一組
+#          只檢查存在，不把值釘死 —— 釘死的話等於把另一個 repo 的預設值也抄了一份
+#          進來，那是自找的維護負擔。
+echo "== [3] ConfigMap 必備 key（附錄 C.2 / C.3：漏掉會靜默退回錯誤的預設值）=="
+
+# --- 附錄 C.2：預設值跟我們要的不一樣，所以一律比對「值」 ---------------------
+
+# session cookie 名稱：漏掉會退回 JSESSIONID，一次失去兩件事 —— __Host- 前綴的
+#   瀏覽器層保護，以及「不跟 DestinationRule consistentHash 用的 Envoy 親和 cookie
+#   撞名」（見 3.3）。撞名之後的症狀是偶發性掉登入，最難查的那一種。
+assert_cm_key "server.servlet.session.cookie.name" "__Host-JSESSIONID"
+
+# session timeout：漏掉會退回 Spring 預設的 30 分鐘（預期 8 小時），而且會破壞
+#   「Keycloak SSO Session Idle >= servlet session timeout」這條規則。
+assert_cm_key "server.servlet.session.timeout" "8h"
+
+# 排程執行緒數：漏掉會退回 1，於是 30 秒一次的 pilot 名單 reload 排在 60 秒一次的
+#   Keycloak token refresh 後面 —— 「改名單多久生效」變成不可預測，而改名單是維運
+#   最常做的事。
+assert_cm_key "spring.task.scheduling.pool.size" "2"
+
+# canary cookie path：漏掉會退回 Java 預設的 "/"，cookie 變成 host-wide，而且之後
+#   CanaryCookies.clear() 清不掉它（Set-Cookie 要 name/Path/Domain 全對才會覆蓋）
+#   —— 使用者會被黏在 canary 上直到 8 小時過期，連逃生門都救不了。
+assert_cm_key "app.canary.cookie-path" "/gui_epmmFormQuery"
+
+# actuator base-path：漏掉會退回 /actuator，而探針打的是帶前綴的路徑（見 3.6）
+#   → 404。US-007 會把探針改成 health/liveness、health/readiness，更依賴這一行。
+assert_cm_key "management.endpoints.web.base-path" "/gui_epmmFormQuery/actuator"
+
+# user-name-attribute：這裡【刻意只檢查存在】。值的斷言是 US-004 的工作 —— 這份
+#   檔案現在還寫著 preferred_username，US-004 才會改成 sub 並在這裡把它釘死。先放
+#   一個存在檢查，是為了讓這個 key 不會在 US-004 動手之前就先被人整行刪掉。
+assert_cm_key "spring.security.oauth2.client.provider.keycloak.user-name-attribute"
+
+# csp-policy 不能用 assert_cm_key 直接比對整串：附錄 A.2 與 3.5.1 都明說這條政策
+# 是會被改的（canary 那份可以先加一個新 origin 再回頭改 stable），把整串釘死等於
+# 每次調政策都得改這支腳本。但「只檢查 key 存在」又擋不住真正的失效模式 ——
+# `csp-policy: ""` 是合法 YAML，而空字串正好就是「header 完全不送」的那個值，
+# assert_cm_key 會放它過（空字串是刻意允許的，見 CM_KEY_SCRIPT 的說明）。
+# 所以這裡改用子字串比對：釘住政策的骨架，同時允許 origin 清單演進。
+CM_KEY_CONTAINS_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file, keyPath, needle] = process.argv.slice(1);
+const cm = y.load(fs.readFileSync(file, "utf8"));
+const raw = cm && cm.data && cm.data["application.yml"];
+if (typeof raw !== "string") {
+  console.error(file + ": 沒有 data[\"application.yml\"]，這不是一份預期中的 ConfigMap");
+  process.exit(1);
+}
+const app = y.load(raw);
+let cur = app;
+for (const seg of keyPath.split(".")) {
+  if (cur === null || typeof cur !== "object" || !(seg in cur)) {
+    console.error(file + ": 缺少 key  " + keyPath);
+    process.exit(1);
+  }
+  cur = cur[seg];
+}
+if (typeof cur !== "string" || !cur.includes(needle)) {
+  console.error(file + ": key " + keyPath + " 少了必要的片段");
+  console.error("  應包含: " + needle);
+  console.error("  實際值: " + JSON.stringify(cur));
+  process.exit(1);
+}
+'
+
+# 用法：assert_cm_key_contains <dotted.key.path> <必須出現的子字串>
+assert_cm_key_contains() {
+  local key="$1" needle="$2"
+  local cm
+  for cm in "${TRACK_A_CONFIGMAPS[@]}"; do
+    check "cm-key $key contains [$needle] ($(basename "$cm"))" \
+      node -e "$CM_KEY_CONTAINS_SCRIPT" "$cm" "$key" "$needle"
+  done
+}
+
+# frame-ancestors 'none' 是這條政策裡唯一真的有安全意義的指令（點擊劫持）；
+# default-src 'self' 是整條政策的地基。這兩段還在，就代表沒有人「為了讓某個東西
+# 動起來」把政策整條掏空成 default-src *。
+assert_cm_key_contains "app.security.csp-policy" "frame-ancestors 'none'"
+assert_cm_key_contains "app.security.csp-policy" "default-src 'self'"
+
+# --- 附錄 C.3：值跟 Java 預設相同，只檢查存在 --------------------------------
+# 「跟預設相同」不是省略的理由：US-006 之後是 replace 語意，jar 裡的
+# application.yml 完全不會被載入，這份 ConfigMap 就是這個環境設定的唯一真相。
+# 讀的人要能只看這個檔案就知道 app 怎麼跑，不必去翻另一個 repo 的 @Value 預設值。
+# 這一組因此只檢查「有沒有寫」，不比對值 —— 值本來就等於預設，釘死它只是把別的
+# repo 的預設值抄一份過來，之後對方改了這裡就會變成假警報。
+for cm_key in \
+  "app.context-prefix" \
+  "app.frontend.url-prefix" \
+  "app.frontend.resource-location" \
+  "app.frontend.index-path" \
+  "app.frontend.classpath-base" \
+  "app.canary.entry-path" \
+  "app.canary.roster-file" \
+  "app.canary.roster-reload-ms" \
+  "app.silent-auth.enabled" \
+  "app.silent-auth.hint-cookie-name" \
+  "app.silent-auth.hint-cookie-max-age-seconds" \
+  "app.silent-auth.cookie-secure" \
+  "app.token-refresh.enabled" \
+  "app.token-refresh.skew-seconds" \
+  "app.token-refresh.schedule-rate-ms" \
+  "app.security.csp-report-only" \
+  "app.security.required-role" \
+  "app.privilege.enabled" \
+  "app.downstream.base-url" \
+  "app.third-party.base-url"
+do
+  assert_cm_key "$cm_key"
+done
+
+# leave-path 是 C.3 裡唯一一個把值釘死的例外，附錄 C.3 也特別點名了它：這個值同時
+# 被 CanaryLeaveController 的 @GetMapping、SecurityConfig 的 permitAll 清單、
+# CanaryEvictionFilter 的 pass-through 三處讀取。值寫錯不是「退回預設」，而是三處
+# 對不上、逃生門安靜地失效 —— 而它存在的意義正好是「其他東西都壞了的時候」。
+assert_cm_key "app.canary.leave-path" "/gui_epmmFormQuery/canary/leave"
 
 # --- 總結 --------------------------------------------------------------------
 echo

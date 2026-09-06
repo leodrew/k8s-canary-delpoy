@@ -27,10 +27,44 @@ data:
     server:
       port: 8080
       forward-headers-strategy: framework
+      servlet:
+        session:
+          # 【漏掉會靜默出錯】Spring 的預設是 30 分鐘 —— 使用者 30 分鐘沒動作就被
+          # 登出，而這裡預期的是 8 小時。這一行也撐著「Keycloak SSO Session Idle
+          # 必須 >= servlet session timeout」這條規則：servlet session 先過期時，
+          # 使用者會被送回 Keycloak，而 Keycloak 那邊還認得他 —— 症狀是畫面閃一下
+          # 就回來了，沒有任何錯誤訊息可以查。見 CANARY-COMPLETE.md 附錄 C.2。
+          timeout: 8h
+          cookie:
+            # 【漏掉會靜默出錯】少了這一行會退回 Spring 預設的 JSESSIONID，
+            # 一次失去兩件事：
+            #   1. __Host- 前綴的保護 —— 這個前綴是瀏覽器強制的契約（必須 Secure、
+            #      必須 Path=/、不得帶 Domain），子網域因此無法覆寫這個 cookie。
+            #   2. 名字不再跟 Envoy 的親和 cookie 撞。DestinationRule 的
+            #      consistentHash 也是拿 cookie 做 session affinity（見 3.3），
+            #      兩邊叫同一個名字時誰蓋誰不可預測，而症狀是「偶爾掉登入」
+            #      —— 這個 repo 裡最難查的一種問題。
+            name: __Host-JSESSIONID
+            # lax 不能改成 strict：Keycloak 導回來的 callback 是跨站發起的
+            # 頂層導向，strict 會讓瀏覽器不帶 session cookie，登入永遠走不完。
+            same-site: lax
+            secure: true     # __Host- 前綴的硬性要求，少了瀏覽器直接拒收整個 cookie
+            http-only: true  # 擋掉 document.cookie，XSS 偷不到 session
 
     spring:
       application:
         name: pmc-epmmformquerygui
+      task:
+        scheduling:
+          pool:
+            # 【漏掉會靜默出錯】預設是 1 —— 一條執行緒要輪流跑兩件事：
+            # 60 秒一次的 Keycloak token refresh（app.token-refresh.schedule-rate-ms），
+            # 以及 30 秒一次的 canary 名單 reload（app.canary.roster-reload-ms）。
+            # 名單 reload 會排在 token refresh 後面，於是「改了 pilot 名單多久生效」
+            # 變得不可預測 —— 而改名單正是維運最常做的事（見 7.1）。
+            # 這個問題不會報錯，只會慢，所以它只會被當成「感覺怪怪的」。
+            # 見 CANARY-COMPLETE.md 附錄 C.2。
+            size: 2
       security:
         oauth2:
           client:
@@ -92,6 +126,47 @@ data:
       # 沒設時，退回冒號後面那個字面值。見 CANARY-COMPLETE.md 3.5 與附錄 C.1。
       post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}
 
+      security:
+        # 【漏掉會靜默出錯】後端讀的是 @Value("${app.security.csp-policy:}") ——
+        # 【冒號後面是空的】，也就是預設值是空字串。而空字串的結果不是「套用一條
+        # 寬鬆的政策」，是【連 Content-Security-Policy-Report-Only 這個 header
+        # 都不會送出去】。漏掉這一行不會有任何報錯、任何日誌，CSP 就是整個消失。
+        # 見 CANARY-COMPLETE.md 附錄 A.2 與附錄 C.2。
+        #
+        # 【這條政策今天擋不了任何東西，這是已知狀態】csp-report-only: true 代表
+        # 只送 Report-Only 版本的 header；而政策裡又沒有 report-uri / report-to，
+        # 所以它「不擋、也不收」—— 違規發生時你不會知道。要切成 enforce 的步驟
+        # 寫在附錄 A.2，照順序走，不要直接把 csp-report-only 改成 false。
+        csp-policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        csp-report-only: true
+        # 【刻意的空字串，不是漏填】空字串代表「不要求任何角色」。寫出來是為了讓
+        # 讀的人知道「這裡有一個開關，而它現在是關的」—— 不寫的話，下一個人得去翻
+        # Java 原始碼才能確認沒有隱藏的角色檢查。
+        required-role: ""
+
+      # 底下這幾塊的值跟 Java 的 @Value 預設相同（附錄 C.3），列出來不是多餘的：
+      # US-006 之後走的是 SPRING_CONFIG_LOCATION（replace 語意），jar 裡那份
+      # application.yml 完全不會被載入，這份 ConfigMap 就是這個環境設定的唯一真相。
+      # 讀的人應該只看這個檔案就知道 app 怎麼跑，而不是去翻另一個 repo 的原始碼。
+      token-refresh:
+        enabled: true
+        skew-seconds: 60         # 提早 60 秒視為過期，避免「剛好在換 token 的瞬間打過去」
+        schedule-rate-ms: 60000  # 排程間隔；跟上面 spring.task 的 pool size: 2 是同一件事的兩半
+
+      silent-auth:
+        enabled: true                         # 註：目前沒有任何程式讀這個 toggle
+        hint-cookie-name: ea_login_hint
+        hint-cookie-max-age-seconds: 2592000  # 30 天
+        cookie-secure: true
+
+      # 下游服務位址。ConfigMap 拆成 -stable / -canary 兩份之後（US-008），
+      # canary 那份可以指到 canary 後端而完全不動 stable —— 那正是拆兩份才做得到
+      # 的事，見 3.5.1 與附錄 A。
+      downstream:
+        base-url: ${DOWNSTREAM_API_URL:http://internal-api:8080}
+      third-party:
+        base-url: ${THIRD_PARTY_API_URL:https://partner.example.com}
+
       cors:
         allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
         allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,PATCH,OPTIONS}
@@ -131,6 +206,12 @@ data:
         roster-file: /app/canary/pilot-users.txt
         roster-reload-ms: 30000
         entry-path: /gui_epmmFormQuery/web/
+        # 【三處共用同一個值】這一行同時被 CanaryLeaveController 的 @GetMapping、
+        # SecurityConfig 的 permitAll 清單、CanaryEvictionFilter 的 pass-through
+        # 讀取。三處只要有一處對不上，逃生門就會安靜地失效 —— 而它存在的意義正好
+        # 是「其他東西都壞掉的時候，使用者還有辦法自己離開 canary」。
+        # 值跟 Java 預設相同，但不能因此省略，見附錄 C.3。
+        leave-path: /gui_epmmFormQuery/canary/leave
 
     logging:
       level:

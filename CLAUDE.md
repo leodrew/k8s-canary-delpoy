@@ -35,6 +35,11 @@ bash scripts/validate.sh      # 或 npm run validate
   每一份 ConfigMap 各跑一次檢查。省略期望值時只檢查 key 存在。行為上有三種結果要分清楚：
   key 沒寫 → 失敗；寫了 key 但沒有值（解析成 `null`）→ 失敗；寫成空字串 `""` → 通過
   （`app.security.required-role` 就是刻意的空字串）。
+- **`assert_cm_key_contains <dotted.key.path> <子字串>`** —— 值會演進、但骨架不能掉的
+  設定用這個。目前只有 `app.security.csp-policy`：那條政策照設計就是會被改的
+  （附錄 A.2、3.5.1 說 canary 那份可以先加新 origin），整串釘死等於每次調政策都要改
+  腳本；但只檢查 key 存在又擋不住 `csp-policy: ""` —— 空字串正好就是「CSP header
+  完全不送」的那個值，而 `assert_cm_key` 會放它過。
 - **`TRACK_A_CONFIGMAPS`** —— ConfigMap 檔案清單。ConfigMap 拆成 `-stable` / `-canary`
   兩份之後，把新檔名加進這個陣列就好，所有既有的 key 檢查會自動對兩份都跑，
   不需要把檢查複製一遍。
@@ -64,6 +69,19 @@ YAML 一律用本地的 `node_modules/.bin/js-yaml` 解析，不要用 `npx --ye
 **node 是 Windows 執行檔，Git Bash 的 `/tmp` 它看不到** —— node 會把 `/tmp/x` 解讀成
 `C:\tmp\x`，於是 shell 那邊寫出去的暫存檔在 node 這邊是 `ENOENT`（實測過）。
 要在 shell 與 node 之間傳檔案，用 repo 內的相對路徑，用完刪掉。
+
+**Git Bash 會竄改傳給 node 的參數**（實測，比上面那個 `/tmp` 的坑更容易中）。MSYS2 在把
+參數交給 Windows 原生執行檔之前，會把長得像 POSIX 絕對路徑的字串翻譯成 Windows 路徑：
+
+```
+node -e '...' "/gui_epmmFormQuery"   →  node 實際收到 "C:/Program Files/Git/gui_epmmFormQuery"
+```
+
+這個 repo 的設定值有一大半是 `/gui_epmmFormQuery` 開頭的，所以任何「把期望值當參數傳進
+node 去比對」的斷言都會【永遠 FAIL】，而且錯誤訊息會印出 `C:\Program Files`，看起來像是
+ConfigMap 被寫壞了。改用環境變數傳值也救不了（環境變數的值一樣會被轉換）。
+`scripts/validate.sh` 開頭已經 `export MSYS2_ARG_CONV_EXCL='*'` 關掉整支腳本的轉換，
+新增檢查時不要拿掉那一行；在腳本外面手動跑 `node -e` 驗證時則要自己記得加。
 
 ## 範圍
 
