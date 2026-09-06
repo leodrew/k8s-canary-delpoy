@@ -75,7 +75,23 @@ spec:
             - secretRef:
                 name: pmc-epmmformquery-secret
           env:
-            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+            # 【設定載入路徑 — 完整說明見 20-deployment-stable.yaml 的同一段】
+            # 路徑要對上底下 volumeMounts 的 config（mountPath: /app/config）。
+            # image 的 Dockerfile:120 內建 SPRING_CONFIG_LOCATION=file:/config/application.yaml，
+            # 而這個 repo 從來不往 /config 掛東西 —— 那個路徑找不到檔案，Spring Boot
+            # 會丟 ConfigDataLocationNotFoundException，pod 直接 CrashLoopBackOff。
+            # Deployment 的 env 會覆蓋 image 的 ENV，所以不需要重建 image。
+            # 原本這裡寫的是 SPRING_CONFIG_ADDITIONAL_LOCATION —— 那是另一個變數
+            # （merge 語意），它蓋不掉 image 那個同名變數，所以壞路徑依然生效。
+            #
+            # 【代價】replace 語意，不是 merge：jar 裡的 application.yml 完全不會
+            # 被載入，ConfigMap 沒寫的 key 一律退回 Java 的 @Value 預設值。canary
+            # 這一側特別要記住這件事 —— US-008 之後兩軌各有自己的 ConfigMap，
+            # 「只改 canary 那份」很容易變成「只在 canary 那份漏掉某個 key」，
+            # 而漏掉的症狀多半不是啟動失敗，是行為安靜地不一樣。
+            # 完整的必備 key 清單見 CANARY-COMPLETE.md 附錄 C，由
+            # scripts/validate.sh 檢查 [2]/[3] 釘住。
+            - name: SPRING_CONFIG_LOCATION
               value: "file:/app/config/application.yml"
             - name: APP_TRACK
               value: "canary"               # log 裡可以直接分辨

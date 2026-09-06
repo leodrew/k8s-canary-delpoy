@@ -540,6 +540,174 @@ assert_cm_key_absent "app.sso" \
 assert_cm_key_absent "app.test-endpoints" \
   "沒有任何程式讀它；測試端點的開關不在 ConfigMap 裡。"
 
+# =============================================================================
+# 檢查 6：設定載入路徑 —— SPRING_CONFIG_LOCATION 要對上真正的 mount 點
+# =============================================================================
+# 為什麼要有這一項：
+#   這是「pod 現在為什麼起不來」的直接原因（CANARY-COMPLETE.md 3.1），而它的失效
+#   方式有兩種，兩種的錯誤訊息都不會指向那一行 env：
+#
+#     1. 變數【名字】錯。原本兩份 Deployment 寫的是 SPRING_CONFIG_ADDITIONAL_LOCATION
+#        —— 那是另一個變數，merge 語意，它蓋不掉 image 內建的同名
+#        SPRING_CONFIG_LOCATION=file:/config/application.yaml（Dockerfile:120），
+#        而這個 repo 從來不往 /config 掛東西 → Spring Boot 對找不到的非 optional:
+#        location 丟 ConfigDataLocationNotFoundException → CrashLoopBackOff。
+#     2. 變數【路徑】跟 volumeMount 對不上。改了 mountPath 卻沒回頭改 env（或反過來）
+#        是同一個症狀，而改 mountPath 的人通常不會想到 env 也綁著這個值。
+#
+#   所以底下不是只比對一個寫死的字串，而是把 env 的值跟這份 manifest 自己的
+#   config volumeMount mountPath【互相對照】—— 任何一邊被單獨改動都會 FAIL。
+#
+# 為什麼是解析 YAML 而不是 grep 原始檔：
+#   US-006 依這個 repo 的慣例，在 env 上面留了一整段註解解釋「原本是
+#   SPRING_CONFIG_ADDITIONAL_LOCATION、為什麼那樣是錯的」。那段註解本身就寫著
+#   SPRING_CONFIG_ADDITIONAL_LOCATION 這幾個字，所以 grep 版本的檢查會被自己的
+#   說明文字打到、變成永遠 FAIL，然後被人改成「先 grep -v 掉註解」那種一碰就碎的
+#   寫法。解析後的物件上不存在註解，問「有沒有這個 env 項目」才是問對問題 ——
+#   跟檢查 [5] 是同一個道理。
+echo "== [6] 設定載入路徑：SPRING_CONFIG_LOCATION 對上 mount 點 =="
+
+# track-a 的兩份 Deployment。US-007（探針路徑）與 US-009（config-hash 註解）的
+# 檢查都會再用到這個陣列，不要另外複製一份清單。
+# 這兩個檔名彼此不同，所以這一組可以直接用 basename 當檢查名稱，
+# 不需要像 ConfigMap 那樣走 cm_label（那兩份的檔名一模一樣）。
+TRACK_A_DEPLOYMENTS=(
+  "canary-manual/track-a/release/20-deployment-stable.yaml"
+  "canary-manual/track-a/release/21-deployment-canary.yaml"
+)
+
+# 期望值寫死在腳本裡、不從 argv 傳，理由跟檢查 [4] 一樣：這一段要比對的東西不只
+# 一個值，而且腳本裡本來就要印出「為什麼不行」的整段說明。
+SPRING_CONFIG_LOCATION_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file] = process.argv.slice(1);
+const EXPECTED = "file:/app/config/application.yml";
+const BAD = "SPRING_CONFIG_ADDITIONAL_LOCATION";
+
+const docs = y.loadAll(fs.readFileSync(file, "utf8")).filter(Boolean);
+
+// 深走整棵樹收集指定 key 的值。不寫死 spec.template.spec.containers 這條路徑，
+// 是為了讓同一段腳本對 Deployment 與 track-b 的 Rollout 都適用。
+function collect(node, key, out) {
+  if (Array.isArray(node)) { for (const v of node) collect(v, key, out); return out; }
+  if (node && typeof node === "object") {
+    for (const k of Object.keys(node)) {
+      if (k === key) out.push(node[k]);
+      collect(node[k], key, out);
+    }
+  }
+  return out;
+}
+
+const containers = [].concat(...collect(docs, "containers", []));
+if (containers.length === 0) {
+  console.error(file + ": 找不到任何 container，這不是一份預期中的 workload manifest");
+  process.exit(1);
+}
+
+let failed = false;
+for (const c of containers) {
+  const where = file + " (container " + c.name + ")";
+  const env = Array.isArray(c.env) ? c.env : [];
+
+  if (env.some(e => e && e.name === BAD)) {
+    console.error(where + ": 又出現 " + BAD + " 了。");
+    console.error("  那是 merge 語意的【另一個變數】，蓋不掉 image 內建的同名");
+    console.error("  SPRING_CONFIG_LOCATION=file:/config/application.yaml，於是 image 那個");
+    console.error("  沒有東西掛的壞路徑依然生效 → CrashLoopBackOff。要改的是變數名稱，");
+    console.error("  不只是路徑。見 CANARY-COMPLETE.md 3.1。");
+    failed = true;
+  }
+
+  const hits = env.filter(e => e && e.name === "SPRING_CONFIG_LOCATION");
+  if (hits.length !== 1) {
+    console.error(where + ": SPRING_CONFIG_LOCATION 有 " + hits.length + " 項，應該剛好 1 項");
+    failed = true;
+    continue;
+  }
+  const val = hits[0].value;
+
+  if (val !== EXPECTED) {
+    console.error(where + ": SPRING_CONFIG_LOCATION 的值不對");
+    console.error("  期望: " + EXPECTED);
+    console.error("  實際: " + JSON.stringify(val));
+    failed = true;
+  }
+
+  const mounts = Array.isArray(c.volumeMounts) ? c.volumeMounts : [];
+  const cfg = mounts.find(m => m && m.name === "config");
+  if (!cfg) {
+    console.error(where + ": 找不到名為 config 的 volumeMount");
+    console.error("  ConfigMap 沒掛進來的話，SPRING_CONFIG_LOCATION 指到哪都沒有意義。");
+    failed = true;
+    continue;
+  }
+  const derived = "file:" + cfg.mountPath + "/application.yml";
+  if (val !== derived) {
+    console.error(where + ": SPRING_CONFIG_LOCATION 跟 config volumeMount 對不上");
+    console.error("  mountPath 是 " + cfg.mountPath + " → env 應該是 " + derived);
+    console.error("  env 實際是 " + JSON.stringify(val));
+    console.error("  這兩個值是綁在一起的：只改其中一邊，Spring 就會去讀一個沒有東西掛");
+    console.error("  的路徑 → ConfigDataLocationNotFoundException → CrashLoopBackOff。");
+    failed = true;
+  }
+}
+process.exit(failed ? 1 : 0);
+'
+
+for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
+  check "spring-config-location $(basename "$dep")" \
+    node -e "$SPRING_CONFIG_LOCATION_SCRIPT" "$dep"
+done
+
+# --- 反方向：SPRING_CONFIG_ADDITIONAL_LOCATION 不得出現在任何 manifest 裡 -----
+# 上面那段只看 track-a 的兩份 Deployment。這一段掃過 canary-manual/ 底下【每一份】
+# *.yaml，防的是「新加的 manifest 從舊檔案複製 env 區塊」這條復活路徑 ——
+# 跟檢查 [5] 擋死設定復活是同一個思路。
+#
+# 掃的是解析後的物件（JSON.stringify 整份文件），所以：
+#   - env 的 name、值、甚至 ConfigMap data 裡夾帶的字串都掃得到
+#   - YAML 註解掃不到（它們在解析後就不存在了）—— 這正是要的行為，
+#     因為 US-006 寫的那段說明註解本身就含有這個變數名。
+#
+# 兩個刻意不掃的東西，理由寫在這裡免得下一個人以為是漏掉：
+#   - *.md 文件（尤其 CANARY-COMPLETE.md 3.1 與 5.x）。那些地方提到這個變數名是
+#     在【解釋為什麼它是錯的】，把它們掃進來等於要求刪掉那段說明。
+#   - canary-manual/track-b/release/20-rollout.yaml。track-b 這一軌不在這次的範圍
+#     內，而它的 ConfigMap 沒有被 US-002/US-003 補齊（附錄 C.2 / C.3 那一批 key
+#     都還沒寫）。在那個狀態下把它一起翻成 replace 語意，會讓 session timeout
+#     悄悄縮成 30 分鐘、cookie 改回 JSESSIONID、CSP header 整個不送 —— 那是把
+#     manifest 改得更糟，不是更好，跟 US-006 排在 US-002..US-005 後面是同一個理由。
+#     要修 track-b 的話，順序是：先照附錄 C 補齊 track-b 的 ConfigMap，再把它從
+#     這行排除清單拿掉，兩件事在同一個 commit 裡。
+SPRING_CONFIG_SWEEP_SKIP="canary-manual/track-b/release/20-rollout.yaml"
+
+SPRING_CONFIG_ADDITIONAL_ABSENT_SCRIPT='
+const fs = require("fs"), y = require("js-yaml");
+const [file] = process.argv.slice(1);
+const BAD = "SPRING_CONFIG_ADDITIONAL_LOCATION";
+const docs = y.loadAll(fs.readFileSync(file, "utf8")).filter(Boolean);
+if (JSON.stringify(docs).includes(BAD)) {
+  console.error(file + ": 出現了 " + BAD + "。");
+  console.error("  這個變數是 merge 語意，而 image 內建的是同名的");
+  console.error("  SPRING_CONFIG_LOCATION=file:/config/application.yaml（Dockerfile:120）——");
+  console.error("  設了前者【蓋不掉】後者，image 那個沒有東西掛的路徑依然生效，");
+  console.error("  結果是 ConfigDataLocationNotFoundException → CrashLoopBackOff。");
+  console.error("  正確寫法：name 用 SPRING_CONFIG_LOCATION，value 對上 config");
+  console.error("  volumeMount 的 mountPath。見 CANARY-COMPLETE.md 3.1。");
+  process.exit(1);
+}
+process.exit(0);
+'
+
+while IFS= read -r manifest; do
+  if [ "$manifest" = "$SPRING_CONFIG_SWEEP_SKIP" ]; then
+    continue
+  fi
+  check "no-additional-location $manifest" \
+    node -e "$SPRING_CONFIG_ADDITIONAL_ABSENT_SCRIPT" "$manifest"
+done < <(find canary-manual -type f -name '*.yaml' | sort)
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then

@@ -54,6 +54,10 @@ bash scripts/validate.sh      # 或 npm run validate
   訊息，寫「為什麼這塊是死的」，讓想加回來的人在錯誤訊息裡就讀到理由。
   注意「寫了 key 但沒有值」（只留一行 `cors:`）算**失敗** —— 那仍然是一個會被讀到的
   key，語意跟 `assert_cm_key` 那邊「空字串算通過」是不同的判斷，不要混用。
+- **`TRACK_A_DEPLOYMENTS`** —— track-a 那兩份 Deployment（`20-deployment-stable.yaml`
+  ／`21-deployment-canary.yaml`）的清單，給「兩份 Deployment 都要有同一項設定」的
+  檢查用（目前是 `SPRING_CONFIG_LOCATION`；探針路徑、`config-hash` 註解也會用到）。
+  這兩個檔名彼此不同，所以這一組的檢查名稱直接用 `basename` 就夠，不必走 `cm_label`。
 - **`cm_label <檔案路徑>`** —— 兩個 track 的 ConfigMap 檔名一模一樣（都叫
   `10-configmap-1.2.3.yaml`），所以跨 track 的檢查名稱不能用 `basename`：
   兩行 PASS 會長得完全一樣，失敗時看不出是哪一份壞了。這個 helper 印出
@@ -69,6 +73,13 @@ bash scripts/validate.sh      # 或 npm run validate
 Spring 用自己的預設值頂上」—— 設定看起來還在，行為已經變了。`redirect-uri` 就是標準
 案例：少了 `/gui_epmmFormQuery` 前綴，登入 callback 進不來，而錯誤訊息不會指向 ConfigMap。
 
+**兩個互相綁定的欄位，要拿它們互相對照，不要各自釘一個常數。** manifest 裡有幾組值
+是必須一致的 —— `SPRING_CONFIG_LOCATION` 的路徑與 `config` volumeMount 的
+`mountPath` 是最典型的一組。把兩邊各自跟一個寫死的字串比對，只擋得住「兩邊都改錯」；
+真正會發生的是「改了 mountPath 卻沒回頭改 env」，而改 mountPath 的人根本不會想到
+env 也綁著這個值。正確的寫法是從 manifest 讀出 `mountPath`、推出 env 應該長什麼樣，
+再跟實際的 env 比 —— 這樣任何一邊被單獨改動都會 FAIL。
+
 **刪掉設定也是一種修改，一樣要加檢查 —— 而且是反方向的那種。** 刪除死設定
 （沒有任何程式讀的 key）之後，唯一會出事的方式是有人把它加回來；而加回來同樣不會
 產生任何症狀，所以沒有人會發現。這種情況用 `assert_cm_key_absent`，並且把「為什麼
@@ -77,6 +88,15 @@ Spring 用自己的預設值頂上」—— 設定看起來還在，行為已經
 
 加完檢查一定要**反向測一次**：把該 key 改壞、跑一次確認真的 FAIL、再還原。
 一個永遠綠燈的檢查比沒有檢查更糟，因為它會讓人以為有防護。
+「某個字串不得出現在任何 manifest 裡」這類掃描檢查，一樣要解析 YAML 之後再看
+（對整份解析結果 `JSON.stringify` 再找子字串就夠了），不要 grep 原始檔：這個 repo
+的慣例是在改掉一個設定的地方留一整段註解解釋「原本是什麼、為什麼那樣是錯的」，
+那段註解本身就含有要禁止的字串，grep 版本會被自己的說明文字打到、變成永遠 FAIL。
+掃描如果有刻意排除的檔案（例如 `SPRING_CONFIG_ADDITIONAL_LOCATION` 的掃描排除了
+`track-b/release/20-rollout.yaml`：track-b 的 ConfigMap 還沒依附錄 C 補齊，
+在那個狀態下把它翻成 replace 語意會讓設定悄悄退回 Java 預設值，是把 manifest 改得
+更糟），要把「為什麼排除」和「什麼條件下可以拿掉」一起寫在排除清單旁邊。
+
 反向測「不得存在」這類檢查時，除了「整塊加回來」，記得也測
 「只留一行 `cors:`（key 有、值是 null）」和「整塊被註解掉」—— 後者必須維持 PASS，
 那正是這個檢查解析 YAML 而不是 grep 的意義。

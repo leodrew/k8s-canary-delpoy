@@ -79,7 +79,40 @@ spec:
             - secretRef:
                 name: pmc-epmmformquery-secret
           env:
-            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+            # 【設定載入路徑 — 動之前先讀 CANARY-COMPLETE.md 3.1】
+            # 這一行是整份 Deployment 裡最容易一次弄死整個環境的地方，而且弄死
+            # 之後的錯誤訊息完全不會指向真正的原因，所以註解寫長一點。
+            #
+            # 有三個值必須互相對得上：
+            #   image 的 Dockerfile:120      ENV SPRING_CONFIG_LOCATION=file:/config/application.yaml
+            #   這一行 env                    SPRING_CONFIG_LOCATION=file:/app/config/application.yml
+            #   底下 volumeMounts 的 config    mountPath: /app/config
+            #
+            # image 內建的那個路徑【沒有任何東西掛在上面】—— 這個 repo 從來不往
+            # /config 掛任何 volume。Spring Boot 2.4+ 遇到一個非 optional: 又找不到
+            # 的 spring.config.location 會丟 ConfigDataLocationNotFoundException，
+            # pod 直接 CrashLoopBackOff。Deployment 的 env 會覆蓋 image 的 ENV
+            # （同名時 env 勝出），所以把這一行指到真正的 mount 點就修好了，
+            # 【不需要重建 image】—— 這是刻意的決定：修 k8s 這一側，不動另一個 repo。
+            #
+            # 原本這裡寫的是 SPRING_CONFIG_ADDITIONAL_LOCATION，那是【另一個變數】，
+            # merge 語意（jar 內的 application.yml 先載入、再被外部檔案疊上去）。
+            # 它沒有覆蓋掉 image 那個同名的 SPRING_CONFIG_LOCATION，所以 image 的壞
+            # 路徑依然生效、pod 依然起不來。要修的是變數名稱，不只是路徑。
+            #
+            # 【代價，必讀】SPRING_CONFIG_LOCATION 是 replace 語意，不是 merge：
+            # jar 裡的 application.yml 從此【完全不會被載入】。ConfigMap 沒寫的每一個
+            # key 都不是「退回 jar 裡的設定」，而是退回 Java 的 @Value 預設值。沒有
+            # 預設值的那幾個（issuer-uri、app.post-logout-redirect-uri）會讓 pod 起
+            # 不來 —— 那反而是安全的，因為它當場炸給你看；真正危險的是有預設值的那些：
+            # pod 照樣起來、探針照樣綠燈，只有行為悄悄變了（session 從 8 小時縮成 30
+            # 分鐘、cookie 從 __Host-JSESSIONID 變回 JSESSIONID 去跟 Envoy 的親和
+            # cookie 撞名、CSP header 整個不送）。
+            #
+            # 所以掛在這裡的 ConfigMap【必須是完整的】。完整的定義見
+            # CANARY-COMPLETE.md 附錄 C，並由 scripts/validate.sh 的檢查 [2]/[3]
+            # 逐項釘住。往那份 ConfigMap 刪 key 之前，先讀那兩節。
+            - name: SPRING_CONFIG_LOCATION
               value: "file:/app/config/application.yml"
             - name: APP_TRACK               # 方便 log 裡分辨自己是哪一軌
               value: "stable"
