@@ -45,10 +45,15 @@ spec:
         app: pmc-epmmformquerygui
         version: canary
       annotations:
-        # 【已失效，US-009 會換成 config-hash】完整說明在 20-deployment-stable.yaml
-        # 的同一個位置。摘要：ConfigMap 名稱固定之後這一行不再會跟著設定變動，
-        # 改了設定不會觸發滾動更新，於是新設定 apply 了卻沒有生效、也沒有錯誤訊息。
-        config-version: "1.2.3"
+        # config-hash —— 完整說明在 20-deployment-stable.yaml 的同一個位置。
+        # 摘要：值是【這一軌】的 ConfigMap（pmc-epmmformquery-config-canary）的
+        # data["application.yml"] 的 sha256 前 8 碼，由 scripts/sync-config-hash.sh
+        # 計算後回寫，不要手改。ConfigMap 的名稱固定之後，改設定內容不會改到 pod
+        # template，沒有這一行就不會觸發滾動更新 —— 新設定 apply 了卻沒有生效，
+        # 而且不會報錯。改完 ConfigMap 要跑一次同步腳本，並跟設定放同一個 commit。
+        # 兩軌的值目前會【相同】（兩份 ConfigMap 的 data 逐字相同，見 validate.sh
+        # 檢查 [8c]）；canary 依 3.5.1 分歧的那一天它們才會不同，那是預期的。
+        config-hash: "1d2149da"
         proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
     spec:
       serviceAccountName: pmc-epmmformquerygui

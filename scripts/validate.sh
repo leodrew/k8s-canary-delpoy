@@ -1097,6 +1097,208 @@ for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
     node -e "$DEPLOYMENT_TRACK_CONFIGMAP_SCRIPT" "$dep" "${TRACK_A_CONFIGMAPS[@]}"
 done
 
+# =============================================================================
+# 檢查 9：config-hash 必須等於自己那一軌 ConfigMap 內容的雜湊
+# =============================================================================
+# 為什麼要有這一項：
+#   US-008 之前，ConfigMap 的名字帶版本號，改設定 = 改名字 = 改到 pod template，
+#   kubectl apply 自然會滾動更新。名字固定之後那條因果鏈斷了：
+#
+#       改 ConfigMap 內容 → apply → pod template 一個欄位都沒變
+#         → 沒有任何 pod 重啟 → Spring 只在啟動時讀一次設定檔
+#         → 新設定 apply 了卻【沒有生效】
+#
+#   而且這件事沒有錯誤訊息：kubectl get / describe 都正常，ConfigMap 裡確實是
+#   新內容，只有行為跟你以為的不一樣。config-hash（data["application.yml"] 的
+#   sha256 前 8 碼）就是把那條鏈接回來的東西 —— 內容變 → hash 變 → template 變
+#   → 滾動更新（CANARY-COMPLETE.md 2.2 表格第 3 條、3.6）。
+#
+#   但 config-hash 自己的失效方式一樣是安靜的：改了 ConfigMap 卻忘了跑
+#   scripts/sync-config-hash.sh，hash 就停在舊值 —— 不會報錯，只是不重啟，
+#   症狀跟上面那一段一模一樣。這一段檢查是那個安靜失效【唯一】的攔截點：
+#   它自己重算一次雜湊，跟 manifest 裡寫的值比對，忘了跑同步腳本就 FAIL。
+#
+# 為什麼是推導而不是釘一個常數：
+#   期望值不是寫死的字串，而是從「這份 Deployment 掛的那一份 ConfigMap」的內容
+#   即時算出來的（走 volumes[config].configMap.name → metadata.name 索引，
+#   同檢查 [7] / [8d]）。所以改 ConfigMap 內容、改掛載的名字、改 hash 值，
+#   三者任何一個被單獨改動都會 FAIL。查不到名字時【必須 FAIL】不能 skip。
+echo "== [9] config-hash 對得上 ConfigMap 內容 =="
+
+CONFIG_HASH_SCRIPT='
+const fs = require("fs"), y = require("js-yaml"), crypto = require("crypto");
+const [file, ...cmFiles] = process.argv.slice(1);
+
+function collect(node, key, out) {
+  if (Array.isArray(node)) { for (const v of node) collect(v, key, out); return out; }
+  if (node && typeof node === "object") {
+    for (const k of Object.keys(node)) {
+      if (k === key) out.push(node[k]);
+      collect(node[k], key, out);
+    }
+  }
+  return out;
+}
+
+// ConfigMap 索引：metadata.name -> { file, hash }。
+// 雜湊的對象是【解析後】的 data[application.yml] 字串，不是原始檔的位元組 ——
+// 叢集那一端（6.3 節的 kubectl ... | sha256sum | cut -c1-8）算的也是這個，
+// 所以兩邊的值可以直接對照。對原始檔算的話，改一個註解就會讓 hash 變，
+// 而那不是設定變更、不該觸發全部 pod 滾動重啟。
+const byName = new Map();
+for (const f of cmFiles) {
+  const cm = y.load(fs.readFileSync(f, "utf8"));
+  if (!cm || !cm.metadata || !cm.metadata.name || !cm.data) continue;
+  const app = cm.data["application.yml"];
+  if (typeof app !== "string") continue;
+  byName.set(cm.metadata.name, {
+    file: f,
+    hash: crypto.createHash("sha256").update(app, "utf8").digest("hex").slice(0, 8),
+  });
+}
+
+const docs = y.loadAll(fs.readFileSync(file, "utf8")).filter(Boolean);
+const dep = docs.find(d => d && d.kind === "Deployment");
+if (!dep) {
+  console.error(file + ": 找不到 Deployment");
+  process.exit(1);
+}
+
+let failed = false;
+
+const tmplMeta = (dep.spec && dep.spec.template && dep.spec.template.metadata) || {};
+const ann = tmplMeta.annotations || {};
+const topAnn = (dep.metadata && dep.metadata.annotations) || {};
+
+// 反方向的斷言：舊機制不得復活。
+if ("config-version" in ann || "config-version" in topAnn) {
+  console.error(file + ": 又出現 config-version annotation 了。");
+  console.error("  ConfigMap 的名稱在 US-008 之後是固定的（不帶版本號），所以這個值");
+  console.error("  不會再跟著設定變動 —— 它是一個永遠不動的常數，等於沒有這個機制。");
+  console.error("  留著它最大的害處是讓人以為「版本化那一套還在、改設定會自動重啟」，");
+  console.error("  於是改完設定就直接 apply，然後花很久去查為什麼設定沒有生效。");
+  console.error("  要的是 config-hash（見 CANARY-COMPLETE.md 2.2 / 3.6）。");
+  failed = true;
+}
+
+const got = ann["config-hash"];
+if (typeof got !== "string") {
+  console.error(file + ": spec.template.metadata.annotations 底下沒有 config-hash");
+  console.error("  實際的 annotations: " + JSON.stringify(Object.keys(ann)));
+  if ("config-hash" in topAnn) {
+    console.error("  它跑到 Deployment 自己的 metadata.annotations 去了 —— 那個位置");
+    console.error("  【不是】pod template 的一部分，改了不會觸發任何滾動更新。");
+  }
+  console.error("  沒有這一行，改 ConfigMap 內容就不會有任何 pod 重啟，而 Spring");
+  console.error("  只在啟動時讀一次設定檔 → 設定 apply 了卻沒有生效，且不會報錯。");
+  process.exit(1);
+}
+if (!/^[0-9a-f]{8}$/.test(got)) {
+  console.error(file + ": config-hash 的格式不對（" + JSON.stringify(got) + "）");
+  console.error("  它必須是 sha256 前 8 碼的小寫十六進位，由 scripts/sync-config-hash.sh");
+  console.error("  回寫。手打的值不會跟 ConfigMap 的內容對上 —— 而對不上就代表下一次");
+  console.error("  改設定時 hash 可能【剛好不變】，於是不重啟。");
+  process.exit(1);
+}
+
+// Deployment 認的是 ConfigMap 的名字不是檔名，所以要走索引查（同檢查 [7] / [8d]）。
+const volumes = [].concat(...collect(dep, "volumes", []));
+const cfgVol = volumes.find(v => v && v.name === "config");
+if (!cfgVol || !cfgVol.configMap || !cfgVol.configMap.name) {
+  console.error(file + ": 找不到名為 config 的 volume（或它不是 configMap）");
+  process.exit(1);
+}
+const cmName = cfgVol.configMap.name;
+const entry = byName.get(cmName);
+if (!entry) {
+  console.error(file + ": 它掛的 ConfigMap 叫 " + cmName + "，但那個名字不在已知的");
+  console.error("  track-a ConfigMap 清單裡（validate.sh 的 TRACK_A_CONFIGMAPS）。");
+  console.error("  config-hash 的期望值是從那份 ConfigMap 的內容算出來的，對不到檔案");
+  console.error("  就無從檢查 —— 而「查不到就跳過」等於改個名字就能讓這個檢查消失。");
+  process.exit(1);
+}
+
+if (got !== entry.hash) {
+  console.error(file + ": config-hash 跟它掛的 ConfigMap 內容對不上");
+  console.error("  manifest 寫的: " + got);
+  console.error("  重算出來的  : " + entry.hash + "（來源 " + entry.file + "）");
+  console.error("  最常見的原因：改了 ConfigMap 的內容，但忘了跑");
+  console.error("      bash scripts/sync-config-hash.sh");
+  console.error("  這件事在叢集上【不會報錯】，只是 pod template 沒變 → 沒有任何 pod");
+  console.error("  重啟 → Spring 只在啟動時讀一次設定檔 → 新設定沒有生效，而 kubectl");
+  console.error("  get / describe 全都正常。跑完同步腳本後，ConfigMap 與 Deployment 的");
+  console.error("  改動要放進【同一個 commit】—— 那是 git revert 能一次回滾兩者的前提");
+  console.error("  （CANARY-COMPLETE.md 2.2 表格第 1 條、8.4）。");
+  failed = true;
+}
+
+process.exit(failed ? 1 : 0);
+'
+
+for dep in "${TRACK_A_DEPLOYMENTS[@]}"; do
+  check "config-hash $(basename "$dep")" \
+    node -e "$CONFIG_HASH_SCRIPT" "$dep" "${TRACK_A_CONFIGMAPS[@]}"
+done
+
+# --- 9b. 同步腳本必須存在且冪等 ----------------------------------------------
+# 冪等的意思是「連跑兩次，第二次不會產生任何改動」。為什麼這件事值得檢查：
+# 這支腳本是用【文字取代】改 manifest 的（不能用 y.dump 整份寫回去，那會把整個
+# repo 的中文註解洗掉）。文字取代寫壞的典型症狀就是每跑一次就多改一點 ——
+# 例如把行尾的 \r 吃掉、或每次都重新排版 —— 於是「跑一次同步腳本」變成一個
+# 會製造雜訊 diff 的動作，而雜訊 diff 會讓人在 code review 時看不見真正的改動。
+#
+# 做法：先把兩份 Deployment 備份起來，跑一次腳本，比對位元組，然後【無論結果】
+# 都從備份還原。這樣：
+#   - 檔案裡的 hash 是對的（檢查 9a 已經確認）時，腳本什麼都不會改，比對通過；
+#   - 檔案裡的 hash 過期時，腳本會把它改對 → 比對失敗 → 這裡也 FAIL，
+#     跟 9a 指向同一個原因（忘了跑同步腳本），兩邊的訊息互相印證。
+#   - 還原是無條件的：品質閘門不應該順手改你的工作目錄，即使改對了也一樣。
+#
+# 刻意不用 `git diff --quiet` 判定：那個指令比對的是 HEAD，所以只要工作目錄裡
+# 有任何未 commit 的改動（而「改完 manifest 跑一次 validate.sh」正是這個 repo
+# 的標準工作流程）它就會失敗 —— 一個在正常開發途中永遠是紅的檢查，下場是被
+# 刪掉或被無視。備份比對問的是「跑這支腳本有沒有改到東西」，那才是冪等的定義，
+# 而且不管工作目錄乾不乾淨都成立。
+sync_config_hash_idempotent() {
+  local tmp rc=0 f out
+  tmp="$(mktemp -d)" || { echo "無法建立暫存目錄"; return 1; }
+
+  for f in "${TRACK_A_DEPLOYMENTS[@]}"; do
+    cp "$f" "$tmp/$(basename "$f").before" || rc=1
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "備份 Deployment 失敗，這一項無法判定"
+    rm -rf "$tmp"
+    return 1
+  fi
+
+  if ! out="$(bash scripts/sync-config-hash.sh 2>&1)"; then
+    echo "scripts/sync-config-hash.sh 執行失敗："
+    printf '%s\n' "$out"
+    rc=1
+  fi
+
+  for f in "${TRACK_A_DEPLOYMENTS[@]}"; do
+    if ! cmp -s "$f" "$tmp/$(basename "$f").before"; then
+      echo "$f: 跑一次 scripts/sync-config-hash.sh 之後檔案內容變了。"
+      echo "  這代表 manifest 裡的 config-hash 是過期的（改了 ConfigMap 卻沒跑同步"
+      echo "  腳本），或者腳本自己不冪等。前者請跑 bash scripts/sync-config-hash.sh"
+      echo "  並把改動跟 ConfigMap 放進同一個 commit；後者請修腳本。"
+      echo "  差異："
+      diff "$tmp/$(basename "$f").before" "$f" | sed 's/^/    /'
+      rc=1
+    fi
+    # 還原是無條件的：閘門不改你的工作目錄。
+    cp "$tmp/$(basename "$f").before" "$f"
+  done
+
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+check "sync-script-exists" test -f scripts/sync-config-hash.sh
+check "sync-config-hash-idempotent" sync_config_hash_idempotent
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then

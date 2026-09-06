@@ -38,17 +38,29 @@ spec:
         app: pmc-epmmformquerygui
         version: stable          # Service 用 app 選中；DestinationRule 用 version 分 subset
       annotations:
-        # 【這個 annotation 已經失效了，US-009 會把它換成 config-hash】
-        # 它原本的作用是「改 ConfigMap 版本 → 改這個值 → pod template 變了 →
-        # 觸發滾動更新」。但 ConfigMap 的名稱現在固定成 ...-config-stable，
-        # 改設定不再會改到版本號，於是這一行變成一個永遠不動的常數：
-        # 改了設定內容、apply 了，pod template 沒變 → 沒有任何 pod 重啟 →
-        # Spring 只在啟動時讀一次設定檔，所以【設定 apply 了卻沒有生效】，
-        # 而且沒有任何錯誤訊息，kubectl get 也看不出異常。
-        # 正解是改成 ConfigMap data 內容的 sha256 前 8 碼、由
-        # scripts/sync-config-hash.sh 回寫（CANARY-COMPLETE.md 2.2 / 3.6）。
-        # 在那之前，改完設定要自己 kubectl rollout restart。
-        config-version: "1.2.3"
+        # config-hash —— 「改設定會不會觸發滾動更新」的全部機制就是這一行。
+        #
+        # 值是這份 Deployment 掛的那一份 ConfigMap（volumes[config].configMap.name，
+        # 也就是 pmc-epmmformquery-config-stable）的 data["application.yml"] 的
+        # sha256 前 8 碼，由 scripts/sync-config-hash.sh 計算後回寫 —— 不要手改。
+        #
+        # 為什麼需要它：這裡原本是 config-version: "1.2.3"，跟著「名字帶版本號」的
+        # ConfigMap 走 —— 改設定 = 改名字 = 改到 pod template，apply 自然會滾動更新。
+        # US-008 把名字固定成 ...-config-stable 之後那條因果鏈斷了：改設定內容
+        # 【不會】改到 pod template 的任何欄位，而 kubectl apply 只在 pod template
+        # 變了的時候才滾動更新，Spring 又只在啟動時讀一次設定檔：
+        #     改 ConfigMap → apply → 沒有任何 pod 重啟 → 新設定沒有生效
+        # 而且沒有錯誤訊息、kubectl get 也看不出異常，ConfigMap 裡確實是新內容 ——
+        # 只有行為跟你以為的不一樣。內容變 → hash 變 → pod template 變 → 滾動更新，
+        # 這一行把那條鏈接回來（CANARY-COMPLETE.md 2.2 表格第 3 條、3.6）。
+        #
+        # 【它自己的失效方式一樣是安靜的】hash 過期（改了 ConfigMap 卻忘了跑同步
+        # 腳本）不會報錯，只是不重啟 —— 症狀跟上面那一段一模一樣。唯一的攔截點是
+        # scripts/validate.sh 的檢查 [9]：它會重算一次跟這裡的值比對，忘了跑就 FAIL。
+        # 同理 kubectl rollout undo 會把這個 annotation 還原成舊值，但 ConfigMap 的
+        # 內容已經是新的 → pod 用舊 hash 重啟卻掛到新設定，同樣沒有任何錯誤訊息。
+        # 所以回滾一律走 git revert（第 8.4 節），undo 是禁止動作（第 8 章）。
+        config-hash: "1d2149da"
         # 確保 sidecar 先就緒再啟動 app，避免啟動瞬間的連線失敗
         proxy.istio.io/config: '{"holdApplicationUntilProxyStarts": true}'
     spec:

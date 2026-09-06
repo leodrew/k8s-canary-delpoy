@@ -136,6 +136,54 @@ US-009 的 config-hash 推自 `data['application.yml']`），正確的做法是�
 「只留一行 `cors:`（key 有、值是 null）」和「整塊被註解掉」—— 後者必須維持 PASS，
 那正是這個檢查解析 YAML 而不是 grep 的意義。
 
+## 改了 ConfigMap 的內容，就要跑 `scripts/sync-config-hash.sh`
+
+ConfigMap 的名稱固定之後（US-008），改設定內容【不會】改到 pod template 的任何欄位，
+而 `kubectl apply` 只在 pod template 變了的時候才滾動更新、Spring 又只在啟動時讀一次
+設定檔 —— 所以「改 ConfigMap → apply → 什麼事都沒發生 → 新設定沒有生效」，而且沒有
+錯誤訊息、`kubectl get` 也看不出異常。兩份 Deployment 的 `config-hash` annotation
+（ConfigMap `data['application.yml']` 的 sha256 前 8 碼）就是把那條因果鏈接回來的東西。
+
+```bash
+bash scripts/sync-config-hash.sh     # 改完 ConfigMap 跑一次；從哪個目錄呼叫都可以
+```
+
+**ConfigMap 與 Deployment 的改動必須放進同一個 commit** —— 那是 `git revert` 能一次
+回滾兩者的前提（CANARY-COMPLETE.md 2.2）。`kubectl rollout undo` 因此是禁止動作：
+它還原 pod template（含舊的 hash）但 ConfigMap 內容已經是新的，pod 用舊 hash 重啟卻
+掛到新設定，一樣沒有錯誤訊息。忘了跑同步腳本會被 `validate.sh` 的檢查 [9] 擋下來
+（它自己重算一次跟檔案裡的值比對）—— 那是這個安靜失效唯一的攔截點。
+
+雜湊的對象是**解析後**的 `data['application.yml']` 字串，不是原始檔的位元組。理由有二：
+叢集那一端（第 6.3 節的 `kubectl get cm -o jsonpath=... | sha256sum | cut -c1-8`）算的
+也是這個，兩邊可以直接對照；而且對原始檔算的話，改一行註解就會讓 hash 變 → 全部 pod
+滾動重啟，但那不是設定變更。
+
+## 腳本改 manifest：文字取代 ＋ 重新解析自我驗證，不要 `y.dump()`
+
+`sync-config-hash.sh` 是這個 repo 第一支會**改寫** manifest 的腳本，它的寫法值得照抄：
+
+- **只取代那一行，不要「解析 → 改物件 → dump 回去」。** 這個 repo 的 manifest 有大量
+  中文註解在解釋「為什麼」，`y.dump()` 一次就全部消失 —— 而那些註解是這裡最貴的資產。
+  取代時用捕獲群組把行尾的 `\r` 原樣接回去，CRLF 的工作目錄才不會產生整檔 diff。
+- **先數過再取代。** 目標字串出現 0 次或 2 次以上都要**失敗並說明**，不要「有就改、
+  沒有就算了」。找不到時的正確反應是叫人自己把那一行連同註解加上去（註解只有人寫得
+  出來），而不是自動插入一個沒有註解的 key。
+- **寫完重新解析，確認改到的是預期的那個位置。** 文字取代永遠有「改到長得很像的另一個
+  地方」的風險，而 `config-hash` 正好有一個看起來一樣、實際完全沒有作用的位置：
+  Deployment 自己的 `metadata.annotations`（那不是 pod template 的一部分，改了不會
+  觸發任何滾動更新）。重新解析後對 `spec.template.metadata.annotations` 下斷言才擋得住。
+- **要冪等。** 連跑兩次第二次不得產生任何 diff，否則「跑一次同步腳本」會變成製造雜訊
+  diff 的動作，而雜訊 diff 會讓人在 review 時看不見真正的改動。
+
+在 `validate.sh` 裡驗證這種會改檔案的腳本，用**備份 → 跑 → 比對位元組 → 無條件還原**
+（`mktemp -d` ＋ `cp` ＋ `cmp` 都是 bash 這邊在處理，不會踩到 node 看不見 `/tmp` 的坑）。
+**不要用 `git diff --quiet` 判定**：它比對的是 HEAD，只要工作目錄有任何未 commit 的改動
+就會失敗 —— 而「改完 manifest 跑一次 validate.sh」正是這個 repo 的標準工作流程，
+那會變成一個在正常開發途中永遠是紅的檢查，下場是被刪掉或被無視。備份比對問的是
+「跑這支腳本有沒有改到東西」，那才是冪等的定義，而且不管工作目錄乾不乾淨都成立。
+還原要無條件做：品質閘門不應該順手改你的工作目錄，即使改對了也一樣。
+
 ## 工具限制
 
 這台機器上只有 node / npm。**沒有** kubectl、**沒有** yq、**沒有**可用的 python
