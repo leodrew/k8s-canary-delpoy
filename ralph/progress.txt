@@ -120,6 +120,26 @@ Started: (not yet run)
 - **反向測之前，先確認「壞掉的版本真的寫進檔案了」。** US-006 有一次 `sed` 沒改到任何
   東西，於是閘門照樣 exit 0，看起來像是「這個檢查沒防護力」，其實是根本沒測到。
   改壞之後先 `grep` 一下改動處，再跑 validate.sh。
+- **腳本改 manifest 用「文字取代 ＋ 寫回後重新解析自我驗證」，不要 `y.dump()`。**
+  這個 repo 的 manifest 有大量中文註解在解釋「為什麼」，dump 一次就全部消失。
+  取代前先數過目標行（0 次或 2 次以上都要失敗並說明，不要「有就改、沒有就算了」），
+  行尾的 `\r` 用捕獲群組原樣接回去，寫完重新解析確認改到的是預期的那個位置 ——
+  最後這步不是多餘：`config-hash` 有一個看起來一樣、實際完全沒作用的位置
+  （Deployment 自己的 `metadata.annotations`，不是 pod template 的一部分）。
+  找不到目標行時要叫人自己加上那一行連同註解，不要自動插入一個沒有註解的 key。
+
+- **`validate.sh` 裡驗證「會改檔案的腳本」：備份 → 跑 → 比對位元組 → 無條件還原。**
+  `mktemp -d` ＋ `cp` ＋ `cmp` 都是 bash 這邊處理，不會踩到 node 看不見 `/tmp` 的坑。
+  **不要用 `git diff --quiet`**：它比對 HEAD，工作目錄有任何未 commit 的改動就失敗，
+  而「改完 manifest 跑一次 validate.sh」正是這裡的標準工作流程 —— 那會變成一個開發途中
+  永遠是紅的檢查，下場跟永遠綠燈的檢查一樣是被無視。還原要無條件做：閘門不改工作目錄。
+
+- **改了 ConfigMap 的內容就要跑 `bash scripts/sync-config-hash.sh`，並跟 ConfigMap 放
+  同一個 commit。** 名稱固定之後，改設定不會改到 pod template → apply 不重啟 →
+  Spring 只在啟動時讀一次設定檔 → 設定沒有生效，而且不會報錯。忘了跑會被檢查 [9] 擋下。
+  雜湊算的是**解析後**的 `data['application.yml']` 字串（跟叢集端 `kubectl ... | sha256sum`
+  一致），不是原始檔位元組 —— 否則改一行註解就會讓全部 pod 滾動重啟。
+
 ---
 
 ## 2026-09-06 - US-001 - Bootstrap scripts/validate.sh with YAML syntax checking
@@ -644,4 +664,99 @@ Started: (not yet run)
     `CM_PREFIX="pmc-epmmformquery-config"` ＋ `${CM_PREFIX}-${ver}` 組出來的是
     `...-config-1.2.3`，那個名字現在【不存在】；`cmd_cleanup` 要刪的舊版 ConfigMap
     也不再有。這不是 US-010 順手做的事，那正是它驗收條件的第 4、5 項。
+---
+
+## 2026-09-06 - US-009 - Replace config-version with a content-hash annotation and a sync script
+
+- 兩份 track-a Deployment 的 `config-version: "1.2.3"` annotation 換成
+  `config-hash`（各自那一軌 ConfigMap `data['application.yml']` 的 sha256 前 8 碼），
+  並新增 `scripts/sync-config-hash.sh` 負責計算回寫。同一個 commit 加上檢查區段 [9]。
+  目前兩軌的值都是 `1d2149da` —— 兩份 ConfigMap 的 data 逐字相同（檢查 [8c] 在守），
+  canary 依 3.5.1 分歧的那天它們才會不同。
+- Files changed:
+  - `scripts/sync-config-hash.sh`（新增，235 行）—— 掃 `canary-manual/track-a/release/`，
+    建 ConfigMap 名稱索引，對每一份 Deployment 算出它自己那一軌的 hash 並回寫
+  - `canary-manual/track-a/release/20-deployment-stable.yaml` —— annotation 換成
+    `config-hash` ＋ 一整段說明（為什麼需要它、它自己的失效方式為什麼也是安靜的）
+  - `canary-manual/track-a/release/21-deployment-canary.yaml` —— 同上（摘要版，指回 stable）
+  - `scripts/validate.sh` —— 新增檢查 [9]：9a 每份 Deployment 的 hash 對得上自己那一軌
+    ConfigMap 的內容（＋格式、＋`config-version` 不得復活），9b 同步腳本存在且冪等
+  - `CLAUDE.md`（dev/k8s 層級）—— 新增兩節：「改了 ConfigMap 內容就要跑同步腳本」、
+    「腳本改 manifest：文字取代 ＋ 重新解析自我驗證，不要 y.dump()」
+- 為什麼要做：US-008 讓 ConfigMap 的名字固定之後，改設定內容不會改到 pod template 的
+  任何欄位 → `kubectl apply` 不滾動更新 → Spring 只在啟動時讀一次設定檔 →
+  **設定 apply 了卻沒有生效**，而且沒有錯誤訊息、`kubectl get` 也看不出異常。
+  內容變 → hash 變 → pod template 變 → 滾動更新，這一行把那條因果鏈接回來。
+- 驗證結果：`bash scripts/validate.sh` → **126/126 PASS、exit 0**（US-008 之後是 122 項，
+  新增 4 項）。`npm run validate` 同樣 exit 0；`cd ralph && bash ../scripts/sync-config-hash.sh`
+  也正常（腳本自己 cd 到 repo root）。反向測九種，八種 FAIL 且 exit 1、第九種維持 PASS：
+  ① 改了 ConfigMap（`session.timeout` 8h→7h）但沒跑同步腳本 → 9a 印出「manifest 寫的
+  1d2149da / 重算出來的 ff6796ab」＋ 9b 附上 diff（**這是最常見的真實錯法**）
+  ② 手動把 canary 的 hash 改成 `deadbeef` ③ 把 `config-version` 加回 pod template
+  ④ `config-hash` 整行刪掉 ⑤ `config-hash` 搬到 Deployment 自己的 `metadata.annotations`
+  （9a 專門為這個位置印了一段說明；同步腳本的寫回自我驗證也獨立抓到）
+  ⑥ 值手打成 `1.2.3`（格式檢查）⑦ Deployment 掛到清單裡沒有的 ConfigMap 名字
+  （推導來源查不到 → FAIL 而不是 skip）⑧ 同一份檔案出現兩行 `config-hash:`
+  （YAML 解析階段就擋下：duplicated mapping key）
+  ⑨ `config-version` 只出現在【註解】裡 → 維持 PASS（證明走的是 YAML 解析不是 grep；
+  20-deployment-stable.yaml 的新註解裡就有這個字串）
+  每一次都先 `grep` 確認壞掉的版本真的寫進檔案了才跑。正向也測過：把 ConfigMap 改壞後
+  跑同步腳本 → 只有 stable 那份的 hash 變、canary 不動（證明是各算各的軌）→ 還原 →
+  再跑一次 → 回到 1d2149da。收工前 `git status` 乾淨、`.tmp-us009/` 已刪除。
+
+- **【給 US-010】這個 commit 讓 `canary-manual/scripts/canary.sh` 又多壞了一處。**
+  `patch_deploy()`（該檔第 47 行起）的 JSON patch 有三個 op，現在有兩個是壞的：
+  `/spec/template/spec/volumes/0/configMap/name` 會被設成 `${CM_PREFIX}-${ver}`
+  （`...-config-1.3.0`，US-008 之後那個物件不存在 → pod 卡 ContainerCreating），而
+  `{"op":"replace","path":"/spec/template/metadata/annotations/config-version"}` 現在會
+  直接失敗（JSON patch 的 replace 對不存在的路徑會報錯）。這正好落在 US-010 驗收條件的
+  第 4 項（`patch_deploy` / `cmd_deploy` 更新或拒跑）。順帶一提：那個 op 應該換成
+  **不要 patch annotation**，改成「改完 manifest 跑 `scripts/sync-config-hash.sh` 再 apply」
+  —— 用 kubectl patch 寫 hash 等於在叢集上手改，下次 apply 就被蓋掉，而且 hash 跟 repo 裡的
+  ConfigMap 對不上（檢查 [9] 抓不到叢集狀態，只守 repo）。
+  另外 `canary.sh:95` 的 `cmd_cleanup` 用 `.metadata.labels.config-version` 當欄位撈舊
+  ConfigMap，那個 label 在 US-008 已經拿掉了（檢查 [8b] 擋著它復活）—— 驗收條件第 5 項。
+
+- **Learnings for future iterations:**
+  - **【最重要】腳本改 manifest 一律用「文字取代 ＋ 寫回後重新解析自我驗證」，
+    不要 `y.dump()`。** 這個 repo 的 manifest 有大量中文註解在解釋「為什麼」，
+    dump 一次全部消失，而那些註解是這裡最貴的東西。取代時要：先數過目標行（0 次或
+    2 次以上都要**失敗並說明**，不要「有就改、沒有就算了」）、用捕獲群組把行尾的 `\r`
+    原樣接回去（CRLF 的工作目錄才不會整檔 diff）、寫完重新解析確認改到的是預期位置。
+    最後那一步不是多餘的：`config-hash` 有一個看起來一模一樣、實際完全沒有作用的位置
+    —— Deployment 自己的 `metadata.annotations`（不是 pod template 的一部分，改了不會
+    觸發滾動更新）。反向測 ⑤ 就是在測這件事，兩道防線都抓到了。
+  - **找不到目標行時，正確的反應是「叫人自己加上那一行連同註解」，不是自動插入。**
+    這個 repo 的規矩是每個 key 都要有一段說明「少了它會壞在哪裡」的註解，而註解只有人
+    寫得出來。腳本自動插一個沒有註解的 key，等於用工具繞過這個 repo 唯一的品質規則。
+  - **在 `validate.sh` 裡驗證「會改檔案的腳本」：備份 → 跑 → 比對位元組 → 無條件還原。**
+    `mktemp -d` ＋ `cp` ＋ `cmp` 都是 bash 這邊在處理，不會踩到「node 看不見 Git Bash 的
+    `/tmp`」那個坑（只有路徑會傳進 node 時才必須用 repo 內相對路徑）。還原要無條件做：
+    閘門不應該順手改你的工作目錄，即使改對了也一樣。
+  - **驗收條件寫的 `git diff --quiet` 刻意沒有照字面做，理由寫在檢查 [9b] 的註解裡：**
+    那個指令比對的是 HEAD，只要工作目錄有任何未 commit 的改動就會失敗 —— 而「改完
+    manifest 跑一次 validate.sh」正是這個 repo 的標準工作流程，照字面做會得到一個在正常
+    開發途中永遠是紅的檢查，下場是被刪掉或被無視（跟「永遠綠燈的檢查」是一體兩面）。
+    備份比對問的是「跑這支腳本有沒有改到東西」，那才是冪等的定義，而且不管工作目錄
+    乾不乾淨都成立，嚴格強於 git diff。
+  - **雜湊的對象是【解析後】的 `data['application.yml']` 字串，不是原始檔的位元組。**
+    兩個理由：叢集那一端（CANARY-COMPLETE.md 6.3 的
+    `kubectl get cm -o jsonpath='{.data.application\.yml}' | sha256sum | cut -c1-8`）
+    算的也是這個，所以兩邊的值可以直接對照；而且對原始檔算的話，改一行註解或縮排就會
+    讓 hash 變 → 全部 pod 滾動重啟，但那不是設定變更。實測：js-yaml 解出來的 block
+    scalar 行尾一律是 LF（`hasCR: false`），跟 API server 存的一致。
+  - **`config-hash` 只守 repo，守不到叢集。** 檢查 [9] 比對的是 manifest 裡的兩個檔案；
+    有人 `kubectl edit` ConfigMap 或 `kubectl patch` annotation 之後，repo 這邊完全看不出
+    來（CANARY-COMPLETE.md 8 章把這兩個動作都列為禁止動作，就是這個原因）。
+    叢集端的對照指令在 6.3 節，部署後要自己跑一次。
+  - **同步腳本刻意只掃 `canary-manual/track-a/release/`。** track-b 的 rollout 沒有
+    config-hash annotation，而且它的 ConfigMap 還沒依附錄 C 補齊（同檢查 [6] / [7] 的
+    排除理由）；`track-a/runtime/05-configmap-canary-pilot.yaml`（pilot 名單）則是
+    **刻意不參與** —— 改名單不應該重啟任何 pod，那也是它的 volume 要維持 `optional: true`
+    的原因。這兩個排除都寫在腳本的檔頭註解裡，連同「什麼條件下可以拿掉」。
+  - **US-010 是這一輪最後一個 story，而且它動的是 shell 腳本不是 YAML。** 檢查
+    「`canary.sh` 不得含 `--replicas=0` / `rollout undo`」沒有 parser 可用，不能直接
+    grep 整個檔案 —— 驗收條件同時要求在移除的地方留註解說明為什麼禁止，而那段註解本身
+    就含有要禁止的字串（跟檢查 [5] / [6] 遇到的是同一個問題）。可行的做法是先剝掉
+    `#` 之後的內容再比對，並且反向測「只出現在註解裡 → 必須 PASS」。
 ---
