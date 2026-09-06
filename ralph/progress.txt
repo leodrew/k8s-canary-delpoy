@@ -71,6 +71,14 @@ Started: (not yet run)
   `const app=y.load(cm.data["application.yml"]);` —— 然後對 `app` 物件下斷言。
   js-yaml CLI 也支援多文件（`---` 分隔）的 YAML，track-b/base 底下就有幾個。
 
+- **刪除設定也要加檢查，而且是反方向的那種。** `assert_cm_key_absent <key> <為什麼不能有>`
+  —— key **存在就是失敗**（跟 `assert_cm_key` 相反，那邊空字串算通過、這邊只留一行
+  `cors:` 算失敗）。用在已經刪掉的死設定（`app.cors` / `app.sso` / `app.test-endpoints`）：
+  它們加回來不會產生任何症狀，所以沒有人會發現加錯了。跑 `BOTH_TRACK_CONFIGMAPS`，
+  因為復活最常見的路徑是「從另一個 track 整段複製設定過來」。反向測這類檢查時，
+  除了「整塊加回來」還要測「整塊被註解掉」—— 後者必須維持 PASS，那正是它解析 YAML
+  而不是 grep 的意義（檔案裡的說明註解本身就含有 `app.cors.*` 這些字，grep 版本永遠 FAIL）。
+
 - **這台機器 `core.autocrlf=true`。** `git add` 噴的 "LF will be replaced by CRLF"
   是正常的、可以忽略；`*.sh` 已由 `.gitattributes` 釘成 LF，之後新增的腳本自動適用。
   但工作目錄裡的 `prd.json` / `progress.txt` 實際上是 LF，程式化改寫時沿用原檔行尾。
@@ -305,4 +313,66 @@ Started: (not yet run)
     收工前 `rm -rf` 掉 —— node 看不到 Git Bash 的 `/tmp`。
   - **反向測試備份也放 repo 內相對路徑**（`.tmp-us004/A.bak`），`cp` 還原後
     一定要複驗一次 exit 0 並看 `git status`，確認沒有殘留的破壞。
+---
+
+## 2026-09-06 - US-005 - Remove the three dead config blocks
+
+- 從兩個 track 的 ConfigMap 移除 `app.cors.*`、`app.sso.*`、`app.test-endpoints.*`
+  這三塊「沒有任何程式讀」的死設定，並在同一個 commit 加上反方向的檢查區段 [5]。
+- Files changed:
+  - `canary-manual/track-a/release/10-configmap-1.2.3.yaml` — 刪三塊、留一段說明註解；
+    順手修掉 `post-logout-redirect-uri` 上方那段因為這次刪除而過時的註解
+    （原本寫「不是底下那塊 app.sso.*」「整塊會在後續的清理裡移除」，兩句都不再成立）
+  - `canary-manual/track-b/release/10-configmap-1.2.3.yaml` — 刪同樣三塊、留摘要註解，
+    並註明「track-b 尚未補齊」不是這次刪除造成的
+  - `scripts/validate.sh` — 新增檢查 [5] 與 `assert_cm_key_absent` helper
+  - `CLAUDE.md`（dev/k8s 層級）— 記錄新 helper、以及「刪除也要加檢查（反方向）」這條規則
+- 為什麼要刪：後端一行都沒讀它們（CANARY-COMPLETE.md 附錄 C.4）。
+  - `app.cors.*` — BFF 是同源架構，`SecurityConfig` 只留一行 `// No .cors()`（review F4），
+    而且有測試守著。出 CORS 問題時一定有人回來改 `allowed-origins`，改完什麼都不會變，
+    然後往錯方向查半天 —— 而那半天正好是故障時間（附錄 A.1）。
+  - `app.sso.*` — 錯的 key 路徑，而且是三塊裡最陰險的一塊：它「看起來」把登出導向設定
+    好了，於是沒有人會去懷疑那個真正沒有 Java 預設值、缺了就 CrashLoopBackOff 的
+    `app.post-logout-redirect-uri`（US-002 補的那個）。
+  - `app.test-endpoints.*` — 沒有程式讀。
+- 驗證結果：`bash scripts/validate.sh` → 56/56 PASS、exit 0（`npm run validate` 同樣 exit 0）。
+  反向測四種情況：整塊加回 track-a → FAIL；加回 track-b → FAIL 且錯誤訊息認得出是哪一份；
+  只留一行 `test-endpoints:`（key 有、值是 null）→ FAIL；整塊【被註解掉】→ 維持 PASS。
+  還原後複驗 exit 0、`git status` 乾淨、暫存目錄 `.tmp-us005/` 已刪除。
+
+- **Learnings for future iterations:**
+  - **【新 helper】`assert_cm_key_absent <dotted.key.path> <為什麼不能有>`** ——
+    跟 `assert_cm_key` 完全相反：**key 存在就是失敗**。跑的是 `BOTH_TRACK_CONFIGMAPS`。
+    第二個參數會原樣印進 FAIL 訊息，用來寫「為什麼這塊是死的」，讓想加回來的人在錯誤
+    訊息裡就讀到理由、不用去翻文件（跟檢查 [4] 對 `preferred_username` 的手法一樣）。
+    注意它跟 `assert_cm_key` 對「key 有但沒有值」的判斷是**相反**的：那邊空字串算通過，
+    這邊只留一行 `cors:` 算失敗 —— 那仍然是一個會被讀到的 key。不要混用兩者的直覺。
+  - **刪除是一種修改，而且它需要的是反方向的檢查。** 刪掉死設定之後，唯一會出事的方式
+    是有人把它加回來 —— 而加回來同樣不會產生任何症狀（它本來就沒有程式讀），所以不會有
+    任何人發現。「復活」最常見的路徑是「從舊版本或另一個 track 整段複製設定過來」，
+    這就是為什麼這一項跟檢查 [4] 一樣跑兩個 track，而不是只擋被改的那一份。
+  - **反向測「不得存在」這類檢查，一定要多測「整塊被註解掉」那一種**，而且期望是
+    **PASS**。這個 repo 的規則是「解析 YAML 不要 grep」，而這一項是最容易被寫成 grep 的
+    —— 但兩份檔案裡留下的說明註解本身就含有 `app.cors.*` / `app.sso.*` 這些字，
+    grep 版本會【永遠 FAIL】，然後被人改成「先 grep -v 掉註解」那種一碰就碎的寫法。
+  - **刪東西的時候要 grep 一下還有沒有別的地方提到它。** 這次 `grep -rn "cors:\|sso:\|
+    test-endpoints:\|CORS_ALLOWED\|TEST_ENDPOINTS_ENABLED\|SSO_LOGOUT" canary-manual/
+    --include=*.yaml --include=*.sh` 確認過整個 canary-manual/ 底下只有這兩份 ConfigMap
+    有這三塊，所以檢查 [5] 涵蓋兩份就夠了。US-006 之前也該對
+    `SPRING_CONFIG_ADDITIONAL_LOCATION` 跑同一招 —— 它的驗收條件正是「canary-manual/
+    底下不得出現這個字串」，那個範圍比 ConfigMap 大，Deployment 與註解裡都可能有。
+  - **舊註解會因為別的 story 的動作而過時，改檔案時要順手看一眼上下文。**
+    track-a 的 `post-logout-redirect-uri` 上方原本寫著「不是**底下那塊**
+    app.sso.post-logout-redirect-uri」和「app.sso.* 整塊**會在後續的清理裡**移除」——
+    這次刪完之後兩句話都不再成立，留著會讓檔案自相矛盾。US-004 的日誌就記過同一件事，
+    這是這個 repo 的常態，不是偶發。
+  - **track-a ConfigMap 現在的 key 順序等於 CANARY-COMPLETE.md 3.5 的順序**（US-003
+    的日誌就是這樣規劃的）。US-008 要做的是把這個檔案原樣複製成 -stable / -canary
+    兩份，驗收條件要求兩份的 `data['application.yml']` 必須 byte-identical ——
+    複製的時候不要「順手整理」順序或註解。
+  - **US-008 要記得把新的 `-stable` / `-canary` 兩個檔名同時加進 `TRACK_A_CONFIGMAPS`
+    【和】`BOTH_TRACK_CONFIGMAPS`。** 現在有兩個陣列了：檢查 [2]/[3] 掛在前者、
+    檢查 [4]/[5] 掛在後者。只更新其中一個的話，另一組檢查會靜靜地不再涵蓋新檔案 ——
+    而且因為舊檔名被 `git mv` 掉了，陣列裡指向不存在的檔案時 `js-yaml` 會噴 ENOENT
+    變成 FAIL，那還算好的；漏加新檔名則是無聲地少檢查，那才是真正危險的。
 ---
