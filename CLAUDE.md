@@ -270,6 +270,11 @@ ConfigMap 被寫壞了。改用環境變數傳值也救不了（環境變數的�
 `canary-manual/CANARY-COMPLETE.md` 是目標狀態的唯一真實來源，動 manifest 前先讀對應章節。
 `canary-manual/` 底下有數份文件掛著「已被取代」橫幅，不要照著它們的操作步驟做。
 
+`.claude/skills/` 底下的 skill 是由 `skills-lock.json` 從上游安裝的，**本地有改過**：
+`to-spec` 與 `retro` 刪掉了 `disable-model-invocation: true`，好讓 Ralph loop 能自己呼叫。
+重新安裝或更新 skill 會把那一行蓋回來，loop 的最後一個故事（retro）就會叫不到 skill ——
+更新 skill 之後記得檢查這兩份的 frontmatter。
+
 ## YAML 註解的密度
 
 這個 repo 的註解是用來解釋「為什麼」的，而且寫得很長。
