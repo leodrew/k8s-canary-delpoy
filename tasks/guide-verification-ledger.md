@@ -24,6 +24,9 @@
 | ③ | Part 4 | 42 | 25 | 5 | 0 | 9 | 3 | 0 |
 | ③ | Part 5（上半） | 38 | 27 | 2 | 1 | 7 | 0 | 1 |
 | ③ | Part 5（下半） | 34 | 21 | 3 | 0 | 9 | 0 | 1 |
+| ④ | Part 6.1–6.2 | 70 | 51 | 3 | 1 | 14 | 0 | 1 |
+| ④ | Part 6.3–6.4 | 52 | 33 | 3 | 3 | 11 | 1 | 1 |
+| ④ | Part 6.5–6.6 | 52 | 32 | 4 | 2 | 11 | 0 | 3 |
 
 ---
 
@@ -506,5 +509,221 @@
 | P05-232 | 1794 | Primary-Remote 依賴 primary（「完蛋」是原文誇飾） | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
 | P05-233 | 1800 | create-remote-secret 產生 secret | https://istio.io/latest/docs/setup/install/multicluster/multi-primary/ |
 | P05-234 | 1807–1810 | 跨 cluster 保留 workload 身分（前提：同一 trust domain） | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+
+---
+
+## Part 6.1–6.2：Deployment、Service
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P06-001 | 1845 | 每次改 `template` 就產生一個新的 ReplicaSet，然後逐步把流量從舊的挪到新的 | 不精確 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ | "If the readiness probe returns a failed state, the EndpointSlice controller removes the Pod's IP address from the EndpointSlices of all Services that match the Pod." | 改成「Deployment 只負責逐步調整新、舊 ReplicaSet 的 Pod 數量；流量會不會轉移，取決於 Service／EndpointSlice 依 Pod 的 ready 狀態更新後端清單（在 mesh 裡則是 Envoy）」。Deployment 本身不搬流量。 | ✓ |
+| P06-002 | 1862 | minReadySeconds … 防止一 ready 就被塞流量 | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "specifies the minimum number of seconds for which a newly created Pod should be ready without any of its containers crashing, for it to be considered available" | 改成「Pod ready 後要穩定多久，才被 Deployment 算進 available（會影響滾動更新的推進速度）」。Pod 一旦 ready 就會被放進 EndpointSlice 開始接流量，minReadySeconds 擋不住流量。 | ✓ |
+| P06-003 | 1920 | 各 zone 之間 Pod 數量最多差 1 | 不精確 | https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/ | "if you select whenUnsatisfiable: ScheduleAnyway, the scheduler gives higher precedence to topologies that would help reduce the skew." | 範例搭配的是 `ScheduleAnyway`，maxSkew 只是排程偏好，實際差距可能超過 1。改成「盡量讓各 zone 差距不超過 1；只有 DoNotSchedule 才是硬上限」。 | ✓ |
+| P06-004 | 1932-1935 | not-ready … node 失聯後，撐 300 秒才被驅逐（預設 300） | 不精確 | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ | "node.kubernetes.io/unreachable: Node is unreachable from the node controller. This corresponds to the NodeCondition Ready being \"Unknown\"." / "Kubernetes automatically adds a toleration for node.kubernetes.io/not-ready and node.kubernetes.io/unreachable with tolerationSeconds=300" | 「失聯」對應的是 `node.kubernetes.io/unreachable`；`not-ready` 指的是 Ready=False。另外系統本來就會自動加上 300 秒的這兩條 toleration，範例這樣寫只是重複一次預設值。建議改註解並註明「只有要調整秒數時才需要寫」，或改成示範 unreachable。 | ✓ |
+| P06-005 | 1937 | priorityClassName: high-priority # 資源不足時，優先保住高優先權的 Pod | 不精確 | https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/ | "If the priority class is not found, the Pod is rejected." | 補註「叢集裡必須先建好名為 high-priority 的 PriorityClass，否則 Pod 在 admission 階段就會被拒絕」。作用也要寫清楚：優先權決定排程佇列的順序，而且可以搶占（preempt）低優先權的 Pod。 | ✓ |
+| P06-006 | 1940 | 收到 SIGTERM 後給多久優雅關閉（預設 30） | 不精確 | https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/ | "The Pod's termination grace period countdown begins before the PreStop hook is executed" | 預設 30 秒沒錯，但倒數是從 Pod 開始終止就起算，preStop 執行的時間也算在裡面。範例的 preStop 睡 10 秒，app 實際收到 SIGTERM 後只剩約 50 秒。改成「從開始終止起算的總預算，含 preStop 時間」。 | ✓ |
+| P06-007 | 2016-2021 | exec: command: ["/bin/sh", "-c", "sleep 10"] # 收到 SIGTERM 前先睡幾秒 | 不精確 | https://github.com/kubernetes/enhancements/blob/master/keps/sig-node/3960-pod-lifecycle-sleep-action/kep.yaml | "stage: stable" / "stable: \"v1.34\"" / "- name: PodLifecycleSleepAction" | 順序說得對（先跑 preStop，後送 SIGTERM）。但 exec 寫法要求 image 裡有 `/bin/sh`；distroless 之類的 image 沒有 sh，hook 會失敗，等於沒有 sleep，502 還是會出現。建議補一句：K8s v1.30 起是 beta、v1.34 起 GA，可以改寫成 `preStop: { sleep: { seconds: 10 } }`，由 kubelet 執行，不依賴 shell。 | ✓ |
+| P06-008 | 2073 | liveness 和 readiness 用同一個 endpoint … failureThreshold 至少要是 readiness 的 3 倍 | 不精確 | https://kubernetes.io/docs/concepts/workloads/pods/probes/ | "A common pattern for liveness probes is to use the same low-cost HTTP endpoint as for readiness probes, but with a higher failureThreshold." | 官方說共用同一個 endpoint 是常見做法，問題出在門檻一樣，不在 endpoint 相同。「3 倍」找不到官方依據，請改成經驗值的寫法。另外上方 YAML 三種 probe 都打 `/actuator/health`，liveness 的 failureThreshold 也同樣是 3，跟這條建議自相矛盾。建議把 liveness 改成 `/actuator/health/liveness`、readiness 改成 `/actuator/health/readiness`，或提高 liveness 的 failureThreshold。 | ✓ |
+| P06-009 | 2078 | 只設 limits 不設 requests：K8s 會把 requests 設成等於 limits，QoS 變 Guaranteed | 不精確 | https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/ | "Every Container in the Pod must have a CPU limit and a CPU request, both greater than zero." | 「requests 會從 limits 複製過來」是對的。但要成為 Guaranteed，Pod 裡每一個容器的 cpu 和 memory 都得設 limit，而且 request 等於 limit；只設 memory limit 的話是 Burstable。Istio 注入的 istio-proxy 也算一個容器，它的 requests/limits 不相等時，整個 Pod 就不會是 Guaranteed。請把這兩個條件補上。 | ✓ |
+| P06-010 | 2081 | Pod 已經收到 SIGTERM 但 endpoint 還沒從所有 node 的 iptables 移除 | 不精確 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ | "Any endpoints that represent the terminating Pods are not immediately removed from EndpointSlices, and a status indicating terminating state is exposed from the EndpointSlice API." | 終止中的 endpoint 不會馬上被移除，而是標成 terminating、ready=false。在這個 mesh 裡，延遲主要來自 istiod 把 EDS 更新推到各個 Envoy，跟 iptables 關係不大。建議改成「endpoint 狀態要傳遞到所有 kube-proxy／Envoy 需要時間」。 | ✓ |
+| P06-011 | 2115 | 【Istio 關鍵】名稱決定協定判定，一定要命名 | 不精確 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ | "appProtocol takes precedence over the port name." | 判定順序是 appProtocol 優先，其次才是 port 名稱前綴。已經設了 appProtocol 的話，名稱就不是判定依據。K8s 只在多個 port 時強制要命名。建議改成「appProtocol 或 port 名稱前綴擇一明確宣告（兩者都寫最好）」。 | ✓ |
+| P06-012 | 2165 | 不命名 = 只能用 L4 功能 | 錯誤 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ | "If the protocol cannot automatically be determined, traffic will be treated as plain TCP traffic." | 沒命名時 Istio 會自動偵測 HTTP/HTTP2，偵測得到就能用 L7；有 appProtocol 也一樣可以用 L7。這也跟本節 2183、2185 行的說法互相矛盾。改成「沒命名也沒 appProtocol 時靠自動偵測，偵測失敗才當 TCP（L4）」。 | ✓ |
+| P06-013 | 2169 | Local 時，沒有該 Pod 的 node 會拒絕連線 | 不精確 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ | "(Traffic mistakenly sent to a node with no endpoints will be dropped.)" | 封包是被丟棄（drop），不是拒絕（reject），client 端看到的是 timeout，不是 connection refused。另外補充：外部 LB 會用 healthCheckNodePort 把這種 node 排除掉。 | ✓ |
+| P06-014 | 2185 | 對 server-first 協定（MySQL、Redis）會誤判並造成連線 hang | 錯誤 | https://istio.io/latest/docs/ops/deployment/application-requirements/ | "The following ports are known to commonly carry server first protocols, and are automatically assumed to be TCP:" （官方表格列的是 SMTP 25、DNS 53、MySQL 3306、MongoDB 27017） | Redis 是 client 先送命令，不屬於 server-first，請刪掉 Redis，改舉 MySQL、SMTP、MongoDB。官方也沒有描述「hang」這個症狀，建議改成「與自動偵測及 PERMISSIVE mTLS 不相容，必須明確宣告為 TCP；但標準 port（例如 3306）Istio 會自動當成 TCP」。 | ✓ |
+| P06-015 | 2209-2211 | httpCookie: name: JSESSIONID … ttl: 10800s （方案 A 最推薦） | 錯誤 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "If specified, a cookie with the TTL will be generated if the cookie is not present." | 設了 ttl 之後，請求沒帶這個 cookie 時，Envoy 會自己產生一個同樣叫 JSESSIONID 的 cookie，跟 Spring 的 session cookie 撞名。Spring 收到不認得的 session id 會重發 JSESSIONID，雜湊值跟著變，黏著反而被破壞。建議改用專用名稱，例如 `name: istio-session-affinity` 加 `ttl: 10800s`，交給 Envoy 管理，不要跟 JSESSIONID 共用。如果一定要用 JSESSIONID 就拿掉 ttl，但第一個請求落在哪個 Pod，不保證就是之後雜湊對到的那個 Pod。 | ✓ |
+| P06-016 | 2220 | consistentHash 用的是 ring hash 演算法 | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "The Maglev load balancer implements consistent hashing to backend hosts." | consistentHash 有 ringHash 和 maglev 兩種演算法可選，官方頁面沒有寫哪一種是預設。改成「一致性雜湊（ringHash 或 maglev）」。 | ✓ |
+| P06-017 | 2227 | kubectl get endpoints <svc> 沒東西 | 過時 | https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/ | "a kubernetes.io/service-name label that enables simple lookups of all EndpointSlices belonging to a Service" （同頁註明 Endpoints API 自 v1.33 起 deprecated） | 改成 `kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=<svc>`，順便說明 Endpoints API 從 v1.33 起已經 deprecated。 | ✓ |
+| P06-018 | 2228 | targetPort 填了不存在的名稱：不會報錯，但 endpoint 永遠是空的 | 無法驗證 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ | "If this is a string, it will be looked up as a named port in the target Pod's container ports." | 官方文件沒寫「名稱查不到」時會怎樣。建議改成較保守的寫法：「名稱對不到 containerPort 時，該 port 不會產生可用的 endpoint，API 也不會報錯」，並附上實測方法（檢查 EndpointSlice 的 ports 欄位）。 | ✓ |
+| P06-019 | 2229 | externalTrafficPolicy: Local + 節點沒有 Pod … 要搭配 topologySpreadConstraints 確保每個 node 都有 Pod | 不精確 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ | "External systems (e.g. load-balancers) can use this port to determine if a given node holds endpoints for this service or not." | topologySpreadConstraints 保證不了「每個 node 都有 Pod」（只有 2 個 replica 時根本不可能）。正規做法是讓 LB 透過 healthCheckNodePort 自動避開沒有 endpoint 的 node；真的要每台都有，就得用 DaemonSet。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P06-020 | 1859 | 用 HPA 時不要寫 replicas | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-021 | 1860 | revisionHistoryLimit 預設 10、佔 etcd | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-022 | 1861 | progressDeadlineSeconds 預設 600 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-023 | 1865 | Recreate 先全殺再全起 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-024 | 1867-1868 | maxSurge/maxUnavailable 可填數字或百分比 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-025 | 1872 | selector 須符合 template，建立後不可改 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-026 | 1878 | version label 供 DR subset 分流 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P06-027 | 1880-1881 | 改 template 的 annotation 會觸發 rollout | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-028 | 1883 | holdApplicationUntilProxyStarts 延後 app 啟動 | https://istio.io/latest/docs/reference/config/istio.mesh.v1alpha1/ |
+| P06-029 | 1886 | SA 是 Istio principal 的來源 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P06-030 | 1887 | automountServiceAccountToken 可設 false | https://kubernetes.io/docs/concepts/security/service-accounts/ |
+| P06-031 | 1890 | nodeSelector 是硬性條件 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/scheduling-eviction/assign-pod-node.md |
+| P06-032 | 1894 | nodeAffinity 支援 In/NotIn/Exists | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/scheduling-eviction/assign-pod-node.md |
+| P06-033 | 1902 | 偏好規則 weight 範圍 1~100 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/scheduling-eviction/assign-pod-node.md |
+| P06-034 | 1922 | ScheduleAnyway 與 DoNotSchedule 的語意 | https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/ |
+| P06-035 | 1929 | Equal 比對 value，Exists 只看 key | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| P06-036 | 1931 | taint 有三種 effect | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| P06-037 | 1958 | 用明確 tag 時 IfNotPresent 少查一次 registry | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/containers/images.md |
+| P06-038 | 1961 | 命名 port 可被 targetPort 引用 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-039 | 1983 | requests 是排程依據 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/configuration/manage-resources-containers.md |
+| P06-040 | 1986 | 超過 memory limit 被 OOM，超過 cpu limit 被 throttle | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/configuration/manage-resources-containers.md |
+| P06-041 | 1995-1997 | startup 給 300 秒，成功前不跑另兩種 probe | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+| P06-042 | 1999 | readiness 失敗移出 endpoint、不重啟 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+| P06-043 | 2008-2014 | liveness 失敗重啟，約 90 秒 | https://kubernetes.io/docs/concepts/workloads/pods/probes/ |
+| P06-044 | 2049-2055 | 表中各欄預設值（1/25%/25%/0/10/600/30） | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-045 | 2062 | serviceAccountName 預設為 default | https://kubernetes.io/docs/concepts/security/service-accounts/ |
+| P06-046 | 2069 | startupProbe 失敗會重啟容器 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+| P06-047 | 2077 | selector 不能改，只能砍掉重建 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ |
+| P06-048 | 2079 | memory limit 是硬上限 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/configuration/manage-resources-containers.md |
+| P06-049 | 2080 | cpu limit 會造成 throttling | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/configuration/manage-resources-containers.md |
+| P06-050 | 2096 | mesh 內負載平衡由 sidecar 負責 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/reference/networking/virtual-ips.md |
+| P06-051 | 2109 | 預設型別是 ClusterIP | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-052 | 2112 | selector 比對的是 Pod label | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-053 | 2117 | targetPort 可以填名稱 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-054 | 2119 | appProtocol 是明確的協定宣告 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ |
+| P06-055 | 2125 | 10800 秒等於 3 小時（也是預設值） | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/reference/networking/virtual-ips.md |
+| P06-056 | 2127 | internalTrafficPolicy Local 只走本機 Pod | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-057 | 2133 | Headless 的 DNS 直接回傳 Pod IP | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-058 | 2145 | nodePort 預設範圍 30000-32767 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-059 | 2150 | Local 保留 client IP，Cluster 是預設 | https://kubernetes.io/docs/tasks/access-application-cluster/create-external-load-balancer/ |
+| P06-060 | 2151 | loadBalancerSourceRanges 是 LB 層白名單 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-061 | 2156 | ExternalName 是 DNS CNAME | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-062 | 2164 | Headless 靠 clusterIP: None，不是一種 type | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/services-networking/service.md |
+| P06-063 | 2166 | appProtocol 優先於 port 名稱 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ |
+| P06-064 | 2170 | 本機沒 Pod 就連不到 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-065 | 2171 | 需要 LB 供應商支援 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ |
+| P06-066 | 2179-2182 | port 名稱前綴對應的協定 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ |
+| P06-067 | 2183 | 未命名時走自動偵測 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ |
+| P06-068 | 2193 | sessionAffinity 是 kube-proxy 的功能 | https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/reference/networking/virtual-ips.md |
+| P06-069 | 2198 | apiVersion 為 networking.istio.io/v1 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P06-070 | 2216 | consistentHash 可用 useSourceIp | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+
+---
+
+## Part 6.3–6.4：ConfigMap（與 Secret）、CronJob／Job
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P06-201 | 2239 | 有 `kubectl get secret` 權限的人就能看到內容 | 不精確 | https://kubernetes.io/docs/concepts/configuration/secret/ | "Anyone with API access can retrieve or modify a Secret, and so can anyone with access to etcd. Additionally, anyone who is authorized to create a Pod in a namespace can use that access to read any Secret in that namespace; this includes indirect access such as the ability to create a Deployment." | 補一句：「能存取 etcd 的人看得到；在該 namespace 能建 Pod 或 Deployment 的人，也能把任何 Secret 掛進 Pod 讀出來。所以只收 `get secret` 權限不夠。」再列官方建議的四步：encryption at rest、最小權限 RBAC、只讓特定容器存取、外部 secret store。 | ✓ |
+| P06-202 | 2296, 2321 | subPath 是掛載當下複製的 | 不精確 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ | "A container using a ConfigMap as a subPath volume will not receive ConfigMap updates." | 結論（不會更新）是對的，機制寫錯。官方只陳述結果，沒說是「複製」。實際上 subPath 是把當下那個檔案 bind mount 進容器；ConfigMap 更新時 kubelet 換掉的是 `..data` symlink，bind mount 還指著舊檔。建議改成「subPath 綁定的是掛載當下那個檔案，看不到之後的更新」。 | ✓ |
+| P06-203 | 2306, 2355 | `defaultMode: 0444`（八進位檔案權限） | 無法驗證 | https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/volume/ | （抓取的內容在 ConfigMapVolumeSource 段落之前就被截斷，沒取得原文） | 寫法本身沒有可疑之處。這次沒能拿到 `defaultMode` 的官方原文（包含預設值 0644），建議下一批人工再核對 API reference。 | ✓ |
+| P06-204 | 2320 | 會（約 1 分鐘內） | 不精確 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ | "the total delay from the moment when the ConfigMap is updated to the moment when new keys are projected to the pod can be as long as kubelet sync period (1 minute by default) + TTL of ConfigMaps cache (1 minute by default) in kubelet." | 改成「會，但最長可能要 kubelet sync period（預設 1 分鐘）加上快取 TTL（預設 1 分鐘），也就是大約 2 分鐘；改一下 Pod 的 annotation 可以立刻觸發刷新」。 | ✓ |
+| P06-205 | 2338 | `kubectl get configmap ... -o yaml` 再 sha256sum | 不精確 | https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-meta/ | "UID is the unique in time and space value for this object. It is typically generated by the server on successful creation of a resource" | 對整份 live 物件的 YAML 算雜湊，會把 server 填的 `uid`、`resourceVersion`、`creationTimestamp`、`managedFields` 一起算進去。結果是資料沒變但重建物件或改 metadata 時 hash 也會變；而且必須先 apply ConfigMap 才算得出來。改成只對資料算：`kubectl get cm pmc-epmmformquery-config -n ea-pmc -o jsonpath='{.data.application\.yml}'` 的輸出取 sha256 前 8 碼（跟本 repo 的 `sync-config-hash.sh`、第 6.3 節一致），或在 CI 直接對本地檔案解析後的 `data` 算。 | ✓ |
+| P06-206 | 2361 | ConfigMap 不存在時 Pod 卡在 `ContainerCreating` | 不精確 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ | "If you reference a ConfigMap that doesn't exist and you don't mark the reference as optional, the Pod won't start." | 官方只說「Pod 起不來」，沒指定狀態名稱。改成「以 volume 掛載時通常停在 `ContainerCreating`（Events 會有 FailedMount）；以 `env`/`envFrom` 引用時通常是 `CreateContainerConfigError`（此細節官方文件未列出）」。兩種都要看 `kubectl describe pod` 的 Events。 | ✓ |
+| P06-207 | 2363 | `VERSION: 1.10` 會變成 `1.1` | 不精確 | https://kubernetes.io/docs/concepts/configuration/configmap/ | "The data field is designed to contain UTF-8 strings while the binaryData field is designed to contain binary data as base64-encoded strings." | 在 ConfigMap 的 `data` 裡，沒加引號的 `1.10` 是 YAML 浮點數，跟 boolean 一樣會被 API 以型別錯誤拒絕，不會被靜默存成 `1.1`。變成 `1.1` 是值先經過 Helm 模板等工具重新序列化才會發生。改成「`VERSION: 1.10` 同樣會被拒絕；透過 Helm values 帶入時還可能先變成 1.1，所以一律加引號」。 | ✓ |
+| P06-208 | 2411, 2425 | `podFailurePolicy:` 搭配 `restartPolicy: OnFailure` | 錯誤 | https://kubernetes.io/docs/concepts/workloads/controllers/job/ | "if you want to use a .spec.podFailurePolicy field for a Job, you must also define that Job's pod template with .spec.restartPolicy set to Never." | 這份範例 YAML 送出去會被 API 拒絕。二選一：要用 podFailurePolicy，就把 `restartPolicy` 改成 `Never`（重試改由 Job controller 重建 Pod）；要保留 `OnFailure`，就整段刪掉 podFailurePolicy。並在註解寫明「podFailurePolicy 需要 restartPolicy: Never」。 | ✓ |
+| P06-209 | 2423, 2525 | annotations 底下的 `sidecar.istio.io/inject: "false"` | 過時 | https://istio.io/latest/docs/reference/config/annotations/ | "This annotation has been deprecated in favor of the sidecar.istio.io/inject label documented" | 把 `sidecar.istio.io/inject: "false"` 從 `template.metadata.annotations` 移到 `template.metadata.labels`，並註明「annotation 形式已 deprecated，官方建議用 label」。 | ✓ |
+| P06-210 | 2454 | 否則 UTC 跟你想的差 8 小時 | 環境特定 | — | — | 依規定不研究。這句只在 controller 時區是 UTC、使用者在台灣時成立，建議加上「若 controller 跑在 UTC」的前提。 | ✓ |
+| P06-211 | 2480 | `kubectl get jobs -n ea-pmc -l job-name` 看這個 CronJob 產生的所有 Job | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/job/ | "Job labels will have batch.kubernetes.io/ prefix for job-name and controller-uid." | 每個自動 selector 的 Job 都帶 job-name label，只寫 key 的 selector 會列出整個 namespace 所有 CronJob 和 Job 產生的 Job，不只這一個。改成在 `jobTemplate.metadata.labels` 加一個 label（例如 `app: pmc-form-daily-sync`），再用 `-l app=pmc-form-daily-sync`；或用 `kubectl get jobs -o custom-columns` 列出 ownerReferences 篩選。 | ✓ |
+| P06-212 | 2482 | Job 的 Pod 跑完不會消失，除非設了 ttl | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ | "Setting this field to 0 will not keep any successful jobs." | CronJob 產生的 Job 也會被 `successfulJobsHistoryLimit`/`failedJobsHistoryLimit` 清掉（連同 Pod）。改成「除非被 ttl 或歷史上限清掉」。 | ✓ |
+| P06-213 | 2495 | `Failed`：重試超過 backoffLimit，或超過 activeDeadlineSeconds | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/job/ | "A failed Pod matches a rule in .spec.podFailurePolicy that has the FailJob action." | 補上「命中 podFailurePolicy 的 FailJob 規則」（本節範例自己就用了這條），以及 Indexed Job 的 backoffLimitPerIndex / maxFailedIndexes。 | ✓ |
+| P06-214 | 2502 | 錯過超過 100 次……這個 CronJob 就永遠不再排程了；訊息為 `Cannot determine if job needs to be started` | 過時 | https://raw.githubusercontent.com/kubernetes/kubernetes/master/pkg/controller/cronjob/utils.go | "If there are too many (>100) unstarted times, it will also record a warning." | 「永遠卡死」和那段訊息都是舊版 v1 controller 的行為。現行 v2 controller 超過 100 次只發一個 Warning 事件 `TooManyMissedTimes`（訊息 "too many missed start times. Set or decrease .spec.startingDeadlineSeconds or check clock skew"），仍會回傳最近一次排程時間。官方概念頁還寫著 "it does not start the Job"，跟原始碼不一致。建議改成「會發 TooManyMissedTimes 警告事件（官方文件說這次不啟動），不要依賴它；設 startingDeadlineSeconds 就不會有這個問題」，並刪掉「永遠不再排程」。 | ✓ |
+| P06-215 | 2503, 2505 | 錯過不到 100 次又是 Allow，會一次補跑所有錯過的排程 | 錯誤 | https://raw.githubusercontent.com/kubernetes/kubernetes/master/pkg/controller/cronjob/utils.go | "the most recent time a Job should be created or nil, if that's after now," | controller 只會為「最近一次」錯過的排程建一個 Job，不會一次補跑全部，也不會爆出一堆 Pod。官方說法是 "the Jobs will always run at least once"（https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/）。刪掉這條，2505 的「兩個問題都解決了」改成「設了就不會觸發 >100 的警告，而且超過窗口的那次會被跳過（MissSchedule 事件）」。 | ✓ |
+| P06-216 | 2537–2539 | `set -e` 之後 `java -jar ...`、`RC=$?`、`curl ... quitquitquit`、`exit $RC` | 錯誤 | https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html | "When this option is on, when any command fails" "the shell immediately shall exit, as if by executing the exit special built-in utility with no arguments," | 有 `set -e` 時 java 一失敗 shell 就直接退出，`RC=$?` 和 curl 都不會執行，sidecar 不會被叫停，Job 正好在失敗時卡住。RC 也永遠是 0。改成第一行寫 `set +e`（或不要 set -e），接著 `java -jar /app/sync.jar`、`RC=$?`、`curl -sf -X POST http://127.0.0.1:15020/quitquitquit`、`exit $RC`。另外註明 app image 要有 curl，而且這個端點只接受 localhost 的 POST。 | ✓ |
+| P06-217 | 2543–2545 | 需要 K8s 1.29+ 且 Istio 開啟 native sidecar；需要在 istiod 設 `ENABLE_NATIVE_SIDECARS=true` | 過時 | https://istio.io/latest/news/releases/1.27.x/announcing-1.27/change-notes/ | "Promoted the environment variable ENABLE_NATIVE_SIDECARS to default to true." "This means native sidecars will be injected into all eligible pods unless explicitly disabled." | 改成「Istio 1.27 起預設就是 native sidecar，不需要再設；舊版 Istio 才要設 `ENABLE_NATIVE_SIDECARS=true` 或在 Pod 加 `sidecar.istio.io/nativeSidecar: "true"`」。K8s 端的 SidecarContainers 1.28 alpha、1.29 起預設開啟、1.33 GA（https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/："Stable since Kubernetes v1.33"）。也就是說在 1.27+ 環境裡，「Job 卡住」本來就不該發生，排查時要先確認 istio-proxy 是不是在 initContainers 裡。 | ✓ |
+| P06-218 | 2559 | `schedule` 用 UTC | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ | "For CronJobs with no time zone specified, the kube-controller-manager interprets schedules relative to its local time zone." | 改成「不設 timeZone 時用 kube-controller-manager 的本地時區（多數 cluster 是 UTC）」。 | ✓ |
+| P06-219 | 2561 | CronJob 名稱建議不超過 52 字元 | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ | "Even when the name is a DNS subdomain, the name must be no longer than 52 characters. This is because the CronJob controller will automatically append 11 characters to the name you provide and there is a constraint that the length of a Job name is no more than 63 characters." | 「建議」改成「必須」：超過 52 字元就違反限制（controller 會再加 11 字元，Job 名稱上限 63）。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P06-220 | 2239 | Secret 預設只是 base64、未加密 | https://kubernetes.io/docs/concepts/configuration/secret/ |
+| P06-221 | 2249 | immutable 之後只能刪掉重建 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-222 | 2260 | data 值必須是字串 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-223 | 2262 | binaryData 用 base64 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-224 | 2288, 2356 | optional 時不擋 Pod 啟動 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ |
+| P06-225 | 2291 | 整個 volume 掛載會自動更新 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-226 | 2319 | env 不會更新，要重啟 Pod | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-227 | 2341 | Helm checksum/config 寫法 | https://helm.sh/docs/howto/charts_tips_and_tricks/ |
+| P06-228 | 2344 | rollout restart 可手動觸發 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-229 | 2353 | immutable 減少 apiserver watch 負擔 | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-230 | 2362 | 1 MiB 上限，可改用 volume | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-231 | 2364 | Pod 與 ConfigMap 須同 namespace | https://kubernetes.io/docs/concepts/configuration/configmap/ |
+| P06-232 | 2384 | cron 五欄格式 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-233 | 2385 | timeZone 1.27 GA，未設用 controller 時區 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-234 | 2388, 2455, 2469–2471 | concurrencyPolicy 三值，預設 Allow | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-235 | 2391–2392 | startingDeadlineSeconds 補跑窗口 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-236 | 2395, 2457 | 成功歷史預設 3，設 0 不保留 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-237 | 2458 | 失敗歷史預設 1 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-238 | 2398, 2459 | suspend 不影響已啟動的 Job | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-239 | 2403 | 指數退避 10s、20s、40s | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-240 | 2404–2405 | activeDeadline 含重試且優先 | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-241 | 2406 | ttl 刪 Job 時連帶刪 Pod | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-242 | 2411 | podFailurePolicy 1.31 GA | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-243 | 2425, 2463, 2560 | Job 只允許 OnFailure 或 Never | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-244 | 2438 | 15020 quitquitquit 用 POST | https://raw.githubusercontent.com/istio/istio/master/pilot/cmd/pilot-agent/status/server.go |
+| P06-245 | 2453 | 支援 @daily、@hourly | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-246 | 2460 | backoffLimit 預設 6 | https://kubernetes.io/docs/concepts/workloads/controllers/job/ |
+| P06-247 | 2489 | create job --from=cronjob | https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_job/ |
+| P06-248 | 2505 | 設 deadline 只看窗口內的排程 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+| P06-249 | 2513 | 傳統 sidecar 讓 Pod 不會結束 | https://istio.io/latest/blog/2023/native-sidecars/ |
+| P06-250 | 2544 | native sidecar 不擋 Job 完成 | https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/ |
+| P06-251 | 2552 | nativeSidecar 註解存在（Alpha） | https://istio.io/latest/docs/reference/config/annotations/ |
+| P06-252 | 2562 | 歷史上限之內的 Job 會保留 | https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ |
+
+---
+
+## Part 6.5–6.6：Gateway、VirtualService
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P06-401 | 2587, 2641 | 選錯 = 設定下發到不存在的 Pod，完全沒作用也沒錯誤 ／ 選錯完全沒反應，也不會報錯 | 不精確 | https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-analyze/ | "Error [IST0101] (Gateway default/bookinfo-gateway samples/bookinfo/networking/bookinfo-gateway.yaml:9) Referenced selector" "not found: "istio=ingressgateway"" | 改成「istiod 會照樣接受、不會拒絕 apply，但 `istioctl analyze` 會回報 IST0101 Referenced selector not found」。2652 行已經提到 analyze，把兩處講法統一。 | ✓ |
+| P06-402 | 2594 | HTTP / HTTPS / GRPC / HTTP2 / TCP / TLS / MONGO | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | "The protocol exposed on the port. MUST be one of HTTP…GRPC-WEB…TLS." (原文用分隔符列出 HTTP、HTTPS、GRPC、GRPC-WEB、HTTP2、MONGO、TCP、TLS) | 補上 `GRPC-WEB`。 | ✓ |
+| P06-403 | 2593 | 名稱在同一個 Gateway 內要唯一 | 無法驗證 | https://istio.io/latest/docs/reference/config/networking/gateway/ | Port.name: "Label assigned to the port." ／ Server.name: "An optional name of the server, when set must be unique across all servers." | 官方文件對 `port.name` 沒有唯一性要求，有寫明要唯一的是 `servers[].name`。改成「port.name 必填；要唯一的是選填的 `servers[].name`」，或直接刪掉這句註解。 | ✓ |
+| P06-404 | 2597, 2662 | 對應到 K8s Secret（type: kubernetes.io/tls）／ 檢查 secret 的 type 是不是 kubernetes.io/tls，以及有沒有 tls.crt / tls.key | 不精確 | https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/ | "A TLS Secret with keys `tls.key` and `tls.crt`" ／ "A generic Secret with keys `key` and `cert`." | 改成「TLS Secret（tls.crt／tls.key）或 generic Secret（cert／key）都可以」。排錯那條不要只要求 `kubernetes.io/tls`。 | ✓ |
+| P06-405 | 2622 | 這個 secret 要額外包含 ca.crt | 不精確 | https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/ | "a separate generic Secret named `<secret>-cacert`, with a `cacert` key." | 改成「CA 憑證可以放在同一個 secret 的 `ca.crt` key，也可以另外建一個名為 `<secret>-cacert`、key 為 `cacert` 的 secret」。 | ✓ |
+| P06-406 | 2627–2635 | TLS 四種 mode（表格實際列了五種） | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | OPTIONAL_MUTUAL: "Similar to MUTUAL mode, except that the client certificate is optional." | 標題改成「TLS mode」，並補一列 `OPTIONAL_MUTUAL`（client 憑證可有可無）。 | ✓ |
+| P06-407 | 2634 | ISTIO_MUTUAL … mesh 內部的 gateway（如 east-west gateway） | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | ISTIO_MUTUAL: "Compared to Mutual mode, this mode uses certificates, representing gateway workload identity" ／ AUTO_PASSTHROUGH: "This server is typically used to provide connectivity between services in disparate L3 networks." | 跨網路的 east-west gateway 典型用的是 AUTO_PASSTHROUGH。ISTIO_MUTUAL 的意思是 gateway 用 Istio 自動簽發的 workload 身分憑證，跟 sidecar 之間走 mTLS。例子改成「例如 sidecar 到 egress gateway 這一段的 mTLS」。 | ✓ |
+| P06-408 | 2642 | `HTTPS` 才會做 TLS 終止 | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | "TLS can be either used to terminate non-HTTP based connections on a specific port" "or to route traffic based on SNI header to the destination without terminating the TLS connection." | 改成「`HTTPS` 會終止 TLS 再做 L7 路由。`TLS` 搭 `SIMPLE`／`MUTUAL` 也會終止 TLS（給非 HTTP 流量用），搭 `PASSTHROUGH` 則不解密、只看 SNI」。 | ✓ |
+| P06-409 | 2643, 2651 | `*` 太寬鬆，多個 Gateway 會互搶 ／ 行為會變得不可預期。永遠寫明確的 host | 不精確 | https://istio.io/latest/docs/ops/common-problems/network-issues/ | "produce 404 errors when accessing a second host after a connection to another host has already been established." ／ "configuring a single wildcard `Gateway`, instead of two" | 官方記載的多 Gateway 問題是：多個 Gateway 共用同一張（萬用字元）憑證時，瀏覽器重用 HTTP/2 連線，導致第二個 host 拿到 404。官方的解法正好是「合併成單一個萬用字元 Gateway」。「互搶、不可預期」改寫成這個具體機制，「永遠寫明確 host」改成「避免多個 Gateway 用重疊的 host 或共用憑證」。 | ✓ |
+| P06-410 | 2650, 2656 | （通常是 `istio-system`）／ `deploy/istio-ingressgateway -n istio-system` | 不精確 | https://istio.io/latest/docs/setup/additional-setup/gateway/ | "helm install istio-ingressgateway istio/gateway -n istio-ingress" | 官方現行的 Helm 安裝把 gateway 放在 `istio-ingress` namespace，不是 `istio-system`。改成「istioctl 預設安裝在 istio-system；Helm 則依安裝時的 release 名稱與 namespace 而定，請先 `kubectl get deploy -A` 找出實際名稱再查 label」。selector 的 label 也一併加同樣的提醒。 | ✓ |
+| P06-411 | 2650 | 較新的 Istio 支援 `namespace/name` 的跨 namespace 引用 | 錯誤 | https://istio.io/latest/docs/reference/config/analysis/ist0161/ | "ensure that the secret with the specified `credentialName` exists in the same namespace as the Gateway workload" | 刪掉這句。現行官方文件沒有記載 Istio Gateway 的 `credentialName` 有 `namespace/name` 寫法，analyze 訊息 IST0161 也明確要求 secret 跟 gateway workload 同一個 namespace。 | ✓ |
+| P06-412 | 2662 | 透過 SDS 動態載入憑證的，更新 secret 後通常幾秒內生效，不需要重啟 | 無法驗證 | https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/ | （現行官方頁面找不到「免重啟、幾秒生效」的敘述。這一頁的示範做法是刪掉 secret 再重建。） | 改成「Istio 透過 SDS 下發憑證，理論上不用重啟 gateway；更新後請用 `istioctl proxy-config secret` 確認新憑證已經生效」，拿掉「幾秒內」這種沒有出處的時間保證。 | ✓ |
+| P06-413 | 2722, 2818 | 所有 weight 加起來必須 = 100 ／ 全部加起來必須是 100 | 過時 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | "Weight specifies the relative proportion of traffic to be forwarded to the destination." ／ "`weight/(sum of all weights)`" | 改成「weight 是相對比例，每個 destination 拿到 weight 除以全部 weight 總和的流量；只有一個 destination 時它拿到全部流量。習慣上湊成 100 比較好讀，但現行版本不是硬性規定」。 | ✓ |
+| P06-414 | 2733, 2821 | 單次嘗試的逾時（x attempts 要小於 timeout）／ `attempts x perTryTimeout` 要小於 `timeout`（範例是 attempts 3、perTryTimeout 5s、timeout 15s） | 錯誤 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ ；https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/router_filter | "The maximum possible number of requests made will be 1 + `attempts`." ／ "includes all retries." | `attempts` 算的是重試次數，不含第一次呼叫，所以最多會送出 1 + 3 = 4 次請求，4 × 5s = 20s，已經超過 15s。範例本身也只是 3 × 5 = 15，「等於」而非「小於」，違反它自己寫的規則。改成「(1 + attempts) × perTryTimeout ≤ timeout，否則後面的重試會被總 timeout 截斷」，範例改成 attempts: 2、perTryTimeout: 5s、timeout: 15s。 | ✓ |
+| P06-415 | 2729–2735 對照 2780–2792 | 同一個 VirtualService 裡同時有 timeout/retries（規則 2）和 fault（規則 5） | 錯誤 | https://istio.io/latest/docs/ops/common-problems/network-issues/ | "Currently, Istio does not support configuring fault injections and retry or timeout policies on the same `VirtualService`." | 把故障注入範例拆成另一個 VirtualService（或另外說明只在測試環境單獨使用），並加註「官方不支援 fault 跟 retries/timeout 放在同一個 VirtualService」。 | ✓ |
+| P06-416 | 2700 對照 2768–2783 | 特例一定要放前面（規則 5 的 header 故障注入卻排在規則 2 的 `/gui_epmmFormQuery/` 和規則 4 的 `/api/` 後面） | 不精確 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | "The first rule matching an incoming request is used." | 範例違反它自己寫的 first-match 原則：帶 `x-chaos-test` 的 `/api/` 和 gui 請求會先被規則 2、4 吃掉，永遠進不了規則 5。把 header 比對的規則移到 path 規則前面，或在註解寫明它只會對前面沒命中的路徑生效。 | ✓ |
+| P06-417 | 2822 | `rewrite.uri`：只能配 `prefix` match 使用 | 錯誤 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | "rewrite the path (or the prefix) portion of the URI with this value." ／ "If the original URI was matched based on prefix, the value provided in this field will replace the corresponding matched prefix." | 改成「配 prefix match 時只取代命中的那段前綴；配 exact 或 regex match 時會取代整段 path。要用 regex 改寫請用 `uriRegexRewrite`」。 | ✓ |
+| P06-418 | 2824, 2882–2886 | 兩邊都會加 `Access-Control-Allow-Origin` header，瀏覽器看到重複的 header 會直接報錯 | 無法驗證 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | （官方文件沒有說明 corsPolicy 和上游 CORS header 並存時會疊加還是覆寫。只有："Indicates whether preflight requests not matching the configured allowed origin shouldn’t be forwarded to the upstream." "Default is forward to upstream."） | 保留「擇一管理」這個建議，但把「必定產生重複 header」改成「可能互相干擾（重複或被覆寫），而且 origin 沒命中的 preflight 預設會被轉給 app」，並建議實測確認。 | ✓ |
+| P06-419 | 2836 | 它會走預設的 round-robin 直連 | 過時 | https://istio.io/latest/docs/concepts/traffic-management/ | "By default, the Envoy proxies distribute traffic across each service’s load balancing pool using a least requests model." | 改成「仍然經過 sidecar，但套用預設路由：送到該 Service 的所有 endpoint，演算法是 least request」。「直連」也容易誤會成繞過了 sidecar。 | ✓ |
+| P06-420 | 2840 | 內部流量還是 50/50 打到所有 Pod | 不精確 | https://istio.io/latest/docs/concepts/traffic-management/ | "By default, the Envoy proxies distribute traffic across each service’s load balancing pool using a least requests model." | 改成「內部流量會依 endpoint 數量（v1、v2 各有幾個 Pod）用 least request 分配，跟 90/10 的設定無關」。只有兩版 Pod 數量相同時才大約是 50/50。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P06-421 | 2579, 2681 | apiVersion networking.istio.io/v1 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-422 | 2572–2574 | Gateway 管 L4-L6，路由交給 VS | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-423 | 2599 | minProtocolVersion: TLSV1_2 是合法值 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-424 | 2602 | hosts 支援萬用字元 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-425 | 2603 | hosts 的 namespace/ 前綴限定 VS | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-426 | 2613 | httpsRedirect 回 301 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-427 | 2631 | SIMPLE 是單向 TLS | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-428 | 2621, 2632 | MUTUAL 會驗證 client 憑證 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-429 | 2633 | PASSTHROUGH 不解密，依 SNI 轉發 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-430 | 2635 | AUTO_PASSTHROUGH 不需要 VS | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-431 | 2598, 2644, 2650 | secret 要在 gateway workload 的 ns | https://istio.io/latest/docs/reference/config/analysis/ist0161/ |
+| P06-432 | 2663 | host 沒有交集就 404 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P06-433 | 2694 | gateways 寫成 ns/name | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-434 | 2695, 2815, 2855 | 預設 mesh，列了 gateway 要自己補 mesh | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-435 | 2700, 2816 | 第一個命中的規則生效 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-436 | 2716 | match 區塊之間是 OR | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-437 | 2705 | header 可用 exact/prefix/regex | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-438 | 2730, 2820 | HTTP timeout 預設停用 | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P06-439 | 2733 | perTryTimeout 是單次嘗試的逾時 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-440 | 2734 | retryOn 用的值都是合法的 Envoy 值 | https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/router_filter |
+| P06-441 | 2735 | retryRemoteLocalities 欄位存在 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-442 | 2738–2744 | headers 的 set/add/remove | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-443 | 2748–2754 | allowOrigins 用 StringMatch | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-444 | 2761 | prefix 改寫只換前綴 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-445 | 2774–2778 | mirrorPercentage；鏡射回應被丟棄 | https://istio.io/latest/docs/tasks/traffic-management/mirroring/ |
+| P06-446 | 2784–2790 | fault 的 delay/abort 欄位 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-447 | 2798–2800 | redirect 可設 redirectCode 302 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-448 | 2802, 2869 | 沒有 match 的預設規則放最後 | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P06-449 | 2814 | 建議 hosts 寫 FQDN | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-450 | 2874 | prefix 是字串前綴比對 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P06-451 | 2892 | NC＝找不到 cluster，UH＝沒有健康 host | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P06-452 | 2819, 2890 | subset 未定義就 503 | https://istio.io/latest/docs/ops/best-practices/traffic-management/ |
 
 ---
