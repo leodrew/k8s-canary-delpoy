@@ -1,6 +1,12 @@
 #Requires -Version 5.1
 # Ralph Wiggum - Long-running AI agent loop (Windows port of ralph.sh)
-# Usage: .\ralph.ps1 [--tool amp|claude] [max_iterations]
+# Usage: .\ralph.ps1 [--tool claude|amp] [--model <alias|id>] [--effort <level>] [--dry-run] [max_iterations]
+#
+#   --model    passed through to `claude --model` (e.g. opus, sonnet, fable, or a full model id)
+#   --effort   passed through to `claude --effort`: low | medium | high | xhigh | max
+#   --dry-run  print the resolved command line and exit without running anything
+#
+# Example: .\ralph.ps1 --model opus --effort high 30
 
 # Emulate `set -e`. Relaxed around the AI tool invocation below.
 $ErrorActionPreference = 'Stop'
@@ -43,23 +49,44 @@ function Reset-ProgressFile {
 
 # --- Parse arguments -------------------------------------------------------
 
-$Tool = 'amp'   # Default to amp for backwards compatibility
+$Tool = 'claude'
 $MaxIterations = 10
+$Model = ''
+$Effort = ''
+$DryRun = $false
+$ValidEfforts = @('low', 'medium', 'high', 'xhigh', 'max')
+
+# Accepts both `--name value` and `--name=value` (and the PowerShell-style `-Name`).
+# Returns the value and how many args were consumed, or exits if the value is missing.
+function Get-OptionValue {
+  param([object[]]$AllArgs, [int]$Index, [string]$Name)
+  $arg = [string]$AllArgs[$Index]
+  if ($arg.Contains('=')) {
+    return @($arg.Substring($arg.IndexOf('=') + 1), 1)
+  }
+  if ($Index + 1 -ge $AllArgs.Count) {
+    Write-Host "Error: --$Name requires a value."
+    exit 1
+  }
+  return @([string]$AllArgs[$Index + 1], 2)
+}
 
 $idx = 0
 while ($idx -lt $args.Count) {
   $arg = [string]$args[$idx]
+  $name = ($arg -replace '^-{1,2}', '') -replace '=.*$', ''
 
-  if ($arg -eq '--tool' -or $arg -eq '-Tool') {
-    if ($idx + 1 -ge $args.Count) {
-      Write-Host "Error: --tool requires a value ('amp' or 'claude')."
-      exit 1
+  if ($arg -match '^-{1,2}(tool|model|effort)(=.*)?$') {
+    $value, $consumed = Get-OptionValue -AllArgs $args -Index $idx -Name $name.ToLower()
+    switch ($name.ToLower()) {
+      'tool'   { $Tool = $value }
+      'model'  { $Model = $value }
+      'effort' { $Effort = $value.ToLower() }
     }
-    $Tool = [string]$args[$idx + 1]
-    $idx += 2
+    $idx += $consumed
   }
-  elseif ($arg -like '--tool=*' -or $arg -like '-Tool=*') {
-    $Tool = $arg.Substring($arg.IndexOf('=') + 1)
+  elseif ($arg -match '^-{1,2}dry-?run$') {
+    $DryRun = $true
     $idx += 1
   }
   elseif ($arg -match '^[0-9]+$') {
@@ -68,7 +95,9 @@ while ($idx -lt $args.Count) {
     $idx += 1
   }
   else {
-    $idx += 1
+    # Silently ignoring a typo like `--modle` would run the whole loop on the wrong model
+    Write-Host "Error: Unknown argument '$arg'."
+    exit 1
   }
 }
 
@@ -78,8 +107,19 @@ if ($Tool -ne 'amp' -and $Tool -ne 'claude') {
   exit 1
 }
 
+if ($Effort -and ($ValidEfforts -notcontains $Effort)) {
+  Write-Host "Error: Invalid effort '$Effort'. Must be one of: $($ValidEfforts -join ', ')."
+  exit 1
+}
+
+# amp has no equivalent flags; failing loudly beats running on a model nobody chose
+if ($Tool -eq 'amp' -and ($Model -or $Effort)) {
+  Write-Host "Error: --model / --effort are only supported with --tool claude."
+  exit 1
+}
+
 # On Windows a missing CLI otherwise surfaces as a raw CommandNotFoundException
-if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
+if (-not $DryRun -and -not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
   $alternative = if ($Tool -eq 'amp') { 'claude' } else { 'amp' }
   Write-Host "Error: '$Tool' not found in PATH. Install it or use --tool $alternative."
   exit 1
@@ -90,6 +130,31 @@ $PrdFile        = Join-Path $ScriptDir 'prd.json'
 $ProgressFile   = Join-Path $ScriptDir 'progress.txt'
 $ArchiveDir     = Join-Path $ScriptDir 'archive'
 $LastBranchFile = Join-Path $ScriptDir '.last-branch'
+
+# --- Resolve the command line -----------------------------------------------
+
+if ($Tool -eq 'amp') {
+  $PromptFile = Join-Path $ScriptDir 'prompt.md'
+  $ToolArgs   = @('--dangerously-allow-all')
+} else {
+  # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
+  $PromptFile = Join-Path $ScriptDir 'CLAUDE.md'
+  $ToolArgs   = @('--dangerously-skip-permissions', '--print')
+  if ($Model)  { $ToolArgs += @('--model', $Model) }
+  if ($Effort) { $ToolArgs += @('--effort', $Effort) }
+}
+
+$ModelLabel  = if ($Model)  { $Model }  else { '(CLI default)' }
+$EffortLabel = if ($Effort) { $Effort } else { '(CLI default)' }
+
+# Exit before the archive step below: a dry run must not archive prd.json,
+# reset progress.txt or rewrite .last-branch.
+if ($DryRun) {
+  Write-Host "Dry run - would pipe $PromptFile into:"
+  Write-Host "  $Tool $($ToolArgs -join ' ')"
+  Write-Host "  model: $ModelLabel  effort: $EffortLabel  max iterations: $MaxIterations"
+  exit 0
+}
 
 # --- Archive previous run if branch changed --------------------------------
 
@@ -132,23 +197,14 @@ if (-not (Test-Path -LiteralPath $ProgressFile)) {
 
 # --- Main loop -------------------------------------------------------------
 
-Write-Host "Starting Ralph - Tool: $Tool - Max iterations: $MaxIterations"
-
-if ($Tool -eq 'amp') {
-  $PromptFile = Join-Path $ScriptDir 'prompt.md'
-  $ToolArgs   = @('--dangerously-allow-all')
-} else {
-  # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-  $PromptFile = Join-Path $ScriptDir 'CLAUDE.md'
-  $ToolArgs   = @('--dangerously-skip-permissions', '--print')
-}
+Write-Host "Starting Ralph - Tool: $Tool - Model: $ModelLabel - Effort: $EffortLabel - Max iterations: $MaxIterations"
 
 # NOTE: `for` rather than `1..$MaxIterations` - PowerShell's range operator
 # counts DOWN when the upper bound is below 1, so `1..0` would run twice.
 for ($iteration = 1; $iteration -le $MaxIterations; $iteration++) {
   Write-Host ''
   Write-Host '==============================================================='
-  Write-Host "  Ralph Iteration $iteration of $MaxIterations ($Tool)"
+  Write-Host "  Ralph Iteration $iteration of $MaxIterations ($Tool, model: $ModelLabel, effort: $EffortLabel)"
   Write-Host '==============================================================='
 
   # Run the selected tool with the ralph prompt.
