@@ -26,6 +26,7 @@
 | [Part 13](#part-13node-排程與-routable-網段) | node 排程與 routable 網段 | 看到 nodeSelector / tolerations 的 routable |
 | [Part 14](#part-14保留人工-pilot-run-的-canary-發布) | **保留人工 pilot run 的 Canary 發布** | 要 user 簽核才能上線，但想做得可靠 |
 | [Part 15](#part-15兩種上版方式的完整對照與-sop) | **兩種上版方式的對照與 SOP** | 要決定用哪套、或要照 SOP 上版 |
+| [Part 16](#part-16active-zone-dns-下-request-落在哪fz2-部好卻-404用-mesh-送到-fz2) | active zone DNS 下 request 落在哪、用 mesh 送到 FZ2 | **FZ2 部好了，打 host 卻 404** |
 
 ---
 
@@ -41,6 +42,197 @@ K8s 原生只有「Service → Pod」這一層抽象，它解決的是**服務�
 - 我想讓服務之間全部走加密（要每個 app 自己實作 TLS）
 
 Istio 把這些抽出來，變成 sidecar（Envoy proxy）+ 一組 CRD。所以你會看到「兩套系統疊在一起」——**K8s 管的是「東西在哪、跑幾份」，Istio 管的是「流量怎麼走、誰能打誰」**。
+
+### Istio 本身由什麼組成：Istio / istiod / istio-system / Envoy
+
+後面每一個 Part 都預設你分得清這四個詞。它們常被混著講，但指的是完全不同層次的東西：
+
+| 名詞 | 是什麼 | 一句話 |
+|---|---|---|
+| **Envoy** | 一支開源的代理程式（proxy），C++ 寫的 | **真正收封包、轉封包的那支程式** |
+| **Istio** | 一個產品，用來管理一大群 Envoy | 整套系統的名字（控制面 istiod ＋ 資料面所有 Envoy） |
+| **istiod** | Istio 的大腦，在 cluster 裡是一個 Deployment | 讀你寫的 Gateway / VS / DR / AuthorizationPolicy，翻成 Envoy 看得懂的設定（xDS），推給每一個 Envoy。**它自己不轉任何流量** |
+| **istio-system** | 一個 namespace —— 跟 `ea-pmc` 一樣，就是 namespace | 放 Istio 自己元件的地方（istiod、ingressgateway、gateway 用的 TLS secret） |
+
+#### Envoy 在 cluster 裡出現在兩個位置（同一支程式）
+
+```
+$ kubectl get pods -n istio-system
+NAME                                   READY
+istiod-7d4f9c8b6-x2k9p                 1/1    ← 大腦，不轉流量
+istio-ingressgateway-5c8d7f6b9-abcde   1/1    ← 位置一：只有 Envoy，站在大門口
+istio-ingressgateway-5c8d7f6b9-fghij   1/1
+
+$ kubectl get pods -n ea-pmc
+NAME                                          READY
+pmc-epmmformquerygui-stable-6b9f8-k2j4l       2/2    ← 兩個容器！
+
+$ kubectl -n ea-pmc get pod pmc-epmmformquerygui-stable-6b9f8-k2j4l \
+    -o jsonpath='{.spec.containers[*].name}'
+app istio-proxy
+# ↑ 你的 Spring Boot（20-deployment-stable.yaml 裡 containers[].name: app）
+#     ↑ 位置二：Envoy sidecar，Istio 自動塞進來的
+```
+
+- **`istio-ingressgateway`**：一個**只有 Envoy、沒有業務容器**的 Pod，前面掛一個 `type: LoadBalancer` 的 Service 拿 VIP。外部流量的第一站（Part 1、Part 10）
+- **`istio-proxy`**：每個 AP Pod 裡的第二個容器。進出這個 Pod 的封包都會先被 iptables 導到它（Part 1 關鍵觀念一）
+
+**sidecar 是自動加的，所以你的 Deployment YAML 裡看不到它。** namespace 帶著 `istio-injection=enabled`（或 `istio.io/rev=<版本>`）這個 label 時，Pod 建立的那一刻 API server 會呼叫 istiod 的 mutating webhook，由它把 `istio-proxy` 容器加進 Pod spec。這也是為什麼 namespace 少了那個 label，Pod 會是 `1/1`、而且所有 Istio 設定對它都無效。
+
+```bash
+kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio.io/rev
+```
+
+#### 全景圖
+
+```
+┌─────────────────────── 一座 cluster（例如 FZ1）──────────────────────────┐
+│                                                                          │
+│  ns: istio-system                         ns: ea-pmc                     │
+│  ┌──────────────────┐                     ┌──────────────────────────┐   │
+│  │ istiod（大腦）   │ ┄┄┄┄推設定┄┄┄┄┄┄┄┄▶│ Pod                      │   │
+│  │  watch API server│                     │ ┌──────────────────────┐ │   │
+│  └───────┬──────────┘                     │ │ istio-proxy (Envoy)  │ │   │
+│          ┊ 推設定                         │ └──────────┬───────────┘ │   │
+│          ▼                                │            │ localhost   │   │
+│  ┌──────────────────────┐   直連 Pod IP   │ ┌──────────▼───────────┐ │   │
+│  │ istio-ingressgateway │ ───────────────▶│ │ Spring Boot :8080    │ │   │
+│  │ （只有 Envoy）       │                 │ └──────────────────────┘ │   │
+│  └──────────▲───────────┘                 └──────────────────────────┘   │
+│             │                                                            │
+└─────────────┼────────────────────────────────────────────────────────────┘
+              │  VIP（Service istio-ingressgateway 的 EXTERNAL-IP）
+           使用者
+
+  實線 ── 流量      虛線 ┄┄ istiod 推設定（xDS）
+```
+
+**比喻：保全公司。**
+
+| 比喻 | 對應 |
+|---|---|
+| 整家保全公司 | **Istio** |
+| 總部大樓 | **istio-system** |
+| 總部（把規則手冊印好、發給每個警衛） | **istiod** |
+| 警衛 | **Envoy** |
+| 園區大門的警衛室 | **istio-ingressgateway** |
+| 各棟大樓門口的警衛 | 每個 Pod 裡的 **istio-proxy** |
+| 規則手冊 | 你寫的 **Gateway / VS / DR / AuthorizationPolicy** |
+
+#### 你 `kubectl apply` 一份 VirtualService 之後，實際發生什麼
+
+```
+① API server 把 YAML 存進 etcd           ← 到這裡為止，什麼效果都還沒有
+② istiod（watch 著 API server）發現新的 VS，把它翻成 Envoy 的 route 設定
+③ 幾秒內推給 ingressgateway 的 Envoy（VS 有寫 mesh 的話，也推給所有相關的 sidecar）
+④ 下一個 request 進來，Envoy 用新規則查表
+```
+
+**你寫的 YAML 自己不會執行任何東西。** 它只是存在 API server 裡的一份資料，要被 istiod 讀到、推到 Envoy 才算生效。兩個直接推論：
+
+- **istiod 只讀「自己這座 cluster」的 API server** —— 所以 FZ2 的 VS 對 FZ1 的 Envoy 完全不存在（Part 16.3）
+- **設定「apply 成功」≠「Envoy 拿到了」** —— 要確認 Envoy 手上的版本，用 `istioctl proxy-status`（`SYNCED` 才算到位，Part 8.1）
+
+### 物件之間怎麼互相找到：label、名字、host 三種連結
+
+Gateway、VirtualService、DestinationRule、Service、Deployment 之間**只有三種連結方式**：
+
+- **label selector** —— 「選出帶著這些 label 的 Pod」
+- **名字引用** —— 「我要的是叫這個名字的那個物件」
+- **host 字串** —— 「兩邊寫的字串必須對得上」
+
+最常見的誤解是以為 VS 跟 DR 之間也是靠 selector。**不是**：VS 跟 DR 是靠 **host 字串**和 **subset 名字**對上的，真正用到 label 的是 DR 裡面那個 subset 去選 Pod 的那一步。
+
+#### 整條鏈（用 `canary-manual/track-a` 的真實值）
+
+```
+Gateway  (istio-system/my-gateway)
+  │ ① Gateway.spec.selector  istio: ingressgateway  ──▶ ingressgateway Pod 的 label   【label】
+  │     決定「哪一組 Envoy 載入這個 Gateway」
+  │
+  │ ② VS.spec.gateways: istio-system/my-gateway                                  【名字】
+  │ ③ VS.spec.hosts: myapp.example.com  必須落在 Gateway.servers.hosts 裡          【host】
+  ▼
+VirtualService  (ea-pmc/app-routing)
+  │ ④ route.destination.host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+  │      == DR.spec.host  == Service 的全名                                       【host】
+  │ ⑤ route.destination.subset: stable  == DR.subsets[].name                     【名字】
+  │ ⑥ route.destination.port.number: 8080  == Service.ports[].port               【數字】
+  ▼
+DestinationRule  (ea-pmc/pmc-epmmformquerygui-dr)
+  │ ⑦ subsets[stable].labels  version: stable  ──▶ 比對 Pod 的 label              【label】
+  ▼
+Service  (ea-pmc/pmc-epmmformquerygui-svc)
+  │ ⑧ spec.selector  app: pmc-epmmformquerygui  ──▶ 比對 Pod 的 label，產生 Endpoints   【label】
+  │ ⑨ ports[].targetPort: 8080  == container 的 containerPort                    【數字】
+  ▼
+Pod  labels: app=pmc-epmmformquerygui, version=stable
+  ▲
+  │ ⑩ Deployment.spec.selector.matchLabels  ⊆  template.metadata.labels         【label】
+Deployment  (track-a/release/20-deployment-stable.yaml)
+```
+
+④⑦⑧ 合起來，就是 Envoy 手上那份「通訊錄」的產生方式：
+
+```
+Service selector  app=pmc-epmmformquerygui   → 選出全部 Pod（stable 和 canary 都有）
+       ∩
+DR subset labels  version=stable             → 再篩一次，只留 stable
+       =
+Envoy cluster  outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+```
+
+這就是為什麼 `01-service.yaml` 的 selector **只寫 `app`、不寫 `version`**：Service 負責把兩軌的 Pod 都撈進來，DR 負責切成兩組。Service 也寫了 `version: stable` 的話，canary subset 一個 Pod 都選不到 → 503 `UH`。
+
+#### 每一個連結斷掉時的症狀
+
+| 斷掉的連結 | 症狀 |
+|---|---|
+| ① Gateway selector 對不到 gateway Pod | 那組 Envoy 根本沒有這個 listener，連不上或 404 |
+| ② `gateways` 名字寫錯 ／ ③ host 不在 Gateway 的 hosts 裡 | 404 |
+| ④ host 拼錯（registry 裡沒有這個 Service） | 503 `NC` |
+| ⑤ subset 名字在任何 DR 裡都找不到 | 503 `NC` |
+| ⑦ subset label ／ ⑧ Service selector 對不到任何 Pod | 503 `UH` |
+| ⑥ ⑨ port 對不上 | 503 或連線被拒 |
+| ⑩ Deployment selector 不是 template labels 的子集 | `kubectl apply` 直接被拒 |
+
+**踩雷：VS 的 host 寫短名。** `destination.host: pmc-epmmformquerygui-svc` 會被 Istio 用 **VS 自己所在的 namespace** 補全，而不是 Service 所在的 namespace。VS 放在別的 namespace 時，就補成一個不存在的名字 → 503 `NC`。所以這個 repo 的 VS / DR 一律寫 FQDN。
+
+#### selector 的兩種寫法
+
+```yaml
+# A. 等值比對：每一個 key=value 都要符合（AND）
+selector:
+  matchLabels:
+    app: pmc-epmmformquerygui
+    version: stable
+
+# B. 運算式比對：In / NotIn / Exists / DoesNotExist
+selector:
+  matchExpressions:
+    - { key: version, operator: In, values: [stable, canary] }
+    - { key: deprecated, operator: DoesNotExist }
+```
+
+兩種同時寫時是 AND。不是每個欄位都支援 B —— 見下表。
+
+#### 各物件的 selector 一覽
+
+| 物件.欄位 | 選的是什麼 | 支援 `matchExpressions`？ | 特殊行為 |
+|---|---|:---:|---|
+| `Service.spec.selector` | Pod → 產生 Endpoints | ✗ 只能等值，而且直接寫 map，沒有 `matchLabels` 這一層 | 不寫 selector 就不會自動產生 Endpoints |
+| `Deployment.spec.selector` | 自己管的 Pod | ✔ | **建立後不能改**；必須是 template labels 的子集 |
+| `DestinationRule.subsets[].labels` | `spec.host` 那個 Service 的 Endpoints 裡的 Pod | ✗ 只能等值 | 只在該 Service 選到的 Pod 範圍內再篩 |
+| `Gateway.spec.selector` | ingressgateway 的 Pod | ✗ | 決定哪一組 Envoy 載入這個 Gateway |
+| `AuthorizationPolicy` / `PeerAuthentication` / `RequestAuthentication` 的 `spec.selector.matchLabels` | 要套用的 workload Pod | ✗ | **省略 = 整個 namespace**；放在 `istio-system` 且省略 = 整個 mesh |
+| `Sidecar.spec.workloadSelector.labels` | 要套用的 Pod | ✗ | 省略 = 這個 namespace 的預設值（Part 2.3） |
+| `NetworkPolicy.spec.podSelector` | 要保護的 Pod | ✔ | `{}` = 這個 namespace 全部 Pod |
+| `NetworkPolicy` 的 `from/to.namespaceSelector` | 來源 / 目的 namespace | ✔ | 常用 `kubernetes.io/metadata.name: istio-system` |
+| `PodDisruptionBudget.spec.selector` | 要保護的 Pod | ✔ | |
+| `topologySpreadConstraints` / `podAntiAffinity` 的 `labelSelector` | 要彼此分散的 Pod | ✔ | `20-deployment-stable.yaml` 就有一段 |
+| `VirtualService.http[].match[].sourceLabels` | **呼叫方** Pod 的 label | ✗ | 只對 mesh 內部呼叫有效；從 gateway 進來的流量沒有來源 Pod label 可比 |
+
+**selector 共通的危險：對不到時不會報錯。** Service 選不到 Pod 只是 Endpoints 變空；AuthorizationPolicy 選不到 Pod 等於沒寫、規則無聲地不生效。這也是 `scripts/validate.sh` 要拿兩邊的值互相對照、而不是只檢查 key 存不存在的原因。
 
 ### 一句話職責表
 
@@ -179,6 +371,7 @@ meshConfig:
 ---
 
 > **延伸閱讀**：istio-ingressgateway 跟一般 Service 到底差在哪、以及 routable / non-routable 雙 VIP 怎麼配，見 [Part 10](#part-10istio-ingressgateway-與一般-service-的差別含雙-vip-架構)。
+> Gateway / VirtualService / DestinationRule 為什麼是「查表」不是「跳點」、以及兩座 cluster 時 request 落在哪一邊，見 [Part 16](#part-16active-zone-dns-下-request-落在哪fz2-部好卻-404用-mesh-送到-fz2)。
 
 ---
 
@@ -4248,7 +4441,7 @@ Gateway 的 `hosts` 比對不到就回 404，GSLB 會把健康的 cluster 誤判
 
 **先找出真正的單點在哪，再決定要不要投資在入口層的高可用。**
 
-> **延伸閱讀**：跨 cluster 呼叫時的身分斷裂與補救見 [Part 5](#part-5獨立-cluster-互打走對方-vip-與-virtualservice)；session 問題的根源見 [Part 9](#part-9你目前環境的具體發現) 發現 2。
+> **延伸閱讀**：跨 cluster 呼叫時的身分斷裂與補救見 [Part 5](#part-5獨立-cluster-互打走對方-vip-與-virtualservice)；session 問題的根源見 [Part 9](#part-9你目前環境的具體發現) 發現 2；DNS 是 active/standby（只回 active zone）時「FZ2 部好了卻 404」見 [Part 16](#part-16active-zone-dns-下-request-落在哪fz2-部好卻-404用-mesh-送到-fz2)。
 ---
 
 ## Part 12：用 Argo Rollouts 取代人工 pilot run
@@ -7574,6 +7767,377 @@ kubectl apply --dry-run=server -f release/
 > **如果問完發現其實可以跑指令**，就回頭用 15.4 / 15.5 那兩份 SOP，操作會簡單很多。
 > 這一節（15.8–15.13）是「最壞情況下也能運作」的版本。
 
+---
+
+## Part 16：active zone DNS 下 request 落在哪（FZ2 部好卻 404、用 mesh 送到 FZ2）
+
+### 16.1 這是在解決什麼問題
+
+公司的 DNS 是 **active/standby**：同一個 host（例如 `myapp.example.com`）**永遠只回 active zone 那座 cluster 的 VIP**，要切 zone 時才改回另一邊。
+
+典型的困惑長這樣：
+
+> 我在 FZ2 部好了一整套 —— VirtualService、Service、DestinationRule、Pod 全都有。FZ1 什麼都沒部。打 `https://myapp.example.com/gui_epmmFormQuery/` 卻拿到 **404**。FZ2 明明是好的啊？
+
+答案一句話：**「去哪座 cluster」在 DNS 那一步就決定了，之後 Istio 不會幫你換 cluster。** request 根本沒有到 FZ2，它到的是 FZ1，而 FZ1 的 ingressgateway 不認識這個 host 的路由。
+
+要真的看懂這件事，得先分清楚兩條完全不同的線：
+
+- **資料路徑**（16.2）：封包實際經過哪些東西
+- **控制面**（16.3）：每一站的「路由表」是誰、從哪裡讀來填的
+
+### 16.2 資料路徑：封包真正經過什麼
+
+最常見的誤解是把 Gateway / VirtualService / DestinationRule / Service 想成四個依序穿過的「站」。**實際上真正經過的只有 VIP、ingressgateway、目標 Pod 三種東西**，其他都是查表。
+
+```
+ [0] 瀏覽器 https://myapp.example.com/gui_epmmFormQuery/
+  │
+ [1] DNS ── 公司 DNS 只回 active zone 的 VIP
+  │         ← 去哪座 cluster 在這一步就定了，之後不會再換
+  ▼
+ [2] VIP（F5 / LB）
+  ▼
+ [3] Service: istio-ingressgateway  (ns istio-system, type LoadBalancer)
+  │   ← 整條路上「唯一真的經過」的 K8s Service；它是 gateway 的，不是你 AP 的
+  ▼
+ [4] Pod: istio-ingressgateway（純 Envoy）
+  │   在「同一個 Envoy 裡」依序查四張表 —— 不是四個網路跳點：
+  │     4a Gateway            這個 port / host / TLS 收不收？
+  │     4b VirtualService     host + path → 要送去哪個 destination.host（+ subset）
+  │     4c DestinationRule    subset 對到哪些 label 的 Pod、LB 策略、連線池
+  │     4d AP 的 Service + Endpoints   destination.host → Pod IP 清單（通訊錄）
+  ▼
+ [5] 直接連目標 Pod IP（不經過 AP Service 的 ClusterIP，也不經過 kube-proxy）
+  ▼
+ [6] AP Pod 的 istio-proxy（inbound）：PeerAuthentication(mTLS) → AuthorizationPolicy
+  ▼
+ [7] Spring Boot :8080（Spring Security / PrivilegeCheckFilter）
+```
+
+所以「先到 Service 還是先到 VirtualService」的答案是：
+
+1. **先到 ingressgateway 的 Service**（`istio-system` 那個，不是你的）
+2. **再到 ingressgateway 的 Envoy**，在裡面依序套 Gateway → VirtualService → DestinationRule
+3. **你 AP 的 Service 從頭到尾不是一跳** —— Envoy 只是拿它當通訊錄，查出 Pod IP 後直接連（Part 1 關鍵觀念一）
+
+**但通訊錄不能沒有。** `canary-manual/track-a/base/03-virtualservice.yaml` 裡寫的 `destination.host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local`，必須在**同一座 cluster** 的 service registry 查得到；查不到，Envoy 就不知道要連去哪（16.4 的 `NC`）。
+
+#### 具體例子：VS 指向 Service 的「名字」，但封包不送到 Service 的 IP
+
+**VS 確實指向你 AP 的 Service** —— `destination.host` 寫的就是 Service 的全名。它沒做的是「把封包送到 Service 的 ClusterIP」。用 repo 的真實物件、配上假設的 IP：
+
+```
+03-virtualservice.yaml
+  destination.host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   ← 你 AP 的 Service 名字
+  subset: stable
+
+01-service.yaml  →  pmc-epmmformquerygui-svc
+  ClusterIP: 10.96.12.34          ← Service 自己的 IP（總機）
+  selector:  app=pmc-epmmformquerygui
+
+K8s 依 selector 自動產生的 Endpoints（通訊錄）：
+  172.16.3.21:8080   label version=stable
+  172.16.5.8:8080    label version=stable
+  172.16.7.40:8080   label version=canary
+
+02-destinationrule.yaml
+  subset stable → label version=stable
+```
+
+request 到了 ingressgateway 的 Envoy，Envoy 在內部做三步：
+
+```
+① 查 VS：/gui_epmmFormQuery/ → 「pmc-epmmformquerygui-svc 的 stable subset」
+   對應到 Envoy 內部的 cluster：outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+② 這個 cluster 的成員 = Service 的 Endpoints ∩ DR subset label（version=stable）
+     172.16.3.21 ✔   172.16.5.8 ✔   172.16.7.40 ✗（canary）
+③ 依 DR 的 LB 策略挑一個，例如 172.16.5.8，直接建立連線
+
+封包的目的地是 172.16.5.8:8080
+10.96.12.34（ClusterIP）從頭到尾沒有出現在封包上
+```
+
+**打電話的比喻**：Service 名字是「公司名」，ClusterIP 是「總機」，Pod IP 是「分機」。
+
+- **沒有 Istio**：你撥總機 `10.96.12.34`，kube-proxy（總機小姐）用 iptables DNAT 幫你轉到某一支分機
+- **有 Istio**：Envoy 自己翻通訊錄查到分機號碼，**直接撥分機**，從來不撥總機（Part 1 關鍵觀念一）
+- **但公司一定要在通訊錄上**：Service 不存在 → Envoy 查不到任何分機 → 503 `NC`
+
+自己驗證（在能連 cluster 的機器上）：
+
+```bash
+# 通訊錄：一排 Pod IP
+kubectl -n ea-pmc get endpoints pmc-epmmformquerygui-svc
+
+# Envoy 手上有哪些 cluster（一個 Service 會展開成「不分 subset」＋ 每個 subset 各一個）
+istioctl proxy-config cluster deploy/istio-ingressgateway -n istio-system \
+  --fqdn pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+#   SERVICE FQDN                                        PORT  SUBSET  DIRECTION  TYPE
+#   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  -       outbound   EDS
+#   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  stable  outbound   EDS
+#   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  canary  outbound   EDS
+
+# stable subset 裡實際有誰 —— 只有 stable，而且都是 Pod IP
+istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
+  --cluster "outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local"
+#   ENDPOINT          STATUS
+#   172.16.3.21:8080  HEALTHY
+#   172.16.5.8:8080   HEALTHY
+```
+
+gateway access log 的 `upstream_host` 欄位印出來的也會是 `172.16.5.8:8080`，不是 `10.96.12.34`。VS / DR / Service 三者是用哪些 key 連起來的，見 [Part 0「物件之間怎麼互相找到」](#物件之間怎麼互相找到label名字host-三種連結)。
+
+### 16.3 控制面：表是誰填的 —— 404 的根本原因
+
+16.2 裡 Envoy 查的那四張表，不是 Envoy 自己知道的。是 **istiod 去 watch 本 cluster 的 API server**，把讀到的 Gateway / VS / DR / Service / Endpoints 翻成 Envoy 設定（xDS）推下去。
+
+關鍵在「**本 cluster**」三個字：
+
+```
+          FZ1（active）                            FZ2
+ ┌───────────────────────────────┐      ┌───────────────────────────────┐
+ │ API server                    │      │ API server                    │
+ │   Gateway ✔（CD 建的共用 *）  │      │   Gateway ✔                   │
+ │   VS ✗  Service ✗  DR ✗       │      │   VS ✔  Service ✔  DR ✔       │
+ │   Pod ✗                       │      │   Pod ✔                       │
+ │        │ watch                │      │        │ watch                │
+ │     istiod（FZ1）             │      │     istiod（FZ2）             │
+ │        │ push xDS             │      │        │ push xDS             │
+ │   ingressgateway Envoy（FZ1） │      │   ingressgateway Envoy（FZ2） │
+ └───────────▲───────────────────┘      └───────────────────────────────┘
+             │                                   request 根本沒有來這裡
+   DNS: myapp.example.com → FZ1 VIP
+```
+
+**兩座 cluster 的 istiod 互不相通**（除非平台組做了 Istio multi-cluster，見 16.6 路線二）。FZ2 的 VirtualService 寫得再完整，FZ1 的 istiod 也看不到它，FZ1 的 Envoy 裡就沒有這個 host 的 route。
+
+所以那個 404 的完整因果是：
+
+```
+DNS 回 FZ1 VIP → FZ1 ingressgateway → 共用 wildcard Gateway 收下 host
+→ 查 VirtualService：FZ1 沒有任何 VS 宣告 myapp.example.com → 沒有 route → 404（NR）
+```
+
+### 16.4 FZ1 缺什麼 → 什麼症狀
+
+前提：**沒有** Istio multi-cluster。request 被 DNS 送進 FZ1。
+
+| FZ1 的狀態 | 使用者看到 | access log `response_flags` |
+|---|---|---|
+| Gateway 不收這個 host（HTTPS，SNI 對不到任何 server） | TLS handshake 失敗 / 連線被 reset | 通常沒有 log |
+| 共用 wildcard Gateway 收了，但**沒有 VS** | **404** ← 你遇到的就是這個 | `NR`（no route） |
+| 有 VS，但**沒有 AP Service**，或 VS 指的 subset 在 DR 裡沒定義 | 503 | `NC`（no cluster） |
+| VS + Service + DR 都有，但**沒有 Pod**、或 Pod label 跟 subset 對不上 | 503 | `UH`（no healthy upstream） |
+| 整套都有 | 200 | `-` |
+
+**結論：在 FZ1 只補一個 VS 是不夠的** —— 404 只會變成 503。FZ1 要嘛有整套（Gateway 收 host + VS + DR + Service + Pod），要嘛靠 16.6 的方式把流量送去 FZ2。
+
+### 16.5 驗證：確認 request 真的落在哪一邊
+
+下面這些要在能連 cluster 的機器上跑：
+
+```bash
+# 1. DNS 現在回哪個 IP？
+nslookup myapp.example.com
+
+# 2. 跟兩邊 ingressgateway 的 EXTERNAL-IP 對照
+kubectl --context=fz1 -n istio-system get svc istio-ingressgateway
+kubectl --context=fz2 -n istio-system get svc istio-ingressgateway
+
+# 3. 繞過 DNS，直接打 FZ2 的 VIP
+#    成功 = FZ2 本身沒問題，404 是「DNS 把你送進 FZ1」造成的
+curl -vk --resolve myapp.example.com:443:<FZ2_VIP> \
+  https://myapp.example.com/gui_epmmFormQuery/rs/gui/ping
+
+# 4. FZ1 gateway 的 access log：看到 404 + NR = FZ1 沒有這個 host 的 VS
+kubectl --context=fz1 -n istio-system logs deploy/istio-ingressgateway --tail=200 \
+  | grep myapp.example.com
+
+# 5. FZ1 的 Envoy 到底有沒有這個 host 的 route（空的 = 沒有）
+istioctl --context=fz1 proxy-config route deploy/istio-ingressgateway -n istio-system \
+  | grep myapp.example.com
+```
+
+> **`curl --resolve` 是測 standby zone 的標準做法。** 想在 FZ2 驗證新部署、又不想動 DNS，就用它。不需要為了「測一下 FZ2」去搭 16.6 的跨 cluster 接力。
+
+### 16.6 用 service mesh 把 FZ1 收到的 request 送到 FZ2 的 Pod
+
+如果真的需要「request 進 FZ1、由 FZ2 的 Pod 處理」，mesh 有兩條路。**兩條的本質完全不同**：路線一是「FZ1 當成一般 client 去打 FZ2 的大門」，路線二是「兩座 cluster 併成同一個 mesh，FZ1 直接看得到 FZ2 的 Pod」。
+
+#### 路線一：VIP 接力（不需要 multi-cluster，就是 Part 5 的模式）
+
+```
+ Client
+   │ DNS → FZ1 VIP
+   ▼
+ FZ1 ingressgateway
+   │ 共用 Gateway 收 host
+   │ FZ1 VS：route 到 ServiceEntry 的 host
+   │ FZ1 DR：TLS origination，SNI = myapp.example.com
+   ▼
+ （出 FZ1，走公司網路）── FZ2 VIP
+   ▼
+ FZ2 ingressgateway
+   │ Gateway → VS → DR（跟外部使用者直接打進 FZ2 是同一條路）
+   ▼
+ FZ2 Pod
+```
+
+FZ1 這邊要放的三份：
+
+```yaml
+# FZ1 / ea-pmc
+# 1. ServiceEntry：把 FZ2 的大門註冊進 FZ1 的 mesh
+#    ⚠ 一定要 STATIC + 寫死 FZ2 VIP。用 resolution: DNS 去解 myapp.example.com
+#      的話，公司 DNS 回的是 active zone —— 也就是 FZ1 自己 —— request 會在 FZ1
+#      的 ingressgateway 無限繞圈，最後以 timeout 或 503 收場，log 裡看起來像
+#      「FZ2 很慢」，完全不會指向 DNS。
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: myapp-fz2-relay
+  namespace: ea-pmc
+spec:
+  hosts:
+    - myapp-fz2-relay.internal      # 只在 mesh 內有意義的名字，不需要真的有 DNS record
+  location: MESH_EXTERNAL
+  resolution: STATIC
+  endpoints:
+    - address: 10.20.31.40          # FZ2 ingressgateway 的 VIP
+  ports:
+    - { number: 443, name: https, protocol: HTTPS }
+  exportTo: ["."]
+---
+# 2. DestinationRule：ingressgateway 打 FZ2 時升級成 TLS
+#    sni 要填 myapp.example.com —— FZ2 的 Gateway 是靠 SNI 選憑證、選 server 的，
+#    填成 relay 的名字會在 FZ2 那邊 handshake 失敗。
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: myapp-fz2-relay
+  namespace: ea-pmc
+spec:
+  host: myapp-fz2-relay.internal
+  trafficPolicy:
+    tls:
+      mode: SIMPLE
+      sni: myapp.example.com
+---
+# 3. VirtualService：FZ1 的 gateway 收到 myapp.example.com 就轉去 FZ2
+#    Host header 預設原樣帶過去（仍是 myapp.example.com），所以 FZ2 的
+#    Gateway / VS 對得上。不要加 rewrite.authority —— 改掉 Host 之後
+#    FZ2 的 VS 會比對不到，又是一個 404。
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: myapp-fz2-relay
+  namespace: ea-pmc
+spec:
+  hosts: ["myapp.example.com"]
+  gateways: ["istio-system/<FZ1 共用 Gateway 的名字>"]
+  http:
+    - route:
+        - destination:
+            host: myapp-fz2-relay.internal
+            port: { number: 443 }
+```
+
+**代價**（全部繼承自 Part 5）：
+
+- **身分在 FZ2 的 ingressgateway 斷掉** —— FZ2 Pod 的 sidecar 看到的來源永遠是 FZ2 的 `sa/istio-ingressgateway`，寫 `principals` 的 AuthorizationPolicy 全部要改（Part 5 核心結論）
+- **FZ1 仍是單點** —— FZ1 的 ingressgateway 掛了，FZ2 再健康也進不去
+- **DNS 切到 FZ2 之後這條就沒作用了** —— 流量直接進 FZ2，FZ1 的 relay VS 沒人打
+- 多一次跨機房往返、兩次 TLS
+- 如果 Gateway 是 `istio-system` 的共用物件，你的 VS 和 CD 團隊管的其他 VS 會共用同一個 host 空間 —— **同一個 host 被兩份 VS 宣告時，Istio 的合併行為不保證你要的那份贏**
+
+#### 路線二：Istio multi-cluster（multi-primary + multi-network，平台層級）
+
+把 FZ1、FZ2 併成**同一個 mesh**。這時 FZ1 的 istiod 讀得到 FZ2 的 Service / Endpoints，FZ1 的 Envoy 就可以直接把 FZ2 的 Pod 當成自己的 endpoint。
+
+```
+ 控制面：
+   FZ1 istiod ──(remote secret: FZ2 的 kubeconfig)──▶ watch FZ2 API server
+   同名、同 namespace 的 Service 視為「同一個服務」，endpoint 合併
+     pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+       = FZ1 的 Pod（如果有） + FZ2 的 Pod（經由 FZ2 east-west gateway）
+
+ 資料路徑：
+   Client → FZ1 VIP → FZ1 ingressgateway（Gateway → VS → DR）
+     │ endpoint 是「FZ2 east-west gateway:15443」（因為 FZ2 的 Pod IP 在另一個網路，FZ1 連不到）
+     │ mTLS，SNI = outbound_.8080_._.pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+     ▼
+   FZ2 east-west gateway（tls.mode: AUTO_PASSTHROUGH —— 只看 SNI 轉發，不解密）
+     ▼
+   FZ2 Pod 的 sidecar（mTLS 從 FZ1 ingressgateway 一路到這裡才終止）→ app
+```
+
+**前提（缺一不可，全部是平台組的事）：**
+
+1. **共用 root CA** —— 兩邊 istiod 用同一張 root 簽發（`cacerts` secret），否則 FZ2 的 sidecar 不信任 FZ1 送來的憑證
+2. **istiod 讀得到對方 API server** —— `istioctl create-remote-secret` 產生的 secret，且網路上 FZ1 → FZ2 API server 要通
+3. **east-west gateway** —— 跟 ingressgateway 分開的另一組 gateway，專收跨 cluster 流量（15443）
+4. **network label** —— 每座 cluster 標 `topology.istio.io/network`，istiod 才知道「這個 Pod IP 我直接連不到，要走對方的 east-west gateway」
+5. **兩邊 istiod 版本要一起升級**
+
+**AP 團隊在 FZ1 要放什麼：**
+
+| 物件 | 要不要 | 說明 |
+|---|---|---|
+| Gateway | 共用 wildcard 已收就不用 | |
+| VirtualService | **要** | FZ1 的 Envoy 收到 host 要知道往哪送 |
+| DestinationRule | **要** | subset 定義；要做 failover 就一定要（見下） |
+| Service | **建議要**（沒有 Pod 也可以） | ingressgateway 靠 istiod 合併後的 registry，不需要 DNS；但 FZ1 內其他 Pod 呼叫時要靠 kube-dns 解得到這個名字（除非開了 Istio DNS proxying）。官方範例是每座 cluster 都建 Service，以平台實測為準 |
+| Deployment / Pod | 不用 | endpoint 來自 FZ2 |
+
+**附帶好處：**
+
+- **身分端到端保留** —— FZ2 Pod 看到的來源是 FZ1 ingressgateway 的 SPIFFE ID（但兩座共用 trust domain 時，`principals` 分不出是哪一座的 ingressgateway）
+- **locality failover** —— DR 加 `localityLbSetting` ＋ `outlierDetection`，平常走本 zone，本 zone 的 Pod 掛了才自動送去另一座。**沒有 `outlierDetection` 就不會 failover**，這是最常見的漏設
+
+**這不是 AP 團隊能自己開的東西**，而且 Part 5 附錄講的「mesh 打通 = 信任邊界打通」在這裡一樣成立。先問平台組有沒有（列在文末「需向他人確認」）。
+
+### 16.7 三種做法對照
+
+| | **兩邊都部整套**（Part 11.4） | **路線一：VIP 接力** | **路線二：multi-cluster** |
+|---|---|---|---|
+| FZ1 要有 Pod 嗎 | 要 | 不用 | 不用 |
+| DNS 切到 FZ2 後 | 照常運作 | relay 失去作用 | 照常運作 |
+| FZ1 ingressgateway 掛了 | 要等 DNS 切 zone | 服務中斷 | 要等 DNS 切 zone |
+| 誰能做 | AP 團隊 | AP 團隊 | **平台組** |
+| 來源身分 | 完整 | **斷在 FZ2 gateway** | 完整 |
+| in-memory session | 只在切 zone 那一刻被登出 | 同左 | **流量分散到兩邊 Pod 時會被登出**（Part 11.5） |
+| 主要成本 | 兩邊設定漂移（11.10） | 多一跳、ServiceEntry 迴圈陷阱 | 憑證、跨 cluster 除錯、版本同步 |
+
+**建議：**
+
+- **在 active/standby DNS 下，正解是兩邊部署逐字相同的整套**。DNS 一切 zone，100% 的流量就換邊，standby 那座必須當下就接得住 —— 這跟「request 能不能繞到另一邊」無關，是「另一邊有沒有準備好」
+- **只是想測 FZ2**：用 16.5 的 `curl --resolve`，不要為了測試去搭路線一
+- **路線一**只適合短期過渡（例如 FZ1 暫時無法部署），而且要記得它在 DNS 切 zone 後就沒用了
+- **路線二**等到真的需要「單一 zone 內 Pod 掛了自動跨 cluster 接手」時再跟平台組談
+
+### 16.8 踩雷
+
+#### 踩雷 1：只在 active zone 補 VS
+
+404 變 503（`NC` 或 `UH`），看起來像「進步了」，其實只是換一種壞法。見 16.4。
+
+#### 踩雷 2：ServiceEntry 用 DNS 解自己的正式 host
+
+`resolution: DNS` ＋ `hosts: [myapp.example.com]` → 公司 DNS 回 active zone = FZ1 → 自己打自己。症狀是 timeout 或 503，**錯誤訊息完全不會提到 DNS**。路線一一律用 `STATIC` 寫死對方 VIP。
+
+#### 踩雷 3：以為 FZ2 部好了就代表 standby 準備好了
+
+standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直到 DNS 切過去那一刻。**定期用 `curl --resolve` 打一次 standby 的 VIP**，並用 Part 11.10 踩雷 1 的 diff 腳本比對兩邊設定。
+
+#### 踩雷 4：健康檢查沒帶 Host header
+
+不管是 DNS 切 zone 的判斷、還是你自己用 `curl` 打 VIP，沒帶 `Host: myapp.example.com`（或 `--resolve`）時 Gateway 的 hosts 比對不到，會回 404 —— 然後你會誤以為那一邊掛了。見 Part 11.4。
+
+> **延伸閱讀**：入口鏈逐跳的錯誤碼見 [Part 1](#part-1流量入口鏈-vip-到-pod)；跨 cluster 身分斷裂與 JWT 補救見 [Part 5](#part-5獨立-cluster-互打走對方-vip-與-virtualservice)；兩座 cluster 的入口模式與 session 問題見 [Part 11](#part-11fz1-與-fz2-雙-cluster-的入口設計dns-record-放哪)。
+
+---
+
 ## 附錄：這份文件之後怎麼轉成 skill
 
 每個 Part 都是獨立可抽出的段落。之後要轉成 Claude Code skill 時，建議這樣拆：
@@ -7612,6 +8176,7 @@ kubectl apply --dry-run=server -f release/
 |---|---|
 | v1 | Part 0–9：名詞表、流量入口鏈、四層管控、RBAC 除錯、跨 ns、跨 cluster、六種 kind、canary + HPA、除錯速查、環境發現 |
 | v2 | 新增 Part 10–13：ingressgateway 與雙 VIP、FZ1/FZ2 入口設計、Argo Rollouts 取代人工 pilot run、node 排程與 routable 網段 |
+| v3 | 補記 Part 14–15（保留人工 pilot run 的 canary、兩種上版方式的對照與 SOP）；新增 Part 16：active zone DNS 下 request 落在哪、FZ2 部好卻 404 的成因、用 mesh 送到 FZ2 的兩條路線；Part 0 補「Istio 本身由什麼組成」與「物件之間怎麼互相找到（label / 名字 / host）」；16.2 補「VS 指向 Service 名字但封包直連 Pod IP」的具體例子 |
 
 ## 文件中標示為「需向他人確認」的項目
 
@@ -7625,3 +8190,5 @@ kubectl apply --dry-run=server -f release/
 | CD 建 ingressgateway 時：裝新的還是共用、VIP 從哪個池來、會不會一併建 Gateway/VirtualService、憑證誰管 | CD 團隊 | Part 11.7 |
 | node 的實際 label key / value 與 taint 內容 | 用 Part 13.5 的指令自己查 | Part 13.5 |
 | 環境有沒有 Prometheus / Argo Rollouts | 用 Part 12.10 的指令自己查 | Part 12.10 |
+| FZ1 / FZ2 有沒有做 Istio multi-cluster（共用 root CA、remote secret、east-west gateway） | 平台組 | Part 16.6 路線二 |
+| active zone 怎麼切換（誰觸發、自動還是人工）、DNS TTL 多長 | 網路組 | Part 16.1 |

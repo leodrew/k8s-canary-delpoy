@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # dev/k8s — Claude / agent guidance
 
 ## 這個 repo 沒有 build，但有一個閘門
@@ -12,6 +16,52 @@ bash scripts/validate.sh      # 或 npm run validate
 從 repo root 執行，exit 0 = 通過。腳本自己會 cd 到 repo root，所以從哪裡呼叫都一樣。
 第一次使用前要先在 repo root 跑一次 `npm install`（js-yaml 是 devDependency；
 `node_modules/` 不進版控，`package-lock.json` 有）。
+
+腳本**沒有**「只跑某一項」的參數 —— 刻意不用 `set -e`，每次都跑完全部檢查（約 20 秒），
+每項印一行 `PASS <名稱>` / `FAIL <名稱>`，失敗項底下縮排印出原因。要看某一區段就
+`bash scripts/validate.sh 2>&1 | grep -A8 FAIL`，不要為了這個去加過濾參數。
+
+## Repo 地圖（要讀好幾個檔才拼得出來的部分）
+
+- **`canary-manual/track-a/` 與 `track-b/` 是同一件事的兩種實作，互斥。** track-a 是
+  兩份 Deployment（stable / canary）＋ Istio cookie 路由，只需要現有的 Istio；track-b
+  是 Argo Rollouts 的一份 Rollout。兩者同時存在時兩個 controller 會搶 pod。
+  **目前所有修正都只做在 track-a**；track-b 的 ConfigMap 還沒依附錄 C 補齊，只有
+  `BOTH_TRACK_CONFIGMAPS` 那幾項回歸檢查涵蓋它。
+- **track 底下按變更頻率分三層**（CANARY-COMPLETE.md 第 2 章）：`base/`（SA、Service、
+  DestinationRule、VirtualService；極少動）、`release/`（ConfigMap ＋ Deployment；每次
+  發布）、`runtime/`（pilot 名單 ConfigMap；pilot 期間一天改數次，**刻意不掛 config-hash**，
+  改名單不該重啟 pod）。檔名的數字前綴就是 `kubectl apply -f <dir>/` 的套用順序 ——
+  ConfigMap（`10-`/`11-`）必須先於 workload（`20-`/`21-`），新增檔案時照這個規則編號。
+- **「軌」的權威來源是 pod template 的 `version` label**（DestinationRule 用它分 subset）。
+  pilot 使用者靠 `canary=always` cookie 打到 canary；正式流量的 canary 權重永遠是 0。
+- **整個 repo 只有 image tag 一處帶版本號。** ConfigMap 名稱固定為 `-stable`/`-canary`
+  （US-008），Deployment 靠 `config-hash` annotation 感知設定變更（US-009）。
+- **文件的地位：**
+  - `canary-manual/CANARY-COMPLETE.md` —— 目標狀態的唯一真實來源。3.1（設定怎麼載入）、
+    3.5（完整的目標 ConfigMap）、附錄 C（必備 key 與「漏掉會退回什麼」）最常用到。
+  - `canary-manual/pilot-run-guide.md` —— 保留，讀者是做 pilot run 的使用者，不是維運。
+  - `canary-manual/README.md`、`SOP.md`、`SOP-apply-only.md`、`canary-ops-runbook.md`
+    —— 掛「已被取代」橫幅，含已知會造成 503 outage 的步驟（`replicas: 0`、`rollout undo`）。
+  - `bffautocanarydesign.md` —— 設計提案，不是操作手冊；`k8s-ecosystem-guide.md` ——
+    onboarding ＋ 速查；`tasks/prd-*.md` —— 原始需求。
+- **已知過時、還沒修的東西**（不要把它們當成現況的描述）：
+  - `canary-manual/scripts/canary.sh` 仍假設 US-008 之前的版本化 ConfigMap 與
+    `config-version` annotation（「三處同步」），也還留著造成 outage 的指令 ——
+    那是 `ralph/prd.json` 裡尚未完成的 US-010。
+  - 上層 `dev/CLAUDE.md`（描述 Spring 專案）說 Deployment 用
+    `SPRING_CONFIG_ADDITIONAL_LOCATION`。**在這個 repo 那是錯的**：US-006 已改成
+    `SPRING_CONFIG_LOCATION`（replace 語意），validate.sh 的檢查 [6] 會擋改回去的寫法。
+    兩份說法衝突時以這份和 CANARY-COMPLETE.md 為準。
+
+## Ralph 工作流（`ralph/`）
+
+這個分支的改動是由 Ralph 自動代理迴圈逐個 user story 完成的：`ralph/prd.json` 是故事
+清單（`passes` 欄位標示完成與否），`ralph/progress.txt` 是**只能附加**的進度紀錄，
+開頭的 Codebase Patterns 區段是累積下來的慣例，`ralph/CLAUDE.md` / `prompt.md` 是
+代理的指令，`ralph/ralph.ps1` 是迴圈本體。照這個流程做一個故事時，commit 分兩個：
+`feat: US-0xx - <故事標題>`（改動＋對應的 validate.sh 檢查）、然後
+`chore: US-0xx - mark story complete and log progress`（只動 `prd.json` 與 `progress.txt`）。
 
 ## 改 manifest 就要加檢查，而且要在同一個 commit
 
@@ -209,6 +259,10 @@ node 去比對」的斷言都會【永遠 FAIL】，而且錯誤訊息會印出 
 ConfigMap 被寫壞了。改用環境變數傳值也救不了（環境變數的值一樣會被轉換）。
 `scripts/validate.sh` 開頭已經 `export MSYS2_ARG_CONV_EXCL='*'` 關掉整支腳本的轉換，
 新增檢查時不要拿掉那一行；在腳本外面手動跑 `node -e` 驗證時則要自己記得加。
+
+**行尾：** 這台機器是 `core.autocrlf=true`，YAML / markdown checkout 出來是 CRLF；
+`.gitattributes` 把 `*.sh` 釘成 LF（否則 Linux / CI 上會死在 `bad interpreter`）。
+新增 shell 腳本不用另外設定，但改寫 manifest 的腳本要把行尾的 `\r` 原樣接回去（見上一節）。
 
 ## 範圍
 
