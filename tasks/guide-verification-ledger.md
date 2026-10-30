@@ -21,6 +21,9 @@
 | ② | Part 2.1–2.2 | 53 | 38 | 4 | 1 | 9 | 1 | 0 |
 | ② | Part 2.3–2.5 | 49 | 28 | 4 | 0 | 15 | 0 | 2 |
 | ② | Part 3 | 40 | 24 | 3 | 1 | 11 | 0 | 1 |
+| ③ | Part 4 | 42 | 25 | 5 | 0 | 9 | 3 | 0 |
+| ③ | Part 5（上半） | 38 | 27 | 2 | 1 | 7 | 0 | 1 |
+| ③ | Part 5（下半） | 34 | 21 | 3 | 0 | 9 | 0 | 1 |
 
 ---
 
@@ -308,7 +311,7 @@
 | P03-004 | 1013–1014 | `istioctl proxy-config secret … -o json` 再 grep `spiffe://` | 錯誤 | https://istio.io/latest/docs/ops/common-problems/security-issues/ | 官方範例：`istioctl proxy-config secret … -o json` 經 jq 取 `.secret.tlsCertificate.certificateChain.inlineBytes`，再 `base64 -d` 與 `openssl x509 -noout -text`，確認 SAN 為 "URI:spiffe://cluster.local/ns/my-ns/sa/my-sa" | JSON 裡的憑證是 base64 的 `inlineBytes`，直接 grep 找不到 `spiffe://`。改用官方的 jq＋`base64 -d`＋`openssl x509 -noout -text` 寫法，看 Subject Alternative Name | ✓ |
 | P03-005 | 1017 | `sa/default` 等於「這個 namespace 的任何 Pod」 | 不精確 | https://kubernetes.io/docs/concepts/security/service-accounts/ | "If you deploy a Pod in a namespace, and you don't manually assign a ServiceAccount to the Pod, Kubernetes assigns the `default` ServiceAccount for that namespace to the Pod." | 改成：等於「這個 namespace 裡所有沒指定 serviceAccountName 的 Pod」，有指定其他 SA 的不算 | ✓ |
 | P03-006 | 1030–1032 | `-o jsonpath='{.items[0].spec.containers[*].name}'`＋應該要看到 istio-proxy | 過時 | https://istio.io/latest/news/releases/1.27.x/announcing-1.27/upgrade-notes/ | "Native sidecars are now enabled by default for eligible pods." / "This changes `istio-proxy` from a container to an init container." | Istio 1.27 起（符合條件的 Pod）`istio-proxy` 在 `initContainers`，只查 `containers` 會誤判成沒注入。改成兩處都查：`{.items[0].spec.initContainers[*].name} {.items[0].spec.containers[*].name}` | ✓ |
-| P03-007 | 1035–1036 | `kubectl exec … -c istio-proxy -- curl -s localhost:15000/stats` 再 grep ssl.handshake | 不精確 | https://istio.io/latest/docs/ops/configuration/security/harden-docker-images/ ; https://istio.io/latest/docs/ops/common-problems/security-issues/ | "missing all debugging tools (including a shell!)"；官方範例：`kubectl exec … -c istio-proxy -- pilot-agent request GET config_dump` | distroless 映像沒有 curl，官方一律用 `pilot-agent request GET stats`。`ssl.handshake` 是 listener 層級的累計計數，判斷不了某個來源是否走 mTLS。改成 `pilot-agent request GET stats` 再 grep，並加註「判斷個別來源用 XFCC（見 P03-015）」 | ✓ |
+| P03-007 | 1035–1036 | `kubectl exec … -c istio-proxy -- curl -s localhost:15000/stats` 再 grep ssl.handshake | 不精確 | https://istio.io/latest/docs/ops/configuration/security/harden-docker-images/ ; https://istio.io/latest/docs/ops/common-problems/security-issues/ | "Istio's default images are based on `ubuntu` with some extra tools added. An alternative image based on distroless images is also available." / "Distroless images are missing all debugging tools (including a shell!)."；官方範例：`kubectl exec … -c istio-proxy -- pilot-agent request GET config_dump` | **（batch ③ 更正）** 預設的 proxyv2 映像是 Ubuntu 為底、**有 curl**（https://raw.githubusercontent.com/istio/istio/master/docker/Dockerfile.base）；只有 opt-in 的 distroless variant（`values.global.variant=distroless`）才沒有 curl 與 shell。原文的 curl 指令在預設映像可以跑，但官方範例一律用 `pilot-agent request GET stats`，兩種映像都能用，所以仍建議改成這個寫法，並註明「distroless variant 沒有 curl」。另外 `ssl.handshake` 是 listener 層級的累計計數，判斷不了某個來源是否走 mTLS，加註「判斷個別來源用 XFCC（見 P03-015）」 | ✓ |
 | P03-008 | 1039 | namespace 沒有 `istio-injection=enabled` label，就一定沒有身分 | 不精確 | https://istio.io/latest/docs/setup/additional-setup/sidecar-injection/ | "If either label (`istio-injection` or `sidecar.istio.io/inject` or `istio.io/rev`) is enabled, the pod is injected." | 改成：namespace 的 `istio-injection=enabled` 或 `istio.io/rev=<rev>`、或 Pod 的 `sidecar.istio.io/inject="true"`，任一成立就注入；都沒有、或其中一個明確設成 disabled／"false" 才不注入（與 P00-011 一致） | ✓ |
 | P03-009 | 1048 | `ports` 填 Service port，但 Envoy 看的是容器 port | 無法驗證 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | `ports`: "A list of ports as specified in the connection." | 官方沒明說 targetPort 還是 Service port，只寫「連線上的 port」；推論方向合理但不是原文。改成：`ports` 比對連線實際的目的 port，也就是 Pod 的 containerPort（Service 的 targetPort），不是 Service port；拿掉「Envoy 看的是」這種像在引用官方的語氣 | ✓ |
 | P03-010 | 1052 | `paths` 看的是**原始 HTTP request path** | 不精確 | https://istio.io/latest/docs/ops/best-practices/security/ | "Path normalization (a.k.a., URI normalization) modifies and standardizes the incoming requests' paths"；BASE "is currently the option used in the default installation of Istio." | 改成：`paths` 比對的是正規化後（預設 BASE，依 RFC 3986，並把 `\` 轉成 `/`）的 path，一樣要寫完整的 `/gui_epmmFormQuery/...`（與 P02-015 一致） | ✓ |
@@ -347,5 +350,161 @@
 | P03-038 | 1112 | can-i --list 列出全部 | https://kubernetes.io/docs/reference/kubectl/generated/kubectl_auth/kubectl_auth_can-i/ |
 | P03-039 | 1123–1129 | rbac/v1、"" 為 core | https://kubernetes.io/docs/reference/access-authn-authz/rbac/ |
 | P03-040 | 1143/1148 | ClusterRole+RoleBinding 限該 ns | https://kubernetes.io/docs/reference/access-authn-authz/rbac/ |
+
+---
+
+## Part 4：同 cluster 跨 namespace 互打
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P04-001 | 1179, 1182 vs 1185 | `"http://epmm-api-svc.ea-epmm/api/v1/forms"`（沒寫 port），1185 卻寫 `:8080` | 環境特定 | — | — | 三個範例的 port 要一致：Service port 若是 8080，1179、1182 也補 `:8080`，否則會打到 80 | ✓ |
+| P04-002 | 1184 | 完整 FQDN（少一次 search domain 嘗試，也不會被 ndots 影響） | 錯誤 | https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/ ; https://www.man7.org/linux/man-pages/man5/resolv.conf.5.html | K8s 範例：`options ndots:5`。man7："Resolver queries having fewer than ndots dots (default is 1) in them will be attempted using each component of the search path in turn until a match is found." | `epmm-api-svc.ea-epmm.svc.cluster.local` 只有 4 個點、少於 5，照樣先跑 search list（先查 `…cluster.local.ea-pmc.svc.cluster.local` 等，全部失敗才查絕對名稱），查詢次數反而比 `epmm-api-svc.ea-epmm`（第 2 次就中）多。真正不受 ndots 影響要在尾端加點：`epmm-api-svc.ea-epmm.svc.cluster.local.`，或在 Pod `dnsConfig.options` 調低 ndots。改成：FQDN 可讀性最好；要省查詢請加結尾點或調 ndots | ✓ |
+| P04-003 | 1196 | `ndots:5` 會讓每個少於 5 個點的名字都跑完整串 search domain | 不精確 | https://www.man7.org/linux/man-pages/man5/resolv.conf.5.html | "attempted using each component of the search path in turn until a match is found." | 改成：少於 5 個點的名字會**先**依序套 search domain、**命中就停**，全部 miss 才查原名；只有找不到的名字（例如外部網域）才會跑完整串 | ✓ |
+| P04-004 | 1201–1202 | `kubectl exec … -c istio-proxy -- nslookup …` | 錯誤 | https://raw.githubusercontent.com/istio/istio/master/docker/Dockerfile.base | apt 套件："ca-certificates \ curl \ iptables \ nftables \ iproute2 \ iputils-ping \ knot-dnsutils \ netcat-openbsd \" | 預設 proxyv2 只裝 `knot-dnsutils`（提供 `kdig`/`khost`），沒有 `nslookup`；distroless variant 連 shell 都沒有。改用 `kubectl debug -n ea-pmc <pod> -it --image=busybox:1.36 --target=app -- nslookup epmm-api-svc.ea-epmm.svc.cluster.local`；確定是預設映像時也可用 `-- kdig …` | ✓ |
+| P04-005 | 1207 | 你現在兩邊都是 `default` SA | 環境特定 | https://kubernetes.io/docs/concepts/security/service-accounts/ | "Kubernetes assigns the `default` ServiceAccount for that namespace to the Pod." | 機制正確；現況用 `kubectl get pod -o jsonpath='{.spec.serviceAccountName}'` 自己確認 | ✓ |
+| P04-006 | 1240–1243 | 改完必須重啟才會拿到新身分：`kubectl rollout restart …` | 不精確 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/ ; https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "You cannot update the `.spec.serviceAccountName` field of a Pod that already exists." / "Declare the new state of the Pods by updating the PodTemplateSpec of the Deployment. A new ReplicaSet is created…" | 改成：既有 Pod 的 SA 改不了，一定要換新 Pod；但改 `spec.template.spec.serviceAccountName` 本身就是改 pod template，`kubectl apply` 會自動滾動更新，不用另外 `rollout restart`（多跑只是再滾一輪） | ✓ |
+| P04-007 | 1245 | `istioctl proxy-config secret … -o json` 再 grep `spiffe://` | 錯誤 | https://istio.io/latest/docs/ops/integrations/spire/ | "istioctl proxy-config secret "$CURL_POD" -o json \| jq -r \" "'.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' \| base64 --decode > chain.pem" | 同 P03-004：憑證是 base64 的 `inlineBytes`，grep 幾乎一定是空的。改成 jq 取 `.dynamicActiveSecrets[] \| select(.name=="default") \| .secret.tlsCertificate.certificateChain.inlineBytes`，再 `base64 -d \| openssl x509 -noout -text` 看 Subject Alternative Name | ✓ |
+| P04-008 | 1251 | 先確保 mTLS 開著，principals 才有值（接著設 `mode: STRICT`） | 不精確 | https://istio.io/latest/docs/reference/config/security/peer_authentication/ ; https://istio.io/latest/docs/concepts/security/ | "Otherwise treated as `PERMISSIVE`." / "Istio automatically upgrades all traffic between two PEPs to mutual TLS." | principals 需要的是「這條連線走 mTLS」，不需要 STRICT；沒有 PeerAuthentication 時是 PERMISSIVE＋auto-mTLS，principal 也有值。STRICT 的作用是拒收明文。註解改成「2a. STRICT：拒絕沒有 sidecar 的明文流量（principals 本身在 auto-mTLS 下就有值）」（與 P00-061、P02-001 一致） | ✓ |
+| P04-009 | 1286–1287 | `"cluster.local/ns/istio-system/sa/istio-ingressgateway"` | 不精確 | https://istio.io/latest/docs/ops/configuration/security/security-policy-examples/ | "principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]" | istioctl/operator 預設 SA 是 `istio-ingressgateway-service-account`，Helm gateway chart 等於 release 名稱；寫錯時規則 2 永遠不命中、外部流量全被拒。先查實際名稱再填（與 P05-002 一致） | ✓ |
+| P04-010 | 1289 | health / metrics 任何人都能打，不然 probe 和 Prometheus 會死 | 不精確 | https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/ ; https://istio.io/latest/docs/ops/integrations/prometheus/ | "The rewriting of problematic probes is enabled by default in all built-in Istio configuration profiles" / "This option is enabled by default but can be disabled by passing `--set meshConfig.enablePrometheusMerge=false`" | 預設 probe 改寫到 15020、metrics 合併從 15020 抓，都不經 inbound AuthZ，「不加規則 3 就會死」只在關掉改寫或合併時成立。規則 3 沒有 `from`，等於對所有來源開放這些 path。改成：只有關閉 probe 改寫／metrics merge 時才需要，範圍縮到最小（與 P03-003 一致） | ✓ |
+| P04-011 | 1297–1300 | `action: AUDIT` 先設這個，跑幾天，確認 log 裡沒有該放行卻被記錄的來源 | 錯誤 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ ; https://istio.io/latest/docs/tasks/security/authorization/authz-dry-run/ | "AUDIT policies do not affect whether requests are allowed or denied to the workload." / "A separate plugin must be configured and enabled to actually fulfill the audit decision and complete the audit behavior." / "dry-run the policy without actually enforcing it." | AUDIT 記的是「規則命中」的請求，語意跟原文相反，而且沒有 plugin 什麼都不記。改成：保留 `action: ALLOW`，加 annotation `istio.io/dry-run: "true"`（Alpha），看 proxy debug log 的 `shadow denied` 或 `authz_dry_run_result` 指標，確認後拿掉 annotation（與 P02-006 一致） | ✓ |
+| P04-012 | 1355–1359 | `# 必開：ingressgateway`，只寫 `namespaceSelector: istio-system` | 不精確 | https://kubernetes.io/docs/concepts/services-networking/network-policies/ | "allows connections from Pods in the local Namespace with the label `role=client`, _or_ from any Pod in any namespace with the label `user=alice`." | 沒有 podSelector 也沒有 ports，放行的是 istio-system **所有 Pod** 到**所有 port**。收斂：同一個元素加 `podSelector: {matchLabels: {istio: ingressgateway}}`，再加 `ports: [{protocol: TCP, port: 8080}]` | ✓ |
+| P04-013 | 1331, 1369 | Istio policy 管的是「經過 sidecar 的流量」；攻擊者在 pod 裡直接連 Pod IP 繞過 sidecar —— AuthorizationPolicy：不行 | 錯誤 | https://istio.io/latest/docs/ops/best-practices/security/ | "the security boundary is that a client may not bypass _another_ pod's sidecar." | 攻擊者繞過的是**自己**的 sidecar；epmm-api 的 inbound 仍被它自己的 sidecar 攔下，沒有 mTLS 憑證就沒有 principal，ALLOW 不命中，STRICT 下明文直接被拒。這一格改成「可以（被呼叫端的 sidecar 仍會執行）」；AuthZ 擋不到的是 non-TCP 與被排除在攔截之外的 port，NetworkPolicy 的價值在 L3/L4 縱深防禦與防 sidecar 被拿掉或設錯（與 P02-206、P02-217 一致） | ✓ |
+| P04-014 | 1370 | 攻擊者偽造 `X-User-Id` header —— AuthorizationPolicy 可以（`when` 條件） | 不精確 | https://istio.io/latest/docs/reference/config/security/conditions/ | `request.headers`: "HTTP request headers." / `request.auth.claims`: "Raw claims of the authenticated JWT token." | `when: request.headers[...]` 只比對值，看不出是不是偽造。防偽造要用 RequestAuthentication 驗 JWT 再用 `request.auth.claims[...]` 或 `requestPrincipals` 授權，或在 ingress 端剝掉外部帶進來的 `X-User-Id` | ✓ |
+| P04-015 | 1378 | `kubectl exec … -c app -- curl …` | 環境特定 | — | — | app 映像有沒有 curl 看 Dockerfile；沒有就改用 `kubectl debug --target=app --image=curlimages/curl …` | ✓ |
+| P04-016 | 1382 | 000/timeout = NetworkPolicy 或 DNS | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | UF: "Upstream connection failure in addition to `503` response code." | 來源端有 sidecar 時 curl 連的是本機 Envoy，TCP 一定建得起來；NetworkPolicy 擋掉時 Envoy 連上游失敗回 **503**（`UF`，通常等到 connect timeout 之後）；mTLS 不一致也是 503。只有 DNS 失敗（curl exit 6）或沒有 sidecar 才會看到 000。改成：200 通；403 授權（`RBAC: access denied`）；503＋UF 多半是網路層或 mTLS；000 多半是 DNS | ✓ |
+| P04-017 | 1384–1385 | 確認走的是 mTLS 而不是明文：`istioctl x describe pod …` | 不精確 | https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-describe/ ; https://istio.io/latest/docs/reference/commands/istioctl/ | "Pilot reports that pod enforces mTLS and clients speak mTLS" / "Analyzes pod, its Services, DestinationRules, and VirtualServices and reports the configuration objects that affect that pod." | describe 回報的是**設定推論**（且是 experimental），不是實際流量。改成「確認設定上會走 mTLS」；確認實際流量看 `istio_requests_total{connection_security_policy="mutual_tls"}` 或 access log | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P04-018 | 1171 | Pod 預設不隔離 | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P04-019 | 1178 | 跨 ns 短名解析不到 | https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/ |
+| P04-020 | 1182 | `svc.ns` 可解析 | https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/ |
+| P04-021 | 1190–1194 | resolv.conf 格式與 ndots:5 | https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/ |
+| P04-022 | 1196 | 先補自己 ns，跨 ns 首查必敗 | https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/ |
+| P04-023 | 1209–1223 | SA YAML 合法 | https://kubernetes.io/docs/concepts/security/service-accounts/ |
+| P04-024 | 1225–1231 | SA 設在 pod template spec | https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/ |
+| P04-025 | 1232 | Pod spec 的 automount 優先 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/ |
+| P04-026 | 1238 | 關 automount 不影響 Istio 身分 | https://raw.githubusercontent.com/istio/istio/master/manifests/charts/istio-control/istio-discovery/files/injection-template.yaml |
+| P04-027 | 1238 | 憑證經 SDS 給 Envoy | https://istio.io/latest/docs/concepts/security/ |
+| P04-028 | 1245, 1324 | istioctl 接受 deployment/ 形式 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P04-029 | 1252–1259 | PeerAuthentication v1、STRICT 語意 | https://istio.io/latest/docs/reference/config/security/peer_authentication/ |
+| P04-030 | 1262–1281 | AuthZ v1 欄位結構 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P04-031 | 1277 | principal 格式 `td/ns/x/sa/y` | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P04-032 | 1281, 1292 | `*` 結尾是前綴比對 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P04-033 | 1283, 1289 | 多條 rules 是 OR | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P04-034 | 1305 | 沒列入 egress 就沒有對方的設定 | https://istio.io/latest/docs/reference/config/networking/sidecar/ |
+| P04-035 | 1308–1318 | Sidecar v1、`ns/dnsName` 格式、名稱 default | https://istio.io/latest/docs/reference/config/networking/sidecar/ |
+| P04-036 | 1324–1325 | `pc cluster --fqdn` 用法 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P04-037 | 1346–1352 | ns+pod selector 同元素是 AND | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P04-038 | 1349 | metadata.name label 自動帶 | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P04-039 | 1366–1368 | NP 只到 L4；AuthZ 管 L7 method | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P04-040 | 1372 | 兩者疊加做縱深防禦 | https://istio.io/latest/docs/ops/best-practices/security/ |
+| P04-041 | 1382 | 403 是授權拒絕 | https://istio.io/latest/docs/tasks/security/authorization/authz-http/ |
+| P04-042 | 1385 | `istioctl x describe pod` 存在 | https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-describe/ |
+
+---
+
+## Part 5（上半）：獨立 cluster 互打 —— 封包路徑、身分斷點、三種補救方案
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P05-001 | 1430 | 若有收斂過，沒把對方 host 列進去就**出不去** | 不精確 | https://istio.io/latest/docs/reference/config/networking/sidecar/ | "If requests are sent to destinations not included in the scoping, the traffic will be treated as unmatched traffic" / "In REGISTRY_ONLY mode, unknown outbound traffic will be dropped." | 改成：沒列進 `egress.hosts` 的目的地被當成 unmatched traffic —— `REGISTRY_ONLY` 時丟棄；預設 `ALLOW_ANY` 時通常仍經 PassthroughCluster 放行，只是失去 ServiceEntry／DR 的設定（TLS origination、逾時等） | ✓ |
+| P05-002 | 1448（1467 也有） | 看到的來源永遠是 `cluster.local/ns/istio-system/sa/istio-ingressgateway` | 不精確 | https://istio.io/latest/docs/ops/configuration/security/security-policy-examples/ | "notPrincipals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]" | 拿掉「永遠」：principal 是 `<trust-domain>/ns/<gateway ns>/sa/<gateway 的 SA>`；istioctl 預設裝法的 SA 是 `istio-ingressgateway-service-account`，Helm gateway chart 跟 release 名稱走；trust domain 也不一定是 `cluster.local`。先用 `kubectl get pod -n istio-system -l istio=ingressgateway -o jsonpath='{..serviceAccountName}'` 確認，1467 那條 policy 一起改 | ✓ |
+| P05-003 | 1490–1491、1510 | `issuer: "https://keycloak.example.com/auth/realms/my-realm"` | 過時 | https://www.keycloak.org/migration/migrating-to-quarkus ; https://www.keycloak.org/securing-apps/oidc-layers | "By default, the new Quarkus distribution removes `/auth` from the context-path." / "/realms/{realm-name}/protocol/openid-connect/certs" | 改成 `https://<host>/realms/<realm>` 與 `.../realms/<realm>/protocol/openid-connect/certs`；只有設了 `http-relative-path=/auth` 或舊版 WildFly 才保留 `/auth`。issuer 必須跟 token 的 `iss` 逐字相同，否則所有 token 都 401 —— 以 `/.well-known/openid-configuration` 回傳的 `issuer` 為準；1510 的 requestPrincipals 前綴一起改 | ✓ |
+| P05-004 | 1513 | `request.auth.claims[azp]` # authorized party = client_id | 無法驗證 | https://istio.io/latest/docs/reference/config/security/conditions/ | "The authorized presenter of the authenticated JWT token, constructed from the JWT claim `<azp>`," | 語法正確，但「Keycloak 的 azp 等於 client_id」在 keycloak.org 找不到明文。註明「以實際 decode 的 token 為準」，或改用 Istio 內建的 `request.auth.presenter`（就是 azp） | ✓ |
+| P05-005 | 1521 | `RequestAuthentication` **本身不擋任何東西** | 不精確 | https://istio.io/latest/docs/reference/config/security/request_authentication/ | "It will reject a request if the request contains invalid authentication information" / "A request that does not contain any authentication credentials will be accepted but will not have any authenticated identity." | 改成：RequestAuthentication 不擋**沒帶** token 的請求，但會直接以 401 拒絕帶了**無效** token 的請求（簽章錯、過期、iss 不符） | ✓ |
+| P05-006 | 1504–1518 對照 1542 | DENY 上寫 `notPaths: ["/actuator/health*"]  # health check 除外` | 不精確 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | "If there are no ALLOW policies for the workload, allow the request." / "If any of the ALLOW policies match the request, allow the request." / "Deny the request." | 同一 workload 已有 `epmm-api-require-jwt` 這條 ALLOW（只放 `/api/*` 的 GET/POST），`/actuator/health` 躲過 DENY 後仍因沒有 ALLOW 命中而 403，註解說的「除外」不成立。改成：在 ALLOW 另加一條 rule 放行 health 路徑，或明講 kubelet 探針經 probe rewrite 走 pilot-agent、本來就不受影響；並說明這條 DENY 在有 requestPrincipals ALLOW 時是多餘的保險 | ✓ |
+| P05-007 | 1550–1569 | 「只允許 A cluster 的出口網段進來」，ALLOW 掛在共用的 `istio: ingressgateway` 上 | 不精確 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | "If there are no ALLOW policies for the workload, allow the request." / "Deny the request." | 共用 ingressgateway 上一出現 ALLOW，**其他所有 host 的流量**沒命中就 403，整個 cluster 對外服務一起中斷。改成 `action: DENY`＋`notRemoteIpBlocks: ["10.20.30.0/24"]`，`to.operation.hosts` 只寫 epmm-api，並加警告。**前提同 P05-008**：gateway 必須真的拿得到 client IP（L7 LB 附加 XFF＋numTrustedProxies，或 PROXY protocol），否則 remote IP 退回 LB／node IP，DENY 永遠不觸發、全部靜默放行（同 P02-010） | ✓ |
+| P05-008 | 1577 | `numTrustedProxies: 1     # B 的 VIP/F5 算一層` | 不精確 | https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/ | "proxies in front of the Istio gateway proxy must parse HTTP traffic and append to the X-Forwarded-For header at each hop." / "Envoy falls back to using the immediate downstream address as the trusted client address." | 只有 F5 做 L7 終止並附加 XFF 時才算一層。本節圖上 TLS 在 ⓸ gateway 終止，代表 F5 是 L4 透傳、加不了 XFF，remoteIpBlocks 會退回比對 F5／node IP。補上：L4 LB 改用 PROXY protocol，或 `externalTrafficPolicy: Local`＋`ipBlocks` | ✓ |
+| P05-009 | 1584–1585 | `kubectl logs ...` 再 grep x-forwarded-for | 錯誤 | https://istio.io/latest/docs/tasks/observability/logs/access-log/ | 預設格式含 `"%REQ(X-FORWARDED-FOR)%"`（佔位符會被換成 header 的值，範例輸出是 `"-"`） | 預設 TEXT 格式只印 XFF 的**值**、不印 header 名稱，grep 永遠是空的。改成直接看最近幾行 log 找引號內的 IP 串，或打 httpbin `/get` 看收到的 XFF；並註明 access log 預設沒開（`meshConfig.accessLogFile=/dev/stdout` 或 Telemetry API，與 P01-006 一致） | ✓ |
+| P05-010 | 1590、1592 | TLS passthrough（保留原始憑證…）；由後端自己驗 client 憑證 | 不精確 | https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-sni-passthrough/ ; https://istio.io/latest/docs/reference/config/security/authorization-policy/ | "This instructs the gateway to pass the ingress traffic “as is”, without terminating TLS" / "A list of peer identities derived from the peer certificate." | 保留的是 A 的 **app** 自己發起的 TLS，不是 A 的 Istio workload 身分：A 的 app 要自備 B 的 app 信任的 client cert，由**應用程式**（不是 B 的 sidecar）驗；B sidecar 的 `principals` 看到的仍是 gateway 那條 mTLS 的身分，而且只能做 L4 判斷。標題改成「端到端 TLS（由 app 自行做 mTLS）」 | ✓ |
+| P05-011 | 1627 | 沒有 path 路由、沒有 header 比對、**沒有 canary weight** | 錯誤 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | RouteDestination: "Weight specifies the relative proportion of traffic to be forwarded to the destination." | 刪掉「沒有 canary weight」：tls route 可以用 `weight` 做連線層級的比例分流，只是不能依 header 或 path | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P05-012 | 1396 | 同 istiod／CA 才互信憑證 | https://istio.io/latest/docs/concepts/security/ |
+| P05-013 | 1429 | AuthzPolicy 只管 inbound | https://istio.io/latest/docs/concepts/security/ |
+| P05-014 | 1431 | REGISTRY_ONLY 需 SE，預設 ALLOW_ANY | https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control/ |
+| P05-015 | 1432 | DR 做 TLS origination | https://istio.io/latest/docs/tasks/traffic-management/egress/egress-tls-origination/ |
+| P05-016 | 1433 | egress 被隔離時要放行 VIP | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P05-017 | 1435 | Gateway 依 host／TLS 收流量 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P05-018 | 1436 | VS 是 gateway 的路由規則 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P05-019 | 1437 | gateway 上用 remoteIpBlocks | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-020 | 1439 | gateway→app 是 B 內 mTLS | https://istio.io/latest/docs/concepts/security/ |
+| P05-021 | 1442 | NetPol 來源是 gateway pod | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P05-022 | 1450 | gateway 終止 TLS 後重發 mTLS | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-023 | 1474 | JWT 屬 HTTP 層可穿透 | https://istio.io/latest/docs/reference/config/security/request_authentication/ |
+| P05-024 | 1476 | client 內建 SA 可取 token | https://www.keycloak.org/docs/latest/server_admin/index.html |
+| P05-025 | 1480/1495/1526/1551 | security.istio.io/v1 | https://istio.io/latest/docs/reference/config/security/request_authentication/ |
+| P05-026 | 1491 | JWKS 路徑 openid-connect/certs | https://www.keycloak.org/securing-apps/oidc-layers |
+| P05-027 | 1492 | forwardOriginalToken 保留 token | https://istio.io/latest/docs/reference/config/security/request_authentication/ |
+| P05-028 | 1508 | requestPrincipals 為 iss/sub | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-029 | 1510 | `iss/*` 前綴比對 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-030 | 1513 | `request.auth.claims[x]` 語法 | https://istio.io/latest/docs/reference/config/security/conditions/ |
+| P05-031 | 1521 | 無 token 會通過，要 AuthZ 擋 | https://istio.io/latest/docs/reference/config/security/request_authentication/ |
+| P05-032 | 1539 | notRequestPrincipals ["*"] 擋無 JWT | https://istio.io/latest/docs/tasks/security/authentication/authn-policy/ |
+| P05-033 | 1571 | remoteIpBlocks 需 numTrustedProxies | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-034 | 1574–1576 | gatewayTopology 設定路徑 | https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/ |
+| P05-035 | 1595–1607 | Gateway v1 + TLS + PASSTHROUGH | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P05-036 | 1617–1620 | PASSTHROUGH 用 tls+sniHosts | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P05-037 | 1592 | 後端自行終止 TLS | https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-sni-passthrough/ |
+| P05-038 | 1627 | 無 path／header 路由與 L7 指標 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+
+---
+
+## Part 5（下半）：A／B cluster 各自要準備什麼、真正的 multi-cluster
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P05-201 | 1643–1646, 1650, 1658–1661 | ServiceEntry `number: 443 / name: https / protocol: HTTPS`＋「TLS origination（app 打 http，sidecar 幫你升級成 https）」 | 錯誤 | https://istio.io/latest/docs/tasks/traffic-management/egress/egress-tls-origination/ ; https://istio.io/latest/docs/reference/config/networking/service-entry/ | "will perform TLS origination for HTTP requests on port 80 and the `ServiceEntry` will then redirect the requests on port 80 to target port 443." / "TLS implies the connection will be routed based on the SNI header to the destination." | YAML 做不到註解說的事：只宣告 443 為 HTTPS，sidecar 會當成不透明的 TLS 依 SNI 透傳；app 打明文到 :443 沒有 SNI、不會發起 TLS，app 打 https 則會被 host 層級的 `tls: SIMPLE` 再加密一次。改法：ServiceEntry 加一個 port `{number: 80, name: http, protocol: HTTP, targetPort: 443}`，DR 的 TLS 移進 `portLevelSettings: - port: {number: 80}` 並設 `tls: {mode: SIMPLE}`，app 改打 `http://epmm-api.b-cluster.example.com`（80）。`connectionPool.http` 也要 port 是 HTTP 才生效 | ✓ |
+| P05-202 | 1660–1661 | `sni: … # 內網自簽憑證常常漏這個 → handshake 失敗` | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "SNI will be automatically set based on downstream HTTP host/authority header" / caCertificates: "If omitted, the proxy will verify the server's certificate using the OS CA certificates." / credentialName: "This secret must exist in the namespace of the proxy using the certificates." | port 改成 HTTP 後 SNI 會依 Host header 自動帶入，漏 `sni` 不是自簽憑證失敗的主因；真正的問題是這份 DR 沒有 `caCertificates` 也沒有 `credentialName`，sidecar 用 OS 信任庫驗 B 的憑證，自簽一定失敗。改成：給內部 CA —— 用 `credentialName`（secret 放 **ea-pmc**，且 DR 要有 `workloadSelector`）或 `caCertificates`（掛進 sidecar 的檔案路徑），並加 `subjectAltNames`。註解改成「自簽憑證要給 CA，否則用 OS 信任庫驗證會失敗」 | ✓ |
+| P05-203 | 1683–1699 | `# 4. NetworkPolicy：放行出向`，`policyTypes: [Egress]`，只放行 10.99.88.0/24:443 | 不精確 | https://kubernetes.io/docs/concepts/services-networking/network-policies/ | "A default deny-all egress policy also blocks DNS traffic. If your workloads need DNS resolution, you must add a separate NetworkPolicy that allows egress to your cluster's DNS service." | 講清楚這份是疊加式的：單獨套用時 Pod 進入 egress 隔離，DNS（`resolution: DNS` 時 Envoy 自己要透過 kube-dns 解析）與 istiod 15012 全被擋。加註「需搭配既有允許 kube-dns 53/UDP+TCP 與 istiod 15012 的 egress policy」 | ✓ |
+| P05-204 | 1750–1752 | B 的 gateway「IP 白名單」用 `remoteIpBlocks: ["10.20.30.0/24"]` | 不精確 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | remoteIpBlocks: "A list of IP blocks, populated from `X-Forwarded-For` header or proxy protocol." / "To make use of this field, you must configure the `numTrustedProxies` field of the `gatewayTopology`" | 補前提：前面有 L7 LB／PROXY protocol 且設了 numTrustedProxies 才用 `remoteIpBlocks`；A 直接打 B 的 gateway LB VIP 時改用 `ipBlocks`，且 LB Service 要 `externalTrafficPolicy: Local` 才保得住來源 IP。另外 gateway 看到的通常是 A 的 node／NAT 出口 IP，不是 A 的 Pod CIDR（與 P02-007 一致） | ✓ |
+| P05-205 | 1793 | Multi-Primary：兩個 cluster 各有 istiod，互相同步 endpoint | 不精確 | https://istio.io/latest/docs/ops/deployment/deployment-models/ | "each control plane must observe endpoints from the API Server in every cluster." / "To enable endpoint discovery for a cluster, an administrator generates a `remote secret`" | 改成：每個 istiod 透過 remote secret 直接 watch 對方 cluster 的 API server 取得 endpoint（istiod 之間不互相同步） | ✓ |
+| P05-206 | 1795 | 把 Multi-Network 列成跟 Multi-Primary／Primary-Remote 並列的第三種模式 | 不精確 | https://istio.io/latest/docs/ops/deployment/deployment-models/ ; https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/ | "the workload instances in different networks can only reach each other through one or more Istio gateways." | 網路模型跟控制面模型是兩個獨立的選擇。表格拆成兩個維度：控制面（Multi-Primary／Primary-Remote）× 網路（single／multi-network），官方指南可以自由組合（例如 Multi-Primary on different networks） | ✓ |
+| P05-207 | 1799 | 兩邊的 istiod 用同一張 root cert 簽發（`cacerts` secret） | 不精確 | https://istio.io/latest/docs/setup/install/multicluster/before-you-begin/ | "A multicluster service mesh deployment requires that you establish trust between all clusters in the mesh." / "This guide will assume that you use a common root to generate intermediate certificates for each primary cluster." | 改成：共用同一個 root CA，替每個 cluster 簽一張各自的 intermediate CA 放進 `cacerts`，istiod 用 intermediate 簽 workload 憑證（istiod 不直接用 root 簽） | ✓ |
+| P05-208 | 1800 | 互相有對方的 API server 存取權（缺一不可） | 不精確 | https://istio.io/latest/docs/setup/install/multicluster/primary-remote/ | "we give the control plane in `cluster1` access to the API Server in `cluster2`." | 「互相」只在 Multi-Primary 成立；Primary-Remote 是單向的（primary 的 istiod 讀 remote 的 API server）。改成：每個 primary 要有所有 cluster API server 的存取權（remote secret） | ✓ |
+| P05-209 | 1801 | east-west gateway 缺一不可 | 錯誤 | https://istio.io/latest/docs/setup/install/multicluster/multi-primary/ | "Both clusters reside on the `network1` network, meaning there is direct connectivity between the pods in both clusters." / "Service workloads communicate directly (pod-to-pod) across cluster boundaries." | 改成：只有 multi-network（跨網路流量）時必要；Primary-Remote 即使同網路也常用它暴露 istiod 給 remote；同網路的 Multi-Primary 不需要 | ✓ |
+| P05-210 | 1802 | `topology.istio.io/network` label 缺一不可 | 錯誤 | https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/ ; https://istio.io/latest/docs/setup/install/multicluster/multi-primary/ | "If the istio-system namespace is already created, we need to set the cluster's network there:"（單一網路的指南不設這個 label，只在安裝設定寫 "network: network1"） | 改成：multi-network 時須在 istio-system namespace 標 `topology.istio.io/network`。另補真正共通的前提：唯一的 `clusterName`、相同的 `meshID`、（單一網路時）Pod/Service CIDR 不重疊 | ✓ |
+| P05-211 | 1812–1813 | 跨 cluster 的 locality failover…A cluster 的服務掛了自動導到 B cluster，app 完全無感 | 不精確 | https://istio.io/latest/docs/tasks/traffic-management/locality-load-balancing/failover/ ; https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "This is required in order for failover to function properly."（指 outlierDetection）/ "Note: if no OutlierDetection specified, this will not take effect." | 補上：DR 必須設 `outlierDetection`（需要時再加 `localityLbSetting`／`failover`）；failover 要等錯誤累積到 ejection 才觸發，會有請求先失敗。「app 完全無感」改成「需靠 retry 才能讓 app 幾乎無感」；failover 依 locality（region/zone）決定，不是依 cluster | ✓ |
+| P05-212 | 1822 | 網路不互通，只有幾個開放的 VIP → 不能換，multi-cluster 要求網路可達 | 不精確 | https://istio.io/latest/docs/ops/deployment/deployment-models/ ; https://istio.io/latest/docs/setup/install/multicluster/before-you-begin/ | "the workload instances in different networks can only reach each other through one or more Istio gateways." / "The API Server in each cluster must be accessible to the other clusters in the mesh." | multi-network 本來就是給 Pod 不能直連的網路用的，不需要 Pod 互通；需要的是 east-west gateway 與 API server（Primary-Remote 再加 istiod）可達。改成「若連 API server 與 east-west gateway 都無法開放，才不能換」 | ✓ |
+| P05-213 | 1827 | istiod 版本必須同步升級 | 無法驗證 | https://istio.io/latest/docs/setup/install/multicluster/before-you-begin/ | （官方沒有「所有 cluster 必須同版本」的規定） | 改成：需遵守 control plane／data plane 版本差的支援規則，Primary-Remote 的 remote proxy 版本不可超過 primary istiod；或刪除 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P05-214 | 1633 等 | networking.istio.io/v1 有效 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P05-215 | 1641 | MESH_EXTERNAL＝mesh 外部 | https://istio.io/latest/docs/reference/config/networking/service-entry/ |
+| P05-216 | 1642 | resolution DNS 非同步解析 | https://istio.io/latest/docs/reference/config/networking/service-entry/ |
+| P05-217 | 1647–1648 | exportTo "." 僅本 ns | https://istio.io/latest/docs/reference/config/networking/service-entry/ |
+| P05-218 | 1660 | SIMPLE＝單向 TLS 發起 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P05-219 | 1663–1664 | connectTimeout 等欄位有效 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P05-220 | 1665–1668 | outlierDetection 欄位有效（TCP 計連線失敗） | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P05-221 | 1678–1681 | egress hosts 用 ns/dnsName | https://istio.io/latest/docs/reference/config/networking/sidecar/ |
+| P05-222 | 1718 | secret 放 istio-system（gateway workload ns） | https://istio.io/latest/docs/reference/config/analysis/ist0161/ |
+| P05-223 | 1720 | Gateway hosts 無前綴＝*/ | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P05-224 | 1730 | 跨 ns 引用 ns/gateway | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P05-225 | 1738 | HTTPRoute timeout 欄位 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P05-226 | 1741–1748 | ALLOW：沒匹配就拒絕 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-227 | 1766–1768 | metadata.name 自動 label | https://kubernetes.io/docs/concepts/services-networking/network-policies/ |
+| P05-228 | 1777 | gateway→app 走 B 內 mTLS | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-229 | 1778, 1783 | 來源變 gateway SA | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-230 | 1782 | A 的 AuthZ 管 inbound | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P05-231 | 1793 | Multi-Primary 要 API server 互通 | https://istio.io/latest/docs/setup/install/multicluster/before-you-begin/ |
+| P05-232 | 1794 | Primary-Remote 依賴 primary（「完蛋」是原文誇飾） | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P05-233 | 1800 | create-remote-secret 產生 secret | https://istio.io/latest/docs/setup/install/multicluster/multi-primary/ |
+| P05-234 | 1807–1810 | 跨 cluster 保留 workload 身分（前提：同一 trust domain） | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
 
 ---
