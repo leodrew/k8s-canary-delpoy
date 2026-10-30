@@ -8,12 +8,28 @@ You are an autonomous coding agent working on a software project.
 2. Read the progress log at `progress.txt` (check Codebase Patterns section first)
 3. Check you're on the correct branch from PRD `branchName`. If not, check it out or create from main.
 4. Pick the **highest priority** user story where `passes: false`
-5. Implement that single user story
-6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
-7. Update CLAUDE.md files if you discover reusable patterns (see below)
-8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. Update the PRD to set `passes: true` for the completed story
-10. Append your progress to `progress.txt`
+5. Record the review base before touching anything: `BASE=$(git rev-parse HEAD)`. Write the SHA
+   down — step 9 needs it, and it must be the commit *before* this story's first change.
+6. If the PRD `description` names a spec file and a ledger, read the spec and the ledger rows whose
+   IDs this story lists. Every change you make must trace to one of those rows; do not fix things
+   the story does not list, even if you notice them — note them in `progress.txt` instead.
+7. Implement that single user story
+8. Run quality checks: `bash scripts/validate.sh` from the repo root must exit 0. If checks pass,
+   commit ALL changes with message: `feat: [Story ID] - [Story Title]`
+9. **Review.** Invoke the `code-review` skill with fixed point `BASE` and pass the spec file and the
+   ledger as the spec source. Tell it: the Spec sub-agent must WebFetch every source URL cited by
+   the ledger rows in this story and confirm (a) the quoted text really appears on that page and
+   (b) the guide's new wording agrees with it. A quote that cannot be found is a finding.
+10. If the review has findings, fix them, re-run `bash scripts/validate.sh`, commit
+    `fix: [Story ID] - address review`, and review again from the same `BASE`.
+    **At most 2 review rounds.** If findings remain after round 2, do NOT set `passes: true`:
+    write the remaining findings into the story's `notes` field in `prd.json`, commit that, log it in
+    `progress.txt`, and end the iteration (a human will look at it).
+11. Update CLAUDE.md files if you discover reusable patterns (see below)
+12. When the review is clean, update the PRD to set `passes: true` for the completed story
+13. Append your progress to `progress.txt`, including a short summary of each review round
+    (findings per axis and what you changed)
+14. Commit `prd.json` and `progress.txt` with message: `chore: [Story ID] - mark story complete and log progress`
 
 ## Progress Report Format
 
