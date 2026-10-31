@@ -230,3 +230,29 @@ Started: (not yet run)
   - 在 heredoc 寫的 node 改寫腳本裡用 template literal 帶 `\n`／`\s`，跳脫層數會出乎意料（實際寫進檔案的是真換行與 `s`）；
     改完一定 grep 一下結果，或直接用 Edit 工具。
 ---
+
+## 2026-10-31 - US-001 第四次嘗試（passes 仍為 false：第 2 輪的發現在輪數上限之後才修，待人工確認）
+- BASE 沿用 a8304e4。
+- 612fc39（fix，前一個 iteration）：處理第三次嘗試的 notes —— fence 照 CommonMark 認（``` 以上／~~~、結尾同字元
+  且長度不短於開頭、info string 不含反引號），移除 UNSUPPORTED_FENCE；[10]／[11] 共用 fenceBlocks；
+  「找不到 yaml 區塊」改以 yamlBlocks 判斷。
+- 6792957（fix）：前一個 iteration 在 commit 前中斷，fenceBody 的「非空白行縮排比 fence 淺 → 區塊斷掉」
+  以未 commit 的狀態留在工作目錄（第 1 輪 review 紀錄沒有留下）。本 iteration 驗證後 commit：
+  反向測 —— 散文後插入 4 格縮排的 ```yaml ＋ 頂格的壞 ```yaml → FAIL（指出第 289 行斷點＋解析錯誤）；
+  清單項目底下正確縮排的 fence → PASS。
+- Review round 2：
+  - Spec：無發現（US-001 ledgerIds 為空，沒有來源 URL 要 WebFetch；全部驗收條件達成）。
+  - Standards：前次 (1)–(4) 實測確認已修。新發現 1 項無聲 PASS —— CLOSE 接受任意縮排的結尾 fence，yaml 區塊
+    內容裡更深縮排的 ```（`|` 字串夾 markdown）讓區塊提早結束、下一個 ```yaml 被吞掉不解析。
+    判斷題：「縮排比 fence 淺就斷」對兩種罕見合法 markdown 會大聲 FAIL（未修）。
+  - e34f851（fix）：結尾 fence 縮排 ≤ 開頭＋3。反向測：reviewer 的情境由 PASS 變成 FAIL（第 293 行 bad indentation），
+    還原後 validate.sh exit 0（127 項）。
+  - 已達兩輪上限，e34f851 沒有再 review → passes 維持 false，寫進 notes 交人工確認。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 在 bash 的 node -e '...' 裡寫含 \s 的 regex 字串做取代，跳脫會被吃掉（實際比對的是 `s*`）；改 validate.sh 的
+    JS 片段直接用 Edit 工具。
+  - GUIDE_FENCE_JS 包在 bash 單引號裡，在裡面加註解時不能出現 ASCII 單引號。
+  - 掃 markdown 的 fence 時，開頭與結尾的縮排都有上限（CommonMark：相對容器 ≤3 格）；只管開頭會留下
+    「內容裡縮排的 ``` 被當結尾」的無聲漏檢。
+---

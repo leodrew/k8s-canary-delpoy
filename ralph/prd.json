@@ -21,7 +21,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "第三次嘗試（17bf27d、18078fa）已修掉前次 notes 的兩項（blockquote fence、URL 結尾 ASCII 句點）以及第 1 輪新發現（blockquote 內的 skip 標記、~~~／```` fence 改為 FAIL、[11] 不算 code fence 與 <!-- --> 註解裡的連結、fenceBody 重用 splitQuote）。第 2 輪 review：Spec 軸無發現；Standards 軸沒有任何「壞 YAML 或缺官方來源卻無聲 PASS」的問題，但留下幾項會大聲 FAIL、診斷卻指錯方向的項目，passes 依規則維持 false 待人工判斷：(1) 假 FAIL：散文裡的行內程式碼 ```` ```yaml ```` 開頭的行會被 UNSUPPORTED_FENCE（/^s*(~~~|````)/）當成 fence 報錯；CommonMark 中反引號 fence 的 info string 不能含反引號，建議只在 4+ 反引號之後的剩餘部分不含反引號時才 FAIL（CLAUDE.md 本身就用這種寫法，日後 guide 若寫到閘門就會撞到）。(2) 長度 ≥4 的結尾 fence（```` 收 ``` 開的區塊，CommonMark 允許）不被 CLOSE 認得，區塊會吞到下一個 fence，報錯位置與原因都不對（大聲 FAIL，非無聲）。(3) 判斷題：[10] 的 while 掃描與 [11] 的 forEach 狀態機是兩份 fence walk（只共用 open/close/body helper），fence 沒關時兩者行為已不同；可抽成共用的 fenceBlocks(lines)。(4) 小：所有 yaml 區塊都解析失敗時，parsed+skipped===0 會額外印「一個區塊都沒找到…先修比對規則」，誤導原因。(5) 已接受：> 內的標記後接沒有 > 的 fence 仍會略過（不檢查層數）。guide 目前沒有 ~~~／```` fence，以上都不影響現有內容。"
+      "notes": "第四次嘗試（612fc39、6792957、e34f851）：前次 notes 的 (1)–(4) 都已修掉，第 2 輪 Standards 逐項實測確認（行內程式碼 ```` ```yaml ```` 不再假 FAIL、```` 收尾可認、[10]／[11] 共用 fenceBlocks、全部壞掉時不再印「找不到區塊」）。6792957：縮排比 fence 淺的非空白行讓區塊斷掉（擋 4 格縮排的 ``` 吞掉後面真區塊）。第 2 輪 review（BASE a8304e4）：Spec 無發現；Standards 找到 1 項無聲 PASS —— CLOSE 接受任意縮排的結尾 fence，yaml 區塊內容裡縮排更深的 ```（`|` 字串夾 markdown）會讓區塊提早結束、把下一個 ```yaml 吞掉。已在 e34f851 修正（結尾縮排 ≤ 開頭＋3，CommonMark）並反向測過（該情境現在 FAIL 在正確行號），但這是第 2 輪之後的修正、沒有再 review，依規則 passes 維持 false —— 人工確認 e34f851 後即可設 passes: true。判斷題（未修）：6792957 的「縮排比 fence 淺就斷」對兩種合法但罕見的 markdown 會大聲 FAIL（頂層 fence 縮排 1–3 格而內容頂格；刻意用 4 格縮排展示 ``` 字面）；guide 目前沒有這兩種寫法。另：本次嘗試的第 1 輪 review 紀錄沒有留下（前一個 iteration 在 commit 6792957 之前中斷，修正以未 commit 的狀態留在工作目錄，本 iteration 驗證、反向測試後 commit）。"
     },
     {
       "id": "US-002",
