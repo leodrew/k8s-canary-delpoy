@@ -261,17 +261,21 @@ selector:
 | **CronJob** | K8s | 定時跑一次性任務 | 要自己養一台機器跑 crontab |
 | **Gateway** | Istio | 定義**入口的 L4/TLS**：開哪個 port、收哪些 host、憑證是誰 | 外面的流量進不來 |
 | **VirtualService** | Istio | 定義**路由規則**：這個 path/header 要送去哪個服務、幾成流量 | 只能靠 Service 名稱一對一直連 |
-| **DestinationRule** | Istio | 定義**路由決定之後**、送往該服務的策略：subset 分組、負載平衡演算法、連線池、client 端對上游連線的 TLS 設定（如 `ISTIO_MUTUAL`） | 同一個 Service 底下無法分版本（subset）；兩個版本是不同 Service 時，VS 用 weight 照樣能分流 |
-| **ServiceEntry** | Istio | 把「mesh 外部的服務」註冊進來，讓 sidecar 認得它 | `outboundTrafficPolicy.mode: REGISTRY_ONLY` 時打不出去；預設 `ALLOW_ANY` 會放行，但流量走 passthrough，拿不到 VS/DR 的功能 |
+| **DestinationRule** | Istio | 定義**路由決定之後**、送往該服務的策略：subset 分組、負載平衡演算法、連線池、client 端對上游連線的 TLS 設定（如 `ISTIO_MUTUAL`） | 同一個 Service 底下無法分版本（見表下說明） |
+| **ServiceEntry** | Istio | 把「mesh 外部的服務」註冊進來，讓 sidecar 認得它 | `REGISTRY_ONLY` 模式下打不出去（見表下說明） |
 | **Sidecar** | Istio | 限制**這個 workload 的 Envoy 能看見哪些服務** | 每個 sidecar 都載入全 mesh 設定，吃記憶體 |
-| **PeerAuthentication** | Istio | 決定**服務間連線要不要 mTLS**（身分驗證） | 預設 `PERMISSIVE`：兩邊都有 sidecar 時自動升級成 mTLS，身分照樣有；風險是明文也收（見表下說明） |
+| **PeerAuthentication** | Istio | 決定**服務間連線要不要 mTLS**（身分驗證） | 預設 `PERMISSIVE`，明文也收（見表下說明） |
 | **AuthorizationPolicy** | Istio | 決定**誰可以打誰的哪個 path/method**（授權） | 任何人打得到就進得去 |
 | **RequestAuthentication** | Istio | 驗 **JWT**（end-user 身分） | 沒辦法認「人」，只能認「服務」 |
 | **NetworkPolicy** | K8s + CNI | L3/L4 封包層的防火牆（Pod IP / CIDR / port） | 網路層完全互通 |
 | **HorizontalPodAutoscaler** | K8s | 依指標自動調整 replica 數 | 尖峰要人工擴容 |
 | **PodDisruptionBudget** | K8s | 保證自願中斷時至少留幾個 Pod | 節點維護可能一次砍光你所有 Pod |
 
-**表中 DestinationRule 與 PeerAuthentication 的分工：** DestinationRule 的 `tls` 只管「client 這一端送出去時用不用 mTLS」；server 端要不要**強制** mTLS（拒收明文）由 PeerAuthentication 決定。沒寫 PeerAuthentication 時 mesh 預設是 `PERMISSIVE` ——明文與 mTLS 都收，兩端都有 sidecar 的連線會自動升級成 mTLS。所以真正的風險不是「沒有身分」，而是沒有 sidecar 的 client 可以用明文繞過身分。AuthorizationPolicy 裡依賴 mTLS 的只有 `principals`／`notPrincipals`、`namespaces`／`notNamespaces` 與 `source.principal`、`source.namespace` 條件；path、method 這類規則不受影響。
+**表中三列的補充：**
+
+- **DestinationRule：** 只有「同一個 Service 底下分版本」才需要 subset；兩個版本是不同 Service 時，VirtualService 用 `weight` 分到兩個 Service 照樣能分流。它的 `tls` 是 client 這一端對上游連線的 TLS 設定（例如 `ISTIO_MUTUAL`）；server 端要不要**強制** mTLS（拒收明文）由 PeerAuthentication 決定。
+- **ServiceEntry：** 「打不出去」只發生在 mesh 設成 `outboundTrafficPolicy.mode: REGISTRY_ONLY` 時。預設是 `ALLOW_ANY`，沒有 ServiceEntry 也會放行，但流量走 passthrough，拿不到 VirtualService／DestinationRule 的功能。（這裡的模式跟 mTLS 的 `STRICT` 無關。）
+- **PeerAuthentication：** 沒寫時 mesh 預設是 `PERMISSIVE` —— 明文與 mTLS 都收，兩端都有 sidecar 的連線會自動升級成 mTLS，身分照樣存在。所以真正的風險不是「沒有身分」，而是沒有 sidecar 的 client 可以用明文繞過身分。AuthorizationPolicy 裡依賴 mTLS 的只有 `principals`／`notPrincipals`、`namespaces`／`notNamespaces` 與 `source.principal`、`source.namespace` 條件；path、method 這類規則不受影響。
 
 ### 最重要的一組區分：認證 vs 授權 vs 防火牆
 
@@ -289,7 +293,7 @@ selector:
   ④  你的 App           ← Spring Security 再做一次應用層授權
 ```
 
-- ① 擋掉的：通常是 timeout（多數 CNI 直接丟封包）；會不會回 RST、讓 client 看到 `connection refused`，看 CNI 怎麼實作。NetworkPolicy API 本身沒有阻擋紀錄，要用 CNI 自己的工具（Calico／Cilium）查
+- ① 擋掉的：**通常是 timeout**（多數 CNI 直接丟封包）；會不會回 RST、讓 client 看到 `connection refused`，看 CNI 怎麼實作。NetworkPolicy API 本身沒有阻擋紀錄，要用 CNI 自己的工具（Calico／Cilium）查
 - ② 擋掉的：TLS handshake 失敗、連線被 reset，**沒有 403**
 - ③ 擋掉的：**HTTP 403 + body `RBAC: access denied`** ← Part 3 專章
 - ④ 擋掉的：你自己 app 的 401/403 頁面
