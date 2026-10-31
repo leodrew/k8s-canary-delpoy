@@ -285,3 +285,9 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（引文含 **strict** 粗體不逐字、selector 註解與表格重複 -> 已修）；Spec 無缺漏，所有引文經 WebFetch/curl 確認（>=1.23 版本界線只在帳本，官方頁未載明）。修正後未再開第二輪 sub-agent review（只動兩處措辭，validate.sh 通過）。
 - Learnings: 引文不要帶 markdown 粗體；WebFetch 摘要器可能漏報句子，用 curl 驗證。
 ---
+## 2026-11-01 - US-009
+- 修正 Part 2 §2.2（P02-006/007/008/010/011）：AUDIT 改述並指向 dry-run annotation、ipBlocks/remoteIpBlocks 說明與選擇準則、寫法 B/C 補 numTrustedProxies 前置、寫法 C 範圍與 B 對齊（連動：notRemoteIpBlocks 加入 172.16.0.0/12，帳本要求語意統一）、sidecar 範例移除 hosts 並在踩雷加一條。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 發現（六個 URL 引文皆查到）；Standards 1 硬（寫法 C 註解與值矛盾）＋2 判斷（位置式指引、非逐字「」）→ 已改（a7a7a1f）。未跑第 2 輪（只剩措辭修正）。
+- 觀察（不屬本故事）：guide 約 408 行（Part 1）仍寫「ipBlocks 幾乎永遠是錯的」、約 1374 行 AUDIT 屬 P04-011；皆留給對應帳本列。
+---
