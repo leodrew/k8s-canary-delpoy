@@ -69,6 +69,21 @@ bash scripts/validate.sh      # 或 npm run validate
 `feat: US-0xx - <故事標題>`（改動＋對應的 validate.sh 檢查）、然後
 `chore: US-0xx - mark story complete and log progress`（只動 `prd.json` 與 `progress.txt`）。
 
+- **跑法：** `.\ralph\ralph.ps1 --model <m> --effort <low|medium|high|xhigh|max> <最多幾輪>`；
+  預設 tool 是 claude。先加 `--dry-run` 看組出來的指令（不封存、不動任何檔案）。
+- **每輪都有 code-review**（`ralph/CLAUDE.md` 第 5、9 步）：開工先記 `BASE`，feat commit 之後
+  以 `BASE` 為 fixed point 跑 `code-review`，有發現就 `fix:` commit 再 review，最多兩輪，
+  修不完就寫進 `prd.json` 的 `notes`、`passes` 維持 false。所以一個故事是 2–4 個 commit。
+- **換 run 時要手動封存。** `ralph.ps1` 偵測到 `branchName` 跟 `.last-branch` 不同才封存，
+  但它是在你已經寫好新 `prd.json` 之後才跑 —— 封存進去的會是新的 `prd.json` 配舊的
+  `progress.txt`，還會把新 `progress.txt` 清空。換 run 前先自己把舊的兩份複製到
+  `ralph/archive/<日期>-<舊分支名>/`，再把 `.last-branch` 改成新分支。
+- **目前的 run（`ralph/guide-verification`）** 修的是 `k8s-ecosystem-guide.md`，不是 manifest。
+  事實依據是 `tasks/guide-verification-ledger.md`（查證帳本：每列有官方 URL、逐字引文、
+  建議改法、使用者確認），spec 是 `tasks/prd-k8s-guide-verification.md`；每個故事的
+  `ledgerIds` 列出它負責的帳本列，只改那些列。上一個 run 封存在
+  `ralph/archive/2026-10-31-canary-configmap-split/`（US-010 未完成）。
+
 ## 改 manifest 就要加檢查，而且要在同一個 commit
 
 這是這個 repo 最重要的規則。每一次修改 `canary-manual/` 底下的 manifest，都必須在

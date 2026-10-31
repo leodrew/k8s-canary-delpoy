@@ -1,190 +1,2090 @@
 {
-  "project": "canary-manual (dev/k8s)",
-  "branchName": "ralph/canary-configmap-split",
-  "description": "Canary ConfigMap split and pre-launch fixes for pmc-epmmformquerygui. IMPORTANT - THIS IS NOT A CODE PROJECT: the repo root is dev/k8s and it contains only Kubernetes/Istio YAML manifests, shell scripts and Traditional-Chinese markdown. There is no compiler, no test suite, no package to build. The typecheck equivalent is `bash scripts/validate.sh` run from the repo root; exit code 0 means the check passed. That script does not exist yet - US-001 creates it, and EVERY LATER STORY MUST ADD ITS OWN ASSERTIONS TO scripts/validate.sh IN THE SAME COMMIT as the change it is verifying. That is the single most important rule in this PRD: it is what keeps the script green at every commit and what stops a later story from silently breaking an earlier one. TOOLING: this machine has node/npm/npx only. There is NO kubectl, NO yq, NO usable python (only the Microsoft Store stub). Do not try to install kubectl, do not try to reach a cluster, do not run `kubectl apply` even with --dry-run - it will not exist. YAML parsing is done with the js-yaml CLI pinned as a devDependency (US-001 sets this up). SCOPE: dev/k8s only. The Spring Boot backend lives in a separate repo at dev/spring_oauth2_backend and is deliberately OUT OF SCOPE - in particular the SecurityConfig permitAll change that US-007 depends on, and the whole BFF-proxy phase, are not part of this run. Never edit files outside dev/k8s. SOURCE OF TRUTH: canary-manual/CANARY-COMPLETE.md holds the full target state - section 3.1 (how config is loaded) and Appendix C (the required-key list) are the two most important sections, and section 3.5 contains the complete target ConfigMap. The original requirements are in tasks/prd-canary-configmap-split-and-hardening.md. Read the relevant section BEFORE editing any manifest. WHAT IS BEING FIXED: the image's Dockerfile sets SPRING_CONFIG_LOCATION=file:/config/application.yaml (replace semantics, a path nothing mounts) while the Deployment sets SPRING_CONFIG_ADDITIONAL_LOCATION=file:/app/config/application.yml - the pod cannot start, and under replace semantics every key the ConfigMap omits silently falls back to a Java @Value default. Stories 002-006 make the ConfigMap complete and then flip the env var; stories 008-009 split the single shared ConfigMap into per-track -stable/-canary copies with a content-hash annotation. STYLE: YAML comments in this repo explain WHY at length - see track-a/release/20-deployment-stable.yaml for the density to match. Prose is Traditional Chinese. Five documents under canary-manual/ carry a 'superseded' banner; do not follow their operational steps, they contain known-wrong instructions. NOTE: canary-manual/ is a documentation tree, so nothing here is auto-deployed - but do not leave the repo in a state you would be embarrassed to have applied.",
+  "project": "k8s-ecosystem-guide verification (dev/k8s)",
+  "branchName": "ralph/guide-verification",
+  "description": "依查證帳本修正 k8s-ecosystem-guide.md。Spec: tasks/prd-k8s-guide-verification.md。Ledger: tasks/guide-verification-ledger.md（每個故事的 ledgerIds 欄列出它負責的帳本列；X-／Q- 開頭的 ID 在帳本最後兩節）。帳本是唯一事實依據：只改故事列出的 ID，行號以帳本「原文摘錄」定位。",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Bootstrap scripts/validate.sh with YAML syntax checking",
-      "description": "As a Ralph iteration, I need a quality-check command in a repo that has no compiler and no tests, so that every later story has something to verify against.",
+      "title": "validate.sh 加上 guide 的兩項檢查",
+      "description": "身為維護者，我要 `scripts/validate.sh` 檢查 guide 的 yaml 區塊能解析、修完的 Part 有參考來源，這樣 loop 每一輪改 guide 時都有閘門，不會把 YAML 改壞、也不會把參考來源刪掉。",
+      "ledgerIds": [],
       "acceptanceCriteria": [
-        "Create package.json at the repo root with js-yaml pinned as a devDependency (js-yaml ^4), a `scripts.validate` entry running `bash scripts/validate.sh`, and `private: true`",
-        "Run `npm install` once so package-lock.json is generated and node_modules/js-yaml exists; commit package.json and package-lock.json but NOT node_modules",
-        "Add node_modules/ to .gitignore",
-        "Create scripts/validate.sh as a check runner: it defines a `check <name> <command>` helper that prints `PASS <name>` or `FAIL <name>`, accumulates a failure count, and exits 1 if any check failed and 0 otherwise",
-        "scripts/validate.sh must be runnable from the repo root as `bash scripts/validate.sh` and must cd to the repo root itself so it also works when invoked from elsewhere",
-        "Add the first check: every *.yaml file under canary-manual/track-a/ and canary-manual/track-b/ parses as YAML, using the local js-yaml CLI (node_modules/.bin/js-yaml) - NOT `npx --yes`, which needs network on every run and cannot be a quality gate",
-        "The YAML check must iterate files found with `find`, not a hardcoded list, so manifests added by later stories are covered automatically",
-        "This story makes ZERO changes to any file under canary-manual/ - it is a tooling-only commit and the check must pass against the repo exactly as it is today",
-        "`bash scripts/validate.sh` exits 0 and its output names every manifest it parsed"
+        "新增檢查 `[10]`：用本地 `node_modules/.bin/js-yaml` 同一套 js-yaml（`require('js-yaml')`）的 `loadAll` 解析 `k8s-ecosystem-guide.md` 裡每一個 ```yaml／```yml 區塊；任一區塊解析失敗就 FAIL，訊息印出區塊起始行號與錯誤原因",
+        "刻意寫錯或無法獨立成立的片段，在 fence 的**前一行**加 `<!-- validate:skip-yaml 原因 -->` 就略過；標記存在但原因是空的 → FAIL（原因必填）",
+        "處理掉目前會失敗的 6 個區塊（commit `2c26688` 的第 203、995、1227、3695、6684、7407 行附近）：同一區塊並列兩種寫法（A／B、錯／對）造成 duplicated key 的，**拆成兩個區塊**讓兩邊都被驗證；只有從大檔案截出、縮排不能獨立成立的片段才用 skip 標記",
+        "新增檢查 `[11]`：`VERIFIED_PARTS` 陣列（初始為空，例如 `VERIFIED_PARTS=()`）裡的每個 `Part N`，在 guide 的 `## Part N` 區段內（到下一個 `## ` 為止）必須有 `### 參考來源`，且該小節裡至少一個連結落在官方網域白名單（kubernetes.io、istio.io、envoyproxy.io、argo-rollouts.readthedocs.io、argoproj.github.io、github.com／raw.githubusercontent.com 的 kubernetes／istio／argoproj／envoyproxy 組織、keda.sh、docs.flagger.app、prometheus.io、helm.sh、keycloak.org、metallb.io、learn.microsoft.com、rfc-editor.org）",
+        "兩項都沿用既有的 `check` helper，加在 `# 之後的檢查加在這裡` 區段，各開 `== [n] 說明 ==` 並寫清楚「這個檢查在防什麼」；`export MSYS2_ARG_CONV_EXCL='*'` 不動；解析用 YAML parser，不 grep",
+        "反向測試並把過程寫進 progress.txt：(a) 暫時把一個 yaml 區塊改壞 → `[10]` FAIL；(b) 加一個原因空白的 skip 標記 → `[10]` FAIL；(c) 暫時把 `\"Part 0\"` 放進 `VERIFIED_PARTS`（此時 Part 0 還沒有參考來源）→ `[11]` FAIL；全部還原",
+        "CLAUDE.md 的「擴充 `scripts/validate.sh` 的既有工具」一節補上 `VERIFIED_PARTS` 與 skip-yaml 標記的用法（照該節現有寫法：是什麼、為什麼、漏了會怎樣）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Add the three ConfigMap keys whose absence prevents startup",
-      "description": "As a maintainer, I need the three keys that have no usable Java default present in the ConfigMap, so that the pod can start once the config-load env var is flipped in US-006.",
+      "title": "修正 Part 0：這是在解決什麼問題、Istio 本身由什麼組成：Istio / istiod…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 0 的「這是在解決什麼問題」「Istio 本身由什麼組成：Istio / istiod…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P00-001",
+        "P00-002",
+        "P00-011",
+        "P00-014"
+      ],
       "acceptanceCriteria": [
-        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml, add `issuer-uri: ${KEYCLOAK_ISSUER_URI}` under spring.security.oauth2.client.provider.keycloak (it was deleted from this file at some point; track-b still has it at line 53)",
-        "Add `app.post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:{baseUrl}/gui_epmmFormQuery/page/logged-out}` - the backend reads `@Value(\"${app.post-logout-redirect-uri}\")` with NO default, so a missing key is a Could-not-resolve-placeholder startup failure",
-        "Add `redirect-uri: \"{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}\"` under spring.security.oauth2.client.registration.keycloak - Spring's own default omits the /gui_epmmFormQuery prefix and would not match redirectionEndpoint.baseUri",
-        "Each added key carries a YAML comment saying what breaks without it, matching the comment density of the surrounding file",
-        "Do NOT add the app.sso.* keys back - the correct key is app.post-logout-redirect-uri at the app.* top level, and removing app.sso.* is US-005's job",
-        "Add a check to scripts/validate.sh asserting all three keys are present in the track-a ConfigMap's application.yml (parse the ConfigMap with js-yaml, then parse the data['application.yml'] string as YAML and assert on the parsed object - do not grep the raw file)",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P00-001、P00-002、P00-011、P00-014 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Cluster verification deferred to deploy time: `kubectl logs` must show no ConfigDataLocationNotFoundException and no 'Could not resolve placeholder'."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add the ConfigMap keys that silently fall back to Java defaults",
-      "description": "As a maintainer, I need the keys whose Java defaults are wrong for this environment written out explicitly, so that replace-semantics config loading does not silently change behaviour.",
+      "title": "修正 Part 0：物件之間怎麼互相找到：label、名字、host 三種連…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 0 的「物件之間怎麼互相找到：label、名字、host 三種連…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P00-024",
+        "P00-025",
+        "P00-034",
+        "P00-045"
+      ],
       "acceptanceCriteria": [
-        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml add `server.servlet.session.timeout: 8h` - the Spring default is 30 minutes",
-        "Add server.servlet.session.cookie with name `__Host-JSESSIONID`, same-site `lax`, secure `true`, http-only `true` - without the name key it falls back to JSESSIONID, which collides with the Envoy affinity cookie",
-        "Add `app.security.csp-policy` with the exact policy string from canary-manual/CANARY-COMPLETE.md section 3.5, and `app.security.csp-report-only: true` - the Java default for csp-policy is an empty string, which suppresses the CSP header entirely",
-        "Add `app.security.required-role: \"\"`",
-        "Add `spring.task.scheduling.pool.size: 2` - the default of 1 queues the canary roster reload behind the 60-second Keycloak token refresh",
-        "Add `app.canary.leave-path: /gui_epmmFormQuery/canary/leave` - this one value is read in three places in the backend and must not be left implicit",
-        "Add app.token-refresh.{enabled,skew-seconds,schedule-rate-ms}, app.silent-auth.{enabled,hint-cookie-name,hint-cookie-max-age-seconds,cookie-secure}, app.downstream.base-url and app.third-party.base-url, using the values in CANARY-COMPLETE.md section 3.5",
-        "Each key carries a comment; the ones listed in CANARY-COMPLETE.md Appendix C.2 must say what wrong value they would fall back to",
-        "Extend the scripts/validate.sh check from US-002 into a required-key list covering Appendix C.1, C.2 and C.3, asserting each key exists in the parsed application.yml and that session.cookie.name equals `__Host-JSESSIONID` and task pool size equals 2",
-        "The new checks are added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P00-024、P00-025、P00-034、P00-045 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P00-034 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Cluster verification deferred: after deploy, the session cookie in the browser must be named __Host-JSESSIONID and a Content-Security-Policy-Report-Only header must be present."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Change user-name-attribute from preferred_username back to sub",
-      "description": "As a maintainer, I need the OIDC token store keyed on a stable claim, so that a recycled username cannot resolve the previous user's tokens.",
+      "title": "修正 Part 0：一句話職責表、最重要的一組區分：認證 vs 授權 vs 防火牆",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 0 的「一句話職責表」「最重要的一組區分：認證 vs 授權 vs 防火牆」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P00-058",
+        "P00-059",
+        "P00-061",
+        "P00-070"
+      ],
       "acceptanceCriteria": [
-        "In canary-manual/track-a/release/10-configmap-1.2.3.yaml line ~59, change `user-name-attribute: preferred_username` to `user-name-attribute: sub`",
-        "Make the same change in canary-manual/track-b/release/10-configmap-1.2.3.yaml line ~54",
-        "Replace the stale commented-out hint at track-a line ~48 with a real comment explaining why sub is required: Authentication.getName() keys InMemoryOAuth2AuthorizedClientService, and OIDC does not guarantee preferred_username is stable or unique (review F15)",
-        "Add a check to scripts/validate.sh asserting that in BOTH track-a and track-b ConfigMaps the parsed value of spring.security.oauth2.client.provider.keycloak.user-name-attribute is exactly `sub`",
-        "The check must fail loudly if the value is `preferred_username`, so a future edit cannot quietly reintroduce it",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P00-058、P00-059、P00-061、P00-070 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P00-070 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 0 結尾加 `### 參考來源`：列出帳本中 Part 0 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 0\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "track-b is otherwise out of scope for this run; only this one line is changed there because the same regression exists in both files."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Remove the three dead config blocks",
-      "description": "As a maintainer, I do not want configuration in the repo that no code reads, because it sends people in the wrong direction when they are debugging.",
+      "title": "修正 Part 1：完整鏈路、逐跳職責表：出事了查哪裡",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 1 的「完整鏈路」「逐跳職責表：出事了查哪裡」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P01-002",
+        "P01-005",
+        "P01-006",
+        "P01-007"
+      ],
       "acceptanceCriteria": [
-        "Delete the whole `app.cors:` block (allowed-origins, allowed-methods, allowed-headers, allow-credentials, max-age) from canary-manual/track-a/release/10-configmap-1.2.3.yaml around line 64 - the backend has no CORS configuration at all, deliberately (SecurityConfig's `// No .cors()`, review F4)",
-        "Delete the whole `app.sso:` block (custom-logout-url, post-logout-redirect-uri, logout-redirect-param-name) around line 71 - it is the wrong key path; the correct key was added as app.post-logout-redirect-uri in US-002",
-        "Delete `app.test-endpoints:` around line 79 - no code reads it",
-        "Delete the same blocks from canary-manual/track-b/release/10-configmap-1.2.3.yaml where present",
-        "Leave a single short comment where app.cors was, pointing at canary-manual/CANARY-COMPLETE.md Appendix A, so the next person who goes looking for CORS settings finds the explanation instead of re-adding them",
-        "Add a check to scripts/validate.sh asserting the parsed application.yml of both ConfigMaps has no `cors`, `sso` or `test-endpoints` key under `app`",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P01-002、P01-005、P01-006、P01-007 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Switch both Deployments to SPRING_CONFIG_LOCATION at the real mount path",
-      "description": "As a maintainer, I need the Deployment to point Spring at the path the ConfigMap is actually mounted on, so that the pod stops failing to start.",
+      "title": "修正 Part 1：關鍵觀念一：mesh 裡的 Service「幾乎只剩 D…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 1 的「關鍵觀念一：mesh 裡的 Service「幾乎只剩 D…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P01-008",
+        "P01-009",
+        "P01-010",
+        "P01-011"
+      ],
       "acceptanceCriteria": [
-        "In canary-manual/track-a/release/20-deployment-stable.yaml and 21-deployment-canary.yaml, replace the env var `SPRING_CONFIG_ADDITIONAL_LOCATION` with `SPRING_CONFIG_LOCATION`, value `file:/app/config/application.yml`",
-        "The value must match the `config` volumeMount mountPath (/app/config) already present in both files",
-        "Add a comment explaining that the Deployment env overrides the image's own ENV (Dockerfile line 120 sets SPRING_CONFIG_LOCATION=file:/config/application.yaml, a path nothing mounts), that this is replace semantics not merge, and that the ConfigMap must therefore stay complete - cross-reference CANARY-COMPLETE.md section 3.1 and Appendix C",
-        "Do NOT modify dev/spring_oauth2_backend/Dockerfile - the decision is to fix this from the k8s side only, so no image rebuild is needed",
-        "Add a check to scripts/validate.sh asserting that no file under canary-manual/ contains the string SPRING_CONFIG_ADDITIONAL_LOCATION, and that both track-a Deployments have an env entry named SPRING_CONFIG_LOCATION whose value is exactly file:/app/config/application.yml",
-        "This story is ordered after US-002 through US-005 on purpose: flipping to replace semantics before the ConfigMap is complete would make the manifests worse, not better",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P01-008、P01-009、P01-010、P01-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P01-009 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Cluster verification deferred: `kubectl exec <pod> -- head -3 /app/config/application.yml` must print the ConfigMap contents."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Point the probes at separate liveness and readiness health groups",
-      "description": "As a maintainer, I want liveness and readiness to be different endpoints, so that a dependency blip stops restarting the pod.",
+      "title": "修正 Part 1：關鍵觀念二：Client IP 在哪一跳被弄丟",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 1 的「關鍵觀念二：Client IP 在哪一跳被弄丟」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P01-013",
+        "P01-014",
+        "P01-015",
+        "P01-016"
+      ],
       "acceptanceCriteria": [
-        "Add `management.endpoint.health.probes.enabled: true` to the track-a ConfigMap so the liveness and readiness health groups exist",
-        "In both track-a Deployments, change livenessProbe httpGet path to /gui_epmmFormQuery/actuator/health/liveness",
-        "Change readinessProbe and startupProbe httpGet paths to /gui_epmmFormQuery/actuator/health/readiness",
-        "Add a comment on the probe block recording the known gap: SecurityConfig's permitAll list only covers the UNPREFIXED /actuator/health and /actuator/health/**, so the prefixed paths currently return 302, and kubelet counts 3xx as success - the probes pass unconditionally until the backend adds the prefixed entries. Reference CANARY-COMPLETE.md section 3.6",
-        "Add a check to scripts/validate.sh asserting the three probes in both Deployments use the health/liveness and health/readiness paths and that liveness and readiness are NOT the same path",
-        "Do NOT edit anything in dev/spring_oauth2_backend - the permitAll fix is out of scope for this run",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P01-013、P01-014、P01-015、P01-016 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 1 結尾加 `### 參考來源`：列出帳本中 Part 1 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 1\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "BLOCKED ON A DIFFERENT REPO: this story only completes the k8s half. Until dev/spring_oauth2_backend adds contextPrefix + \"/actuator/health\" and \"/actuator/health/**\" to SecurityConfig's permitAll list, the probes still return 302 and still pass unconditionally. Do not report the probe problem as solved."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Split the shared ConfigMap into per-track stable and canary copies",
-      "description": "As a maintainer, I need each track to own its configuration, so that changing the canary's CSP or backend URL does not roll the stable Deployment.",
+      "title": "修正 Part 2：2.1 PeerAuthentication — 服務間…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.1 PeerAuthentication — 服務間…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-001",
+        "P02-002",
+        "P02-003",
+        "P02-004",
+        "P02-005"
+      ],
       "acceptanceCriteria": [
-        "Rename canary-manual/track-a/release/10-configmap-1.2.3.yaml to 10-configmap-stable.yaml with `git mv`, and change metadata.name to pmc-epmmformquery-config-stable",
-        "Create canary-manual/track-a/release/11-configmap-canary.yaml as a copy with metadata.name pmc-epmmformquery-config-canary",
-        "Remove `immutable: true` from both - a fixed-name ConfigMap must be overwritable by kubectl apply, and leaving it makes apply fail with 'field is immutable'. Replace the old immutable comment with one explaining this",
-        "Remove the `config-version: \"1.2.3\"` label from both and add `track: stable` / `track: canary`",
-        "Point 20-deployment-stable.yaml's volumes[config].configMap.name at pmc-epmmformquery-config-stable and 21-deployment-canary.yaml's at pmc-epmmformquery-config-canary",
-        "The two files' data['application.yml'] contents must be byte-identical at this point - per-track divergence is a later, deliberate act, not something introduced by the split",
-        "Add checks to scripts/validate.sh: both ConfigMaps exist; neither has an `immutable` key; neither metadata.name matches a version-number pattern; the two data['application.yml'] strings are identical; each Deployment references the ConfigMap for its own track",
-        "The existing US-002..US-005 key checks must now run against BOTH ConfigMaps, not just one - update them rather than duplicating them",
-        "The new checks are added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P02-001、P02-002、P02-003、P02-004、P02-005 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "叢集驗證留到部署時：apply 之後 kubectl get cm -n ea-pmc -l app=pmc-epmmformquerygui 要看到 -stable 與 -canary 兩份、且 apply 不再噴 field is immutable；kubectl get deploy ... -o jsonpath 確認兩份 Deployment 各掛各的 ConfigMap。config-hash（US-009）之前，改設定內容不會自動觸發滾動更新，要自己 kubectl rollout restart。"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Replace config-version with a content-hash annotation and a sync script",
-      "description": "As a maintainer, I need changing ConfigMap content to trigger a rolling restart automatically, now that the ConfigMap name no longer changes between releases.",
+      "title": "修正 Part 2：2.2 AuthorizationPolicy — L7…（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.2 AuthorizationPolicy — L7…」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-006",
+        "P02-007",
+        "P02-008",
+        "P02-010",
+        "P02-011"
+      ],
       "acceptanceCriteria": [
-        "Create scripts/sync-config-hash.sh: for each track it reads the ConfigMap's data['application.yml'], computes sha256, takes the first 8 hex characters, and writes it into the matching Deployment's spec.template.metadata.annotations['config-hash']",
-        "The script must be idempotent - running it twice in a row leaves no diff on the second run; assert this in validate.sh by running it and checking `git diff --quiet`",
-        "Replace the `config-version: \"1.2.3\"` annotation in both track-a Deployments with `config-hash`, and run the script to populate the real values",
-        "Add a comment on the annotation explaining that changing ConfigMap content changes the hash, which changes the pod template, which triggers the rollout - and that a stale hash fails silently by simply not restarting",
-        "Add a check to scripts/validate.sh asserting each Deployment's config-hash annotation equals the sha256-prefix of its own ConfigMap's application.yml",
-        "The script must use node for hashing (`node -e` with require('crypto')) since there is no python and sha256sum availability is not guaranteed under Git Bash on this machine - verify whichever you use actually runs",
-        "The new checks are added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P02-006、P02-007、P02-008、P02-010、P02-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "The CI half of the original requirement (fail the build when the annotation is stale, and require ConfigMap+Deployment changes in one commit) is out of scope: neither repo has any CI. validate.sh covers the staleness check locally; the commit-pairing check needs a git hook and is deferred."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Remove the outage-causing commands from scripts/canary.sh",
-      "description": "As an on-call engineer, I do not want the helper script to offer commands that the SOP classifies as an outage.",
+      "title": "修正 Part 2：2.2 AuthorizationPolicy — L7…（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.2 AuthorizationPolicy — L7…」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-012",
+        "P02-013",
+        "P02-014",
+        "P02-015"
+      ],
       "acceptanceCriteria": [
-        "In canary-manual/scripts/canary.sh, `cmd_rollback` must no longer run `kubectl scale --replicas=0`; replace it with the documented shutdown (set image back to stable's version, set APP_CANARY_ENABLED=false, keep replicas at 1) or make it print a pointer to CANARY-COMPLETE.md section 8.2 and exit 1",
-        "`cmd_promote` must no longer end with `kubectl scale --replicas=0` - the drain must happen first (CANARY-COMPLETE.md section 5, step 4a)",
-        "`cmd_undo` must no longer run `kubectl rollout undo` - with fixed-name mutable ConfigMaps that restores the old pod template while leaving the new ConfigMap content mounted. Replace it with a pointer to the `git revert` procedure in section 8.4",
-        "`patch_deploy` and `cmd_deploy` still reference the versioned ConfigMap name pattern ${CM_PREFIX}-${ver}; update them for the fixed -stable/-canary names introduced in US-008, or make the affected subcommands refuse to run and say why",
-        "`cmd_cleanup` deletes old versioned ConfigMaps and no longer has anything to clean - remove it or make it a no-op that explains the names are now fixed",
-        "Add a check to scripts/validate.sh asserting canary-manual/scripts/canary.sh contains neither `--replicas=0` nor `rollout undo`",
-        "The new check is added to scripts/validate.sh in this same commit",
-        "`bash scripts/validate.sh` run from the repo root exits 0"
+        "帳本 P02-012、P02-013、P02-014、P02-015 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "修正 Part 2：2.3 Sidecar — 限制 Envoy 的視野（含…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.3 Sidecar — 限制 Envoy 的視野（含…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-201",
+        "P02-202",
+        "P02-203",
+        "P02-204",
+        "P02-205"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P02-201、P02-202、P02-203、P02-204、P02-205 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P02-201 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "修正 Part 2：2.4 NetworkPolicy — CNI 層防火牆（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.4 NetworkPolicy — CNI 層防火牆」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-206",
+        "P02-207",
+        "P02-208",
+        "P02-209",
+        "P02-210"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P02-206、P02-207、P02-208、P02-209、P02-210 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "修正 Part 2：2.4 NetworkPolicy — CNI 層防火牆（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.4 NetworkPolicy — CNI 層防火牆」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-211",
+        "P02-212",
+        "P02-213",
+        "P02-214"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P02-211、P02-212、P02-213、P02-214 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "修正 Part 2：2.5 四者對照表 —— 這個需求該用哪一個？（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.5 四者對照表 —— 這個需求該用哪一個？」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-215",
+        "P02-216",
+        "P02-217",
+        "P02-218",
+        "P02-219"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P02-215、P02-216、P02-217、P02-218、P02-219 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P02-215 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "修正 Part 2：2.5 四者對照表 —— 這個需求該用哪一個？（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 2 的「2.5 四者對照表 —— 這個需求該用哪一個？」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P02-220",
+        "P02-221"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P02-220、P02-221 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 2 結尾加 `### 參考來源`：列出帳本中 Part 2 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 2\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "修正 Part 3：第一件事：這不是 K8s RBAC",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 3 的「第一件事：這不是 K8s RBAC」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P03-001"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P03-001 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "修正 Part 3：Istio 版：五大成因決策樹（1/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 3 的「Istio 版：五大成因決策樹」（1/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P03-002",
+        "P03-003",
+        "P03-004",
+        "P03-005",
+        "P03-006"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P03-002、P03-003、P03-004、P03-005、P03-006 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "修正 Part 3：Istio 版：五大成因決策樹（2/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 3 的「Istio 版：五大成因決策樹」（2/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P03-007",
+        "P03-008",
+        "P03-009",
+        "P03-010",
+        "P03-011"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P03-007、P03-008、P03-009、P03-010、P03-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P03-009 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "修正 Part 3：Istio 版：五大成因決策樹（3/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 3 的「Istio 版：五大成因決策樹」（3/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P03-012"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P03-012 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "修正 Part 3：精準除錯：打開 Envoy 的 RBAC debug l…、K8s RBAC 版：如果你的 403 其實是 API …",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 3 的「精準除錯：打開 Envoy 的 RBAC debug l…」「K8s RBAC 版：如果你的 403 其實是 API …」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P03-013",
+        "P03-014",
+        "P03-015",
+        "P03-016"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P03-013、P03-014、P03-015、P03-016 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 3 結尾加 `### 參考來源`：列出帳本中 Part 3 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 3\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "修正 Part 4：步驟 0：DNS 要寫全名、步驟 1：兩邊各給獨立 ServiceAccount（最…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 4 的「步驟 0：DNS 要寫全名」「步驟 1：兩邊各給獨立 ServiceAccount（最…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P04-002",
+        "P04-003",
+        "P04-004",
+        "P04-006",
+        "P04-007"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P04-002、P04-003、P04-004、P04-006、P04-007 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "修正 Part 4：步驟 2：ea-epmm 側開授權",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 4 的「步驟 2：ea-epmm 側開授權」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P04-008",
+        "P04-009",
+        "P04-010",
+        "P04-011"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P04-008、P04-009、P04-010、P04-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "修正 Part 4：步驟 4：NetworkPolicy 版（底層防護）、步驟 5：驗證整條路徑",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 4 的「步驟 4：NetworkPolicy 版（底層防護）」「步驟 5：驗證整條路徑」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P04-013",
+        "P04-012",
+        "P04-014",
+        "P04-016",
+        "P04-017"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P04-013、P04-012、P04-014、P04-016、P04-017 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 4 結尾加 `### 參考來源`：列出帳本中 Part 4 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 4\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "修正 Part 5：逐跳表：哪些 policy 生效、哪些失效、核心結論：身分在 ingressgateway 斷掉",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「逐跳表：哪些 policy 生效、哪些失效」「核心結論：身分在 ingressgateway 斷掉」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-001",
+        "P05-002"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-001、P05-002 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "修正 Part 5：補救方案一：JWT（推薦，你們已經有 Keycloak）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「補救方案一：JWT（推薦，你們已經有 Keycloak）」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-003",
+        "P05-006",
+        "P05-004",
+        "P05-005"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-003、P05-006、P05-004、P05-005 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P05-004 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "修正 Part 5：補救方案二：IP 白名單（`remoteIpBlocks…、補救方案三：TLS passthrough（保留原始憑證…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「補救方案二：IP 白名單（`remoteIpBlocks…」「補救方案三：TLS passthrough（保留原始憑證…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-007",
+        "P05-008",
+        "P05-009",
+        "P05-010",
+        "P05-011"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-007、P05-008、P05-009、P05-010、P05-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "修正 Part 5：A cluster 這一側要準備什麼、B cluster 這一側的完整組合",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「A cluster 這一側要準備什麼」「B cluster 這一側的完整組合」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-201",
+        "P05-202",
+        "P05-203",
+        "P05-204"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-201、P05-202、P05-203、P05-204 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "修正 Part 5：附錄：真正的 Istio multi-cluster（何…（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「附錄：真正的 Istio multi-cluster（何…」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-205",
+        "P05-206",
+        "P05-207",
+        "P05-208",
+        "P05-209"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-205、P05-206、P05-207、P05-208、P05-209 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "修正 Part 5：附錄：真正的 Istio multi-cluster（何…（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 5 的「附錄：真正的 Istio multi-cluster（何…」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P05-210",
+        "P05-211",
+        "P05-212",
+        "P05-213"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P05-210、P05-211、P05-212、P05-213 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P05-213 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 5 結尾加 `### 參考來源`：列出帳本中 Part 5 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 5\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "修正 Part 6：6.1 Deployment（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.1 Deployment」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-001",
+        "P06-002",
+        "P06-003",
+        "P06-004",
+        "P06-005"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-001、P06-002、P06-003、P06-004、P06-005 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "修正 Part 6：6.1 Deployment（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.1 Deployment」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-006",
+        "P06-007",
+        "P06-008",
+        "P06-009",
+        "P06-010"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-006、P06-007、P06-008、P06-009、P06-010 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "修正 Part 6：6.2 Service（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.2 Service」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-011",
+        "P06-012",
+        "P06-013",
+        "P06-014",
+        "P06-015"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-011、P06-012、P06-013、P06-014、P06-015 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "修正 Part 6：6.2 Service（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.2 Service」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-016",
+        "P06-017",
+        "P06-018",
+        "P06-019"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-016、P06-017、P06-018、P06-019 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P06-018 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "修正 Part 6：6.3 ConfigMap（與 Secret）（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.3 ConfigMap（與 Secret）」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-201",
+        "P06-202",
+        "P06-203",
+        "P06-204",
+        "P06-205"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-201、P06-202、P06-203、P06-204、P06-205 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P06-203 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "修正 Part 6：6.3 ConfigMap（與 Secret）（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.3 ConfigMap（與 Secret）」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-206",
+        "P06-207"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-206、P06-207 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "修正 Part 6：6.4 CronJob（1/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.4 CronJob」（1/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-208",
+        "P06-209",
+        "P06-211",
+        "P06-212",
+        "P06-213"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-208、P06-209、P06-211、P06-212、P06-213 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "修正 Part 6：6.4 CronJob（2/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.4 CronJob」（2/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-214",
+        "P06-215",
+        "P06-216",
+        "P06-217",
+        "P06-218"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-214、P06-215、P06-216、P06-217、P06-218 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "修正 Part 6：6.4 CronJob（3/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.4 CronJob」（3/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-219"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-219 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "修正 Part 6：6.5 Gateway（Istio）（1/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.5 Gateway（Istio）」（1/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-401",
+        "P06-403",
+        "P06-402",
+        "P06-404",
+        "P06-405"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-401、P06-403、P06-402、P06-404、P06-405 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P06-403 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "修正 Part 6：6.5 Gateway（Istio）（2/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.5 Gateway（Istio）」（2/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-406",
+        "P06-407",
+        "P06-408",
+        "P06-409",
+        "P06-410"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-406、P06-407、P06-408、P06-409、P06-410 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "修正 Part 6：6.5 Gateway（Istio）（3/3）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.5 Gateway（Istio）」（3/3）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-411",
+        "P06-412"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-411、P06-412 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P06-412 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "修正 Part 6：6.6 VirtualService（Istio）（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.6 VirtualService（Istio）」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-416",
+        "P06-413",
+        "P06-415",
+        "P06-414",
+        "P06-417"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-416、P06-413、P06-415、P06-414、P06-417 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "修正 Part 6：6.6 VirtualService（Istio）（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 6 的「6.6 VirtualService（Istio）」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P06-418",
+        "P06-419",
+        "P06-420"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P06-418、P06-419、P06-420 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P06-418 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 6 結尾加 `### 參考來源`：列出帳本中 Part 6 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 6\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "修正 Part 7：7.1 為什麼 K8s 原生做不到真正的 canary、7.2 完整實作：DestinationRule sub…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 7 的「7.1 為什麼 K8s 原生做不到真正的 canary」「7.2 完整實作：DestinationRule sub…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P07-001",
+        "P07-002",
+        "P07-003",
+        "P07-004"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P07-001、P07-002、P07-003、P07-004 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "修正 Part 7：7.4 Canary 與 session 黏著的衝突（你…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 7 的「7.4 Canary 與 session 黏著的衝突（你…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P07-006",
+        "P07-007"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P07-006、P07-007 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "修正 Part 7：7.5 HorizontalPodAutoscaler",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 7 的「7.5 HorizontalPodAutoscaler」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P07-009",
+        "P07-010",
+        "P07-011",
+        "P07-012"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P07-009、P07-010、P07-011、P07-012 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P07-012 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-047",
+      "title": "修正 Part 7：7.6 什麼時候該升級到 Argo Rollouts /…（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 7 的「7.6 什麼時候該升級到 Argo Rollouts /…」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P07-014",
+        "P07-015",
+        "P07-016",
+        "P07-017",
+        "P07-018"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P07-014、P07-015、P07-016、P07-017、P07-018 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P07-014 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-048",
+      "title": "修正 Part 7：7.6 什麼時候該升級到 Argo Rollouts /…（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 7 的「7.6 什麼時候該升級到 Argo Rollouts /…」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P07-019",
+        "P07-020",
+        "P07-021",
+        "P07-022",
+        "P07-023"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P07-019、P07-020、P07-021、P07-022、P07-023 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 7 結尾加 `### 參考來源`：列出帳本中 Part 7 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 7\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-049",
+      "title": "修正 Part 8：8.1 istioctl 常用指令",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 8 的「8.1 istioctl 常用指令」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P08-001",
+        "P08-002"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P08-001、P08-002 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-050",
+      "title": "修正 Part 8：8.2 Envoy access log 判讀",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 8 的「8.2 Envoy access log 判讀」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P08-003",
+        "P08-004",
+        "P08-005",
+        "P08-006"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P08-003、P08-004、P08-005、P08-006 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-051",
+      "title": "修正 Part 8：8.3 一分鐘分流診斷",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 8 的「8.3 一分鐘分流診斷」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P08-007",
+        "P08-008",
+        "P08-009"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P08-007、P08-008、P08-009 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 8 結尾加 `### 參考來源`：列出帳本中 Part 8 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 8\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-052",
+      "title": "修正 Part 9：發現 1：Deployment 沒有 `serviceA…、發現 2：`sessionAffinity: Clien…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 9 的「發現 1：Deployment 沒有 `serviceA…」「發現 2：`sessionAffinity: Clien…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P09-002",
+        "P09-003",
+        "P09-004",
+        "P09-005",
+        "P09-006"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P09-002、P09-003、P09-004、P09-005、P09-006 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-053",
+      "title": "修正 Part 9：發現 3：VirtualService 沒有 `mesh…、發現 4：Service port 沒有命名，Istio…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 9 的「發現 3：VirtualService 沒有 `mesh…」「發現 4：Service port 沒有命名，Istio…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P09-007",
+        "P09-008",
+        "P09-009"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P09-007、P09-008、P09-009 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-054",
+      "title": "修正 Part 9：發現 5：沒有 PDB，也沒有 HPA、發現 6：缺少 `preStop` hook（滾動更新期…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 9 的「發現 5：沒有 PDB，也沒有 HPA」「發現 6：缺少 `preStop` hook（滾動更新期…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P09-011",
+        "P09-012",
+        "P09-013",
+        "P09-014",
+        "P09-015"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P09-011、P09-012、P09-013、P09-014、P09-015 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 9 結尾加 `### 參考來源`：列出帳本中 Part 9 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 9\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-055",
+      "title": "修正 Part 10：10.1 這是在解決什麼問題",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 10 的「10.1 這是在解決什麼問題」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P10-001"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P10-001 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 55,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-056",
+      "title": "修正 Part 10：10.4 雙 VIP 架構：routable 與 non…（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 10 的「10.4 雙 VIP 架構：routable 與 non…」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P10-003",
+        "P10-006",
+        "P10-004",
+        "P10-005",
+        "P10-007"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P10-003、P10-006、P10-004、P10-005、P10-007 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P10-003 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 56,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-057",
+      "title": "修正 Part 10：10.4 雙 VIP 架構：routable 與 non…（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 10 的「10.4 雙 VIP 架構：routable 與 non…」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P10-008",
+        "P10-009"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P10-008、P10-009 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 57,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-058",
+      "title": "修正 Part 10：10.5 兩個 VIP 的安全設定不一樣、10.6 踩雷",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 10 的「10.5 兩個 VIP 的安全設定不一樣」「10.6 踩雷」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P10-010",
+        "P10-012",
+        "P10-013",
+        "P10-014"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P10-010、P10-012、P10-013、P10-014 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 10 結尾加 `### 參考來源`：列出帳本中 Part 10 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 10\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 58,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-059",
+      "title": "修正 Part 11：11.2 模式 A：單一 DNS 指向 FZ1、11.3 模式 B：兩座 cluster 各自建 ing…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 11 的「11.2 模式 A：單一 DNS 指向 FZ1」「11.3 模式 B：兩座 cluster 各自建 ing…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P11-002",
+        "P11-004",
+        "P11-003"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P11-002、P11-004、P11-003 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 59,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-060",
+      "title": "修正 Part 11：11.4 模式 B 實際要準備的 manifest（哪些…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 11 的「11.4 模式 B 實際要準備的 manifest（哪些…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P11-005",
+        "P11-006",
+        "P11-007",
+        "P11-008"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P11-005、P11-006、P11-007、P11-008 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 60,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-061",
+      "title": "修正 Part 11：11.5 session 的致命細節（直接關係到你的架構…、11.10 踩雷",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 11 的「11.5 session 的致命細節（直接關係到你的架構…」「11.10 踩雷」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P11-009",
+        "P11-010",
+        "P11-011",
+        "P11-014",
+        "P11-015"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P11-009、P11-010、P11-011、P11-014、P11-015 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P11-010、P11-015 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 11 結尾加 `### 參考來源`：列出帳本中 Part 11 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 11\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 61,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-062",
+      "title": "修正 Part 12：12.2 先回答：怎麼指定哪些 request 去 v2、12.3 路線一：Job-based smoke tes…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.2 先回答：怎麼指定哪些 request 去 v2」「12.3 路線一：Job-based smoke tes…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-001",
+        "P12-002",
+        "P12-004"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-001、P12-002、P12-004 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 62,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-063",
+      "title": "修正 Part 12：12.4 路線二：Prometheus 指標分析",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.4 路線二：Prometheus 指標分析」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-005",
+        "P12-006",
+        "P12-007",
+        "P12-008"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-005、P12-006、P12-007、P12-008 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 63,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-064",
+      "title": "修正 Part 12：12.7 怎麼從人工過渡到全自動（最重要的一節）、12.8 安全網設定",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.7 怎麼從人工過渡到全自動（最重要的一節）」「12.8 安全網設定」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-009",
+        "P12-010",
+        "P12-011",
+        "P12-012",
+        "P12-013"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-009、P12-010、P12-011、P12-012、P12-013 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 64,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-065",
+      "title": "修正 Part 12：12.10 先確認環境有什麼",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.10 先確認環境有什麼」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-014"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-014 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 65,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-066",
+      "title": "修正 Part 12：12.11 完整 manifest（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.11 完整 manifest」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-015",
+        "P12-016",
+        "P12-021",
+        "P12-017",
+        "P12-018"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-015、P12-016、P12-021、P12-017、P12-018 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 66,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-067",
+      "title": "修正 Part 12：12.11 完整 manifest（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.11 完整 manifest」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-019",
+        "P12-020",
+        "P12-022",
+        "P12-023",
+        "P12-024"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-019、P12-020、P12-022、P12-023、P12-024 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 67,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-068",
+      "title": "修正 Part 12：12.12 用 metric 判斷：最小可用的例子",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 12 的「12.12 用 metric 判斷：最小可用的例子」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P12-025",
+        "P12-026"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P12-025、P12-026 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 12 結尾加 `### 參考來源`：列出帳本中 Part 12 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 12\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 68,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-069",
+      "title": "修正 Part 13：13.3 誰需要 routable、誰不需要、13.4 完整寫法",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 13 的「13.3 誰需要 routable、誰不需要」「13.4 完整寫法」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P13-002",
+        "P13-003",
+        "P13-004",
+        "P13-005"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P13-002、P13-003、P13-004、P13-005 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 69,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-070",
+      "title": "修正 Part 13：13.7 踩雷",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 13 的「13.7 踩雷」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P13-006",
+        "P13-007",
+        "P13-009"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P13-006、P13-007、P13-009 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 13 結尾加 `### 參考來源`：列出帳本中 Part 13 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 13\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 70,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-071",
+      "title": "修正 Part 14：14.2 解法：用 cookie 指定，而不是用權重、14.3 命名採「固定 stable / canary」…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 14 的「14.2 解法：用 cookie 指定，而不是用權重」「14.3 命名採「固定 stable / canary」…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P14-001",
+        "P14-002",
+        "P14-003",
+        "P14-004",
+        "P14-005"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P14-001、P14-002、P14-003、P14-004、P14-005 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 71,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-072",
+      "title": "Part 14 14.4 完整 manifest 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「14.4 完整 manifest」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P14-018",
+        "P14-019",
+        "P14-021",
+        "P14-023",
+        "P14-020",
+        "P14-024",
+        "P14-022",
+        "P14-025",
+        "P14-026",
+        "P14-028",
+        "P14-027",
+        "P14-029"
+      ],
+      "acceptanceCriteria": [
+        "把「14.4 完整 manifest」小節的內容換成兩三句摘要＋指標，指向帳本 P14-018 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P14-018 的「建議改法」",
+        "換掉之後，帳本 P14-019、P14-021、P14-023、P14-020、P14-024、P14-022、P14-025、P14-026、P14-028、P14-027、P14-029 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 72,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-073",
+      "title": "修正 Part 14：14.5 三個必須注意的前提",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 14 的「14.5 三個必須注意的前提」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P14-006",
+        "P14-007"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P14-006、P14-007 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 73,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-074",
+      "title": "修正 Part 14：14.6 為什麼 VirtualService 一定要加…",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 14 的「14.6 為什麼 VirtualService 一定要加…」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P14-008",
+        "P14-009",
+        "P14-010",
+        "P14-011"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P14-008、P14-009、P14-010、P14-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P14-010 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 74,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-075",
+      "title": "修正 Part 14：14.7 讓 pilot 使用者能「自證」在新版上、14.9 兩種實作方式",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 14 的「14.7 讓 pilot 使用者能「自證」在新版上」「14.9 兩種實作方式」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P14-012",
+        "P14-013",
+        "P14-014",
+        "P14-015",
+        "P14-016"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P14-012、P14-013、P14-014、P14-015、P14-016 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 75,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-076",
+      "title": "Part 14 14.10 完整流程速查 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「14.10 完整流程速查」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P14-030",
+        "P14-031",
+        "P14-032",
+        "P14-033",
+        "P14-034",
+        "P14-035"
+      ],
+      "acceptanceCriteria": [
+        "把「14.10 完整流程速查」小節的內容換成兩三句摘要＋指標，指向帳本 P14-030 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P14-030 的「建議改法」",
+        "換掉之後，帳本 P14-031、P14-032、P14-033、P14-034、P14-035 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 76,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-077",
+      "title": "修正 Part 14：14.11 這套流程未來怎麼演進",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 14 的「14.11 這套流程未來怎麼演進」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P14-017"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P14-017 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 14 結尾加 `### 參考來源`：列出帳本中 Part 14 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 14\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 77,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-078",
+      "title": "修正 Part 15：15.1 先講一個現實限制、15.2 兩種可行的「同時保有兩套」",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.1 先講一個現實限制」「15.2 兩種可行的「同時保有兩套」」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-001",
+        "P15-002",
+        "P15-003",
+        "P15-004"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-001、P15-002、P15-003、P15-004 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 78,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-079",
+      "title": "修正 Part 15：15.3 YAML 逐項差異對照（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.3 YAML 逐項差異對照」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-005",
+        "P15-006",
+        "P15-007",
+        "P15-008",
+        "P15-009"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-005、P15-006、P15-007、P15-008、P15-009 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 79,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-080",
+      "title": "修正 Part 15：15.3 YAML 逐項差異對照（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.3 YAML 逐項差異對照」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-010",
+        "P15-011"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-010、P15-011 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 80,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-081",
+      "title": "Part 15 15.4 Track A 的 SOP（人工 pilot … 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.4 Track A 的 SOP（人工 pilot …」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-012",
+        "P15-013",
+        "P15-014",
+        "P15-015",
+        "P15-016",
+        "P15-017",
+        "P15-018",
+        "P15-019",
+        "P15-020"
+      ],
+      "acceptanceCriteria": [
+        "把「15.4 Track A 的 SOP（人工 pilot …」小節的內容換成兩三句摘要＋指標，指向帳本 P15-012 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-012 的「建議改法」",
+        "換掉之後，帳本 P15-013、P15-014、P15-015、P15-016、P15-017、P15-018、P15-019、P15-020 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 81,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-082",
+      "title": "Part 15 15.5 Track B 的 SOP（Argo Roll… 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.5 Track B 的 SOP（Argo Roll…」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-021"
+      ],
+      "acceptanceCriteria": [
+        "把「15.5 Track B 的 SOP（Argo Roll…」小節的內容換成兩三句摘要＋指標，指向帳本 P15-021 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-021 的「建議改法」",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 82,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-083",
+      "title": "修正 Part 15：15.6 什麼情況用哪一套",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.6 什麼情況用哪一套」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-022"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-022 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 83,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-084",
+      "title": "Part 15 15.7 兩種 track 之間的切換 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.7 兩種 track 之間的切換」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-024",
+        "P15-025",
+        "P15-026",
+        "P15-027",
+        "P15-028"
+      ],
+      "acceptanceCriteria": [
+        "把「15.7 兩種 track 之間的切換」小節的內容換成兩三句摘要＋指標，指向帳本 P15-024 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-024 的「建議改法」",
+        "換掉之後，帳本 P15-025、P15-026、P15-027、P15-028 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 84,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-085",
+      "title": "修正 Part 15：15.8 CD 只能 apply 時的限制對照",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.8 CD 只能 apply 時的限制對照」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-029",
+        "P15-030",
+        "P15-031",
+        "P15-032"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-029、P15-030、P15-031、P15-032 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P15-031 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 85,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-086",
+      "title": "修正 Part 15：15.9 檔案分層：base 與 release",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.9 檔案分層：base 與 release」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-033",
+        "P15-034",
+        "P15-035",
+        "P15-036"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-033、P15-034、P15-035、P15-036 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P15-036 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 86,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-087",
+      "title": "Part 15 15.10 Track A 的 apply-only S… 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.10 Track A 的 apply-only S…」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-037",
+        "P15-038",
+        "P15-039",
+        "P15-040",
+        "P15-041",
+        "P15-042",
+        "P15-043"
+      ],
+      "acceptanceCriteria": [
+        "把「15.10 Track A 的 apply-only S…」小節的內容換成兩三句摘要＋指標，指向帳本 P15-037 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-037 的「建議改法」",
+        "換掉之後，帳本 P15-038、P15-039、P15-040、P15-041、P15-042、P15-043 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 87,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-088",
+      "title": "修正 Part 15：15.11 回滾完全靠 Git",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 15 的「15.11 回滾完全靠 Git」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P15-044",
+        "P15-045",
+        "P15-046",
+        "P15-047"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P15-044、P15-045、P15-046、P15-047 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 88,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-089",
+      "title": "Part 15 15.12 Track B 在 apply-only 下… 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.12 Track B 在 apply-only 下…」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-048"
+      ],
+      "acceptanceCriteria": [
+        "把「15.12 Track B 在 apply-only 下…」小節的內容換成兩三句摘要＋指標，指向帳本 P15-048 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-048 的「建議改法」",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 89,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-090",
+      "title": "Part 15 15.13 Azure Pipeline 的設定建議 改成指標",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要「15.13 Azure Pipeline 的設定建議」不再保留一份會跟 CANARY-COMPLETE.md 分歧、而且含 outage 步驟的完整副本，改成摘要＋指標，這樣我照著做的永遠是唯一的真實來源。",
+      "ledgerIds": [
+        "P15-049",
+        "P15-050",
+        "P15-051"
+      ],
+      "acceptanceCriteria": [
+        "把「15.13 Azure Pipeline 的設定建議」小節的內容換成兩三句摘要＋指標，指向帳本 P15-049 列出的 `canary-manual/CANARY-COMPLETE.md` 章節；小節標題保留，摘要內容照 P15-049 的「建議改法」",
+        "換掉之後，帳本 P15-050、P15-051 指出的錯誤說法都不再出現在 guide（這些列落在被取代的小節裡，隨取代一起解決；逐列確認，不要只看整段刪掉）",
+        "摘要裡不得出現 CANARY-COMPLETE.md 禁止的操作：`replicas: 0`／`kubectl scale` 關 canary、`kubectl rollout undo`、版本化＋`immutable: true` 的 ConfigMap、`SPRING_CONFIG_ADDITIONAL_LOCATION`、`canary.sh`",
+        "小節裡被刪掉的 yaml 區塊若前一行有 `<!-- validate:skip-yaml … -->` 標記，標記一起刪掉",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 15 結尾加 `### 參考來源`：列出帳本中 Part 15 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 15\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 90,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-091",
+      "title": "修正 Part 16：16.2 資料路徑：封包真正經過什麼、16.4 FZ1 缺什麼 → 什麼症狀、16.5 驗證：確認 request 真的落在哪一邊",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 16 的「16.2 資料路徑：封包真正經過什麼」「16.4 FZ1 缺什麼 → 什麼症狀」「16.5 驗證：確認 request 真的落在哪一邊」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P16-002",
+        "P16-003",
+        "P16-004",
+        "P16-006",
+        "P16-008"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P16-002、P16-003、P16-004、P16-006、P16-008 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 91,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-092",
+      "title": "修正 Part 16：16.6 用 service mesh 把 FZ1 收到…（1/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 16 的「16.6 用 service mesh 把 FZ1 收到…」（1/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P16-009",
+        "P16-010",
+        "P16-011",
+        "P16-012",
+        "P16-013"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P16-009、P16-010、P16-011、P16-012、P16-013 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "判定為「無法驗證」的 P16-013 只改成帳本建議的保守寫法或刪除，不新增帳本沒有的來源或數字",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 92,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-093",
+      "title": "修正 Part 16：16.6 用 service mesh 把 FZ1 收到…（2/2）",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 16 的「16.6 用 service mesh 把 FZ1 收到…」（2/2）裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P16-014"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P16-014 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 93,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-094",
+      "title": "修正 Part 16：16.8 踩雷",
+      "description": "身為從這份 guide 學 K8s／Istio 的讀者，我要 Part 16 的「16.8 踩雷」裡經官方文件查證為錯誤、過時或不精確的說法被修正，這樣我學到的是對的。",
+      "ledgerIds": [
+        "P16-016"
+      ],
+      "acceptanceCriteria": [
+        "帳本 P16-016 每一列都依「建議改法」修正：guide 不再包含該列「原文摘錄」的錯誤說法，改後的說法與「來源引文」一致（行號會漂移，以原文摘錄定位）",
+        "改到的 yaml 區塊仍可解析（validate.sh 檢查 [10]），而且保留原本「解釋為什麼」的註解密度",
+        "沒有改動上列帳本 ID 以外的說法；若為了同一小節前後一致而連動修改，在 progress.txt 寫明改了哪句、為什麼",
+        "Part 16 結尾加 `### 參考來源`：列出帳本中 Part 16 各列（含先前故事已修的列）用到的官方 URL，去重；並把 `\"Part 16\"` 加進 `scripts/validate.sh` 的 `VERIFIED_PARTS`（檢查 [11]）",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 94,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-095",
+      "title": "環境特定說法併入「需向他人確認」清單",
+      "description": "身為讀者，我要所有「只在我們環境才成立、要問人才知道」的說法都集中在文末清單，並在原處標明，這樣我分得清哪些是通則、哪些要去跟網路組／平台組／CD 團隊確認。",
+      "ledgerIds": [
+        "P01-001",
+        "P01-003",
+        "P01-004",
+        "P01-012",
+        "P02-009",
+        "P04-001",
+        "P04-005",
+        "P04-015",
+        "P06-210",
+        "P07-005",
+        "P07-008",
+        "P07-013",
+        "P09-001",
+        "P09-010",
+        "P10-002",
+        "P10-011",
+        "P11-001",
+        "P11-012",
+        "P11-013",
+        "P12-003",
+        "P13-001",
+        "P13-008",
+        "P13-010",
+        "P15-023",
+        "P16-001",
+        "P16-005",
+        "P16-007",
+        "P16-015",
+        "Q-001",
+        "Q-002"
+      ],
+      "acceptanceCriteria": [
+        "guide 文末「文件中標示為『需向他人確認』的項目」表格，對上列每一個環境特定 ID 都有對應的一列（同一件事可合併成一列，在「在哪一節」欄列出全部出處）；已經在表裡的項目不重複新增",
+        "Q-001（FZ2 ingressgateway 憑證由哪個 CA 簽發）與 Q-002（環境有沒有開 access log）照帳本的「項目／問誰／在哪一節」加進表格",
+        "帳本「建議改法」要求在原處加註的列（例如「加註依你的 kubeconfig 調整」「加上『若 controller 跑在 UTC』的前提」），在 guide 原處加上簡短的前提說明或「見文末需向他人確認」",
+        "不替環境特定說法編造答案或預設值",
+        "`bash scripts/validate.sh` exits 0",
+        "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
+      ],
+      "priority": 95,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-096",
+      "title": "retro 並更新 CLAUDE.md",
+      "description": "身為下一個在這個 repo 工作的人（或代理），我要這次 loop 學到的導覽與陷阱寫進 CLAUDE.md，而且 CLAUDE.md 裡已知不正確的說法被修正，這樣下次不用重新踩一次。",
+      "ledgerIds": [
+        "X-002"
+      ],
+      "acceptanceCriteria": [
+        "執行 `retro` skill，完整的回顧候選寫進 `tasks/retro-k8s-guide-verification.md`",
+        "只把「可重複使用」的導覽與陷阱寫進 CLAUDE.md（照 CLAUDE.md 現有風格：講為什麼、漏了會怎樣），不寫只跟這次 loop 有關的流水帳",
+        "修正帳本 X-002：CLAUDE.md「兩者同時存在時兩個 controller 會搶 pod」改成正確原因 —— Argo 官方 \"The Rollout won't try to manage existing Deployment Pods.\"；兩軌互斥的規則不變，真正原因是共用 `app` label（會被對方的 Service 選進 endpoint）與同一條 VirtualService",
+        "CLAUDE.md 有指向帳本與這份 PRD 的導覽，並說明 `VERIFIED_PARTS` 規則（之後任何改 guide 某個 Part 的人都要維持它的 `### 參考來源`）",
+        "CLAUDE.md 的改動是獨立的 commit（`docs: US-096 - retro and CLAUDE.md update`），再跑一次 code-review",
+        "`bash scripts/validate.sh` exits 0"
+      ],
+      "priority": 96,
       "passes": false,
       "notes": ""
     }
