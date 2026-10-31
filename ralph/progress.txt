@@ -265,3 +265,9 @@ Started: (not yet run)
 - Review rounds: R1 Standards 2 hard（⑤ 格子與說明重複 UF；④a「見表下說明」指向沒有 SNI 內容）→ 精簡格子、把 SNI 與 listener 提示搬進說明；Spec 無阻擋發現（「預設不開」「通常是 NC」「SNI 握手失敗」為帳本建議改法的推論，來源頁未逐字支持）。R2 乾淨。
 - Learnings: kubernetes guide 為 CRLF，用 node 腳本先 split("\r\n") 改完再還原；Edit 工具/ sed 含換行易壞。
 ---
+## 2026-11-01 - US-006
+- Part 1 關鍵觀念一 fixed per P01-008..P01-011: kube-proxy iptables(default)/nftables + IPVS deprecation timeline (KEP-5495); sessionAffinity ClientIP claim kept with "derived from mechanism" caveat (P01-009, no new sources); consistentHash is soft affinity, useSourceIp/gateway caveat; L4/L7 decided by appProtocol / port-name prefix, auto-detect HTTP/HTTP2 before falling back to TCP.
+- Files: k8s-ecosystem-guide.md (3 lines). No linked edits outside these rows.
+- Review round 1: Standards no hard violations, 3 prose nits fixed (軟性 unquoted, 才 ambiguity, IPVS v1.40/v1.43 phrased as KEP plans); Spec clean, all quotes found on pages; nit "partial reassign" applied. Round 2: clean.
+- Learnings: KEP-5495 milestones are plans, word them as such. Observation (not fixed, other ledger rows): guide ~2233 and ~3668 also cover port naming/auto-detect.
+---
