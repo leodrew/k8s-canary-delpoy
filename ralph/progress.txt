@@ -271,3 +271,11 @@ Started: (not yet run)
 - Review round 1: Standards no hard violations, 3 prose nits fixed (軟性 unquoted, 才 ambiguity, IPVS v1.40/v1.43 phrased as KEP plans); Spec clean, all quotes found on pages; nit "partial reassign" applied. Round 2: clean.
 - Learnings: KEP-5495 milestones are plans, word them as such. Observation (not fixed, other ledger rows): guide ~2233 and ~3668 also cover port naming/auto-detect.
 ---
+## 2026-11-01 - US-007
+- 修正 Part 1「關鍵觀念二」P01-013～016：表格欄標題改為「ingressgateway 看到的 source IP」、Cluster 列改為「通常完全遺失，除非前面 L7 proxy 先寫 XFF」（細節放表下說明）；numTrustedProxies 可設全域 MeshConfig 或 gateway Pod annotation、改完要重啟 gateway Pod；yaml 註解改為 IstioOperator spec.meshConfig／ConfigMap key 為 mesh／只對 gateway 生效；N 的定義改為以 gateway 收到的 XFF 從右數第 N 個（app 端看到 N+1）、寫入 X-Envoy-External-Address、項數不足退回直連來源 IP。
+- 連動修改（帳本未列）：表中第一列「ingressgateway 的 Pod IP」改為「VIP／F5 的 SNAT 位址」，因為欄標題改成 ingressgateway 看到的 IP 後原值不成立（P01-012 為環境特定，此改動無官方來源，僅為與新欄標題一致）。
+- Part 1 結尾加 `### 參考來源`（10 個官方 URL，去重）；VERIFIED_PARTS 加入 "Part 1"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review 1: Standards 5 項輕微（註解與正文重複 annotation 說法、表格格子與表下說明重複、欄位級說明掛在單列下、「永遠」過度絕對）→ 全部修正；Spec 無阻擋性發現（P01-015 引文被截斷，用 offset 後確認前半）。未跑第 2 輪（修改僅為措辭精簡）。
+- Learnings: 無新增通則。
+---
