@@ -303,3 +303,10 @@ Started: (not yet run)
 - Review round 1: Standards 0 hard; Spec: all quotes verified on all 7 URLs; 1 finding (service-count inference stronger than source) -> softened to "可能越多". Not changed (out of ledger scope): line ~721 effect "減少 config push 風暴", line ~986 "config push 太慢", line ~985 table "兩層一起才擋得住" (REGISTRY_ONLY) — noted for a later row / follow-up.
 - Learnings: none new.
 ---
+## 2026-11-01 - US-012
+- 修正 Part 2 §2.4（1/2）：P02-206（攻擊者繞過的是自己的 sidecar，缺口在 UDP/ICMP、port 22、sidecar 自己的 port、excludeInboundPorts）、P02-207（L3/L4、節點流量永遠放行）、P02-208（label 1.21 beta／1.22 GA）、P02-209（gateway 可能不在 istio-system 的註解）、P02-210（刪 egress 15017，註解說明方向與 istio-system default-deny 時要放行）。
+- Files changed: k8s-ecosystem-guide.md
+- Review 1 輪：Standards 無硬性發現；Spec 五列引文都在官方頁找到、wording 一致，無發現。
+- 觀察（不改）：Part 4 約 1331／1369 仍有舊說法，屬 P04-013，後續故事處理；P02-206 第一句引文省略了開頭 "Instead, "。
+- Learnings: 無新增通則。
+---
