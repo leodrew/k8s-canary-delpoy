@@ -1063,9 +1063,11 @@ spec:
 收到 403 + "RBAC: access denied"
         |
         ├─ [1] 先確認是哪個 Envoy 擋的：ingressgateway 還是目標 sidecar？
-        |      curl -v 看 response header 有沒有 x-envoy-upstream-service-time
-        |      有 → 請求已經到過目標 → 目標 sidecar 擋的
-        |      沒有 → ingressgateway 就擋掉了
+        |      最可靠：看各個 proxy 的 access log，response code details 出現
+        |      rbac_access_denied_matched_policy[...] 的那個 Envoy 就是擋下的那個
+        |      （輔助線索：response header 的 x-envoy-upstream-service-time 只代表
+        |      回應那一跳的 Envoy 有把請求轉給上游；服務直接打服務、沒經 gateway 時，
+        |      「沒有這個 header → gateway 擋的」不成立，不能單靠它下結論）
         |
         ├─ [2] 這個 workload 到底被哪些 policy 選中？
         |      istioctl x authz check <pod> -n <ns>
@@ -1082,7 +1084,9 @@ spec:
 
 **這是最常見的。** 記住 Part 2.2 的規則：**只要有任何一條 ALLOW policy 的 `selector` 命中這個 workload，所有不符合規則的請求就一律 403。**
 
-典型情境：你替 `epmm-api` 寫了一條「允許 pmc-epmmformquerygui」的 ALLOW policy，結果 **Prometheus 抓 metrics、health check、其他服務全部被擋**，因為它們沒被列進去。
+典型情境：你替 `epmm-api` 寫了一條「允許 pmc-epmmformquerygui」的 ALLOW policy，結果 **其他沒被列進名單的服務全部被擋**，因為它們沒被列進去。
+
+> 注意：預設情況下 Prometheus 與 kubelet probe 通常**不會**被擋。Istio 預設會把 kubelet 的 health check probe 改寫到 sidecar 的 15020 port（probe rewrite，官方文件：「This option is enabled by default.」），Prometheus 也是從 `:15020/stats/prometheus` 抓合併後的 metrics（metrics merging），這兩條路徑都不經過 inbound RBAC filter。只有在你關掉 probe rewrite 或 metrics merge、讓 kubelet 或 Prometheus 直接打 app port 時，它們才會被這條 ALLOW policy 擋下。
 
 ```bash
 # 看這個 pod 被哪些 policy 管
@@ -1130,11 +1134,15 @@ kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui \
   -o jsonpath='{.items[0].spec.serviceAccountName}{"\n"}'
 
 # 方法 2：直接看 sidecar 拿到的憑證裡的身分（最權威）
+# JSON 裡的憑證是 base64 編碼的 inlineBytes，直接 grep 找不到 spiffe://；
+# 要先解 base64、再用 openssl 展開，看 Subject Alternative Name（官方 Istio 排錯文件的寫法）
 istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json \
-  | grep -o 'spiffe://[^"]*'
+  | jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' \
+  | base64 -d | openssl x509 -noout -text | grep -A1 'Subject Alternative Name'
+# 應該看到 URI:spiffe://cluster.local/ns/ea-pmc/sa/<serviceAccount>
 ```
 
-**正確做法是給每個 Deployment 獨立 SA**（Part 4 步驟 1），而不是把 policy 改成 `sa/default` —— 因為 `sa/default` 等於「這個 namespace 的任何 Pod」，授權粒度等於沒有。
+**正確做法是給每個 Deployment 獨立 SA**（Part 4 步驟 1），而不是把 policy 改成 `sa/default` —— 因為 `sa/default` 等於「這個 namespace 裡所有沒指定 `serviceAccountName` 的 Pod」（有指定其他 SA 的不算），授權粒度等於沒有。
 
 #### 成因 3：mTLS 沒開，principal 是空的
 
@@ -1147,9 +1155,11 @@ istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json \
 kubectl get peerauthentication -A
 
 # 檢查 2：來源 Pod 有沒有 sidecar？（沒 sidecar = 沒身分）
+# Istio 1.27 起（符合條件的 Pod）istio-proxy 是 native sidecar，放在 initContainers；
+# 舊版或不符合條件的 Pod 則在 containers。只查 containers 會誤判成沒注入，所以兩處都查
 kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui \
-  -o jsonpath='{.items[0].spec.containers[*].name}{"\n"}'
-# 應該要看到 istio-proxy
+  -o jsonpath='{.items[0].spec.initContainers[*].name} {.items[0].spec.containers[*].name}{"\n"}'
+# 兩處合起來應該要看到 istio-proxy
 
 # 檢查 3：實際流量是不是 mTLS
 kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
