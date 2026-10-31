@@ -687,17 +687,20 @@ spec:
 
 | `when` 常用 key | 說明 |
 |---|---|
-| `request.headers[<name>]` | HTTP header（只支援 HTTP）；name 放在 `[]` 內、不加引號，不分大小寫（官方："Istio authorization policy will compare the header name with a case-insensitive approach."） |
+| `request.headers[<name>]` | HTTP header，不分大小寫（見表下說明） |
 | `request.auth.claims[<claim>]` | JWT claim |
 | `request.auth.principal` | JWT 的 `iss/sub` |
 | `source.namespace` / `source.principal` | 來源身分 |
-| `destination.port` | workload（容器）上的 port，**不是** Service port；`values` 是字串陣列，寫成 `values: ["8080"]` |
+| `destination.port` | workload（容器）port，不是 Service port（見表下說明） |
 | `connection.sni` | TLS SNI |
+
+- `request.headers[<name>]`：只支援 HTTP；name 放在 `[]` 內、不加引號，不分大小寫。官方原文：「Istio authorization policy will compare the header name with a case-insensitive approach.」
+- `destination.port`：是 workload（容器）上的 port，**不是** Service port；`when.values` 是字串陣列，寫成 `values: ["8080"]`。
 
 #### 踩雷
 
 - **`hosts` 是對 Host header 做精確比對**：client 用短名（`epmm-api-svc`）、或 Host 帶 port（`...:8080`）都比對不到，ALLOW 不命中就 403。官方建議 `hosts`／`notHosts` 只用在 gateway 擋外部流量，sidecar 上不要寫；真要用就同時寫 `host` 與 `host:*` 兩種。
-- **`paths` 的萬用字元只支援前綴/後綴**：`/api/*`、`*/health` 可以；單一 `*` 確實只能放在開頭或結尾，`/api/*/detail` 這種中間的 `*` 不支援。但 Istio 1.22 起 `paths` 支援 URI template：`/api/{*}/detail` 比對中間的單一段，`{**}` 比對零到多段且必須放在最後；`/foo/{*}.txt` 這種同一段混字元的寫法不合法。
+- **`paths` 的單一 `*` 只能放開頭或結尾，中間要改用 URI template**：`/api/*`、`*/health` 可以，`/api/*/detail` 這種中間的 `*` 不支援。但 Istio 1.22 起 `paths` 支援 URI template：`/api/{*}/detail` 比對中間的單一段，`{**}` 比對零到多段且必須放在最後；`/foo/{*}.txt` 這種同一段混字元的寫法不合法。
 - **`paths` 比對的是正規化之後的路徑**：預設的 `BASE` 正規化已在授權前依 RFC 3986 處理 `/./` 與 `/../`（`/api/v1/../admin` 預設就被當成 `/api/admin`）。預設**沒有**做的是合併 `//`（`MERGE_SLASHES`）與解碼 `%2F`／`%5C`（`DECODE_AND_MERGE_SLASHES`）；後端若把 `//` 或 `%2F` 視為等價，就把 `meshConfig.pathNormalization.normalization` 調成 `MERGE_SLASHES` 或 `DECODE_AND_MERGE_SLASHES`。
 - **`ports` 一定要用字串**。
 - **policy 放錯 namespace**：AuthorizationPolicy 要放在**被保護方**的 namespace，不是呼叫方。放在 `istio-system`（root ns）= 全 mesh 生效。
