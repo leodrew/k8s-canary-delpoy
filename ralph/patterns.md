@@ -192,5 +192,3 @@
 
 - **P03-008**：注入規則已經在 Part 0 寫齊，指回 Part 0 即可，不要再重述一次（兩份會漂移）。
 - **P04-008**：指回 Part 0「表中三列的補充」裡的 PeerAuthentication 說明，不要再列一次依賴 mTLS 的欄位清單。
-- **P02-215**：Part 2 §2.5 圖（約 914 行）① 仍寫「timeout / connection refused」，要與 Part 0 ① 的保守寫法
-  （通常是 timeout、RST 與否看 CNI）一致。

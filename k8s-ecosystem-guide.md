@@ -983,13 +983,15 @@ spec:
 | 你的需求 | 用這個 | 為什麼不用別的 |
 |---|---|---|
 | 只讓 A 服務呼叫 B 服務 | **AuthorizationPolicy** `principals` | NetworkPolicy 只認 label 和 IP，不認密碼學身分（`principals` 認的是 mTLS 憑證裡的 ServiceAccount 身分），也看不到 L7 |
-| 只讓某個 IP 網段從外部進來 | **AuthorizationPolicy** `remoteIpBlocks`（放 ingressgateway 上） | `ipBlocks` 會比到 LB 的 IP；`remoteIpBlocks` 要先設 `gatewayTopology.numTrustedProxies`（或 gateway annotation），前面的 LB 要追加 `X-Forwarded-For`；純 TCP LB 改用 PROXY protocol，否則拿不到真正的 client IP |
+| 只讓某個 IP 網段從外部進來 | **AuthorizationPolicy** `remoteIpBlocks`（放 ingressgateway 上） | `ipBlocks` 會比到 LB 的 IP；`remoteIpBlocks` 有前提（見表下說明） |
 | 只讓 B 的 `GET /api/*` 被呼叫，`DELETE` 不行 | **AuthorizationPolicy** `to.operation` | 只有它懂 L7 |
 | 服務間流量要全加密 | **PeerAuthentication** `STRICT` | 其他三個都不做加密 |
 | 防止被入侵的 Pod 橫向掃描整個網段 | **NetworkPolicy** default-deny | Istio policy 管不到 UDP／ICMP、被排除在攔截之外的 port，也管不到被入侵 Pod 自己的出向流量 |
 | 限制某個服務只能連特定外部網址 | **NetworkPolicy egress** + **Sidecar** `REGISTRY_ONLY` | 兩層一起才擋得住 |
 | sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它唯一能解的問題 |
 | 只讓帶特定 JWT group 的使用者存取 | **AuthorizationPolicy** + **RequestAuthentication** | 前三個都不看 JWT |
+
+**`remoteIpBlocks` 的前提：** 要先設 `gatewayTopology.numTrustedProxies`（或在 gateway 加 annotation），前面的 LB 要追加 `X-Forwarded-For`；純 TCP LB 改用 PROXY protocol。沒設的話 `remote.ip` 拿不到真正的 client IP（細節見 Part 1 關鍵觀念二）。
 
 #### 一句話總結
 
