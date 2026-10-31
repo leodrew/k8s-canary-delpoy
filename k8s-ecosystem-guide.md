@@ -360,18 +360,18 @@ selector:
 |---|---|---|---|
 | ② VIP | 網路組 / F5 設定 | 完全連不上、TLS 憑證錯誤 | `curl -v` 看憑證 CN、`dig` 看 DNS |
 | ③ Service | `istio-ingressgateway` Service 的 port 定義 | `Connection refused` | `kubectl get svc -n istio-system istio-ingressgateway` |
-| ④a **Gateway** | `servers.port` + `servers.hosts` + `tls` | **HTTP host 不符 → 404＋`NR`**（跟 VS 沒匹配長得一樣）；HTTPS SNI 不符 → TLS 握手就失敗、不會有 404（見表下說明） | `istioctl proxy-config listener <gw-pod> -n istio-system` |
+| ④a **Gateway** | `servers.port` + `servers.hosts` + `tls` | **host 對不上 → 404＋`NR`**，跟 VS 沒匹配長得一樣（見表下說明） | `istioctl proxy-config listener <gw-pod> -n istio-system` |
 | ④b **VirtualService** | `hosts` + `gateways` + `match` | **404＋`response_flags: NR`** ← 沒有 route 匹配（前提：access log 已開啟，見表下說明） | `istioctl proxy-config route <gw-pod> -n istio-system` |
-| ⑤ DestinationRule | `subsets.labels` | **503 `UH`** ← subset labels 選不到任何 Pod；VS 引用了 DR 沒定義的 subset → 503，通常是 `NC`（`UF` 是連線失敗，見表下說明） | `istioctl proxy-config endpoint <gw-pod> -n istio-system` |
+| ⑤ DestinationRule | `subsets.labels` | **503 `UH`** ← subset 選不到任何 Pod（其他 503 旗標見表下說明） | `istioctl proxy-config endpoint <gw-pod> -n istio-system` |
 | ⑥ Sidecar 授權 | AuthorizationPolicy | **403 `RBAC: access denied`** | Part 3 |
 | ⑥ Sidecar mTLS | PeerAuthentication | **連線 reset、`response_flags: UF`** | `istioctl proxy-config secret <pod>` |
 | ⑦ App | 你的 Spring Security | 你自己的登入頁 / access-denied 頁 | `kubectl logs` |
 
 表中 ④a／④b／⑤ 的補充：
 
-* **④a 與 ④b 不能靠「有沒有 access log」分辨。** Host 對不上 Gateway 時，回 404 的是 Envoy 自己（route 表裡沒有符合的 virtual host），flag 一樣是 `NR`；兩者要用 `istioctl proxy-config route <gw-pod> -n istio-system` 看 virtual host 清單才分得出來。完全沒有 log 時，先查 access log 有沒有開、該 port 有沒有 listener。
-* **access log 預設不開**（只有 `demo` profile 會開）。要先用 Telemetry API 或 `meshConfig.accessLogFile=/dev/stdout` 打開，否則 ④b 的 `NR` 根本看不到。
-* **⑤ 的 `UF` 不是「subset 選不到 Pod」。** Envoy 的定義是 UH：「No healthy upstream hosts in upstream cluster」＋503；UF：「Upstream connection failure」＋503（常見於 mTLS 衝突）；NC：「Upstream cluster not found」。
+* **④a 與 ④b 不能靠「有沒有 access log」分辨。** HTTP host 對不上 Gateway 時，回 404 的是 Envoy 自己（route 表裡沒有符合的 virtual host），flag 一樣是 `NR`；兩者要用 `istioctl proxy-config route <gw-pod> -n istio-system` 看 virtual host 清單才分得出來。HTTPS 的 SNI 對不上則是 TLS 握手就失敗，不會有 404。
+* **access log 預設不開**（官方只說 `demo` profile 會開）。要先用 Telemetry API 或 `meshConfig.accessLogFile=/dev/stdout` 打開，否則 ④b 的 `NR` 根本看不到；完全沒有 log 時，先查這一項、再查該 port 有沒有 listener。
+* **⑤ 的 503 要拆開看，`UF` 不是「subset 選不到 Pod」。** Envoy 的定義：UH 是 「No healthy upstream hosts in upstream cluster」（加上 503），subset labels 選不到任何 Pod 時看到的是它；NC 是 「Upstream cluster not found」，VS 引用了 DR 沒定義的 subset 時通常是這個；UF 是 「Upstream connection failure」（加上 503），是連線失敗，常見於 mTLS 衝突。
 
 ### 關鍵觀念一：mesh 裡的 Service「幾乎只剩 DNS」
 
