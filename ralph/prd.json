@@ -42,7 +42,7 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": ""
+      "notes": "BASE 8642a38。第 2 輪 review 仍有發現，已在 f455ca8 修正但未經 review（依兩輪上限，passes 維持 false）：(1) P00-001 括號改回帳本措辭「身分、mTLS、L7 授權」並附「以及下面的可觀測性」對應清單；(2) ambient 說明裡引號引用「資料面＝所有 Envoy」在 guide 中不存在，改成實際字樣「資料面所有 Envoy」；(3) P00-011 括號重複主句的 sidecar.istio.io/inject:\"true\"，刪掉重複半句。待人工確認：disabled／\"false\" 任一邊否決注入那句是為了與 P03-008 一致而連動加的（來源同一頁 sidecar-injection rule 1）；Spec 另提 nit：Pod 層級的 istio.io/rev label 也會觸發注入，帳本沒寫、guide 也沒寫。下一輪重跑 review（BASE 8642a38）通過即可設 passes: true。"
     },
     {
       "id": "US-003",

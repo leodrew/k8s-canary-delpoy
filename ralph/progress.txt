@@ -279,3 +279,35 @@ Started: (not yet run)
     那一段即可；不要每次從故事起點全量重審，否則 review 永遠找得到新的邊界情況、故事收斂不了。
   - 第 2 輪只剩「大聲 FAIL」的判斷題時就收，不要在上限之後再改 —— 改了就又是一段沒 review 的程式。
 ---
+
+## 2026-10-31 - US-002（passes 仍為 false：第 2 輪 review 有發現，已修但未經第 3 輪 review，見 prd.json notes）
+- 實作（BASE 8642a38；commits 338d734 feat、2b42251 fix、f455ca8 fix）：k8s-ecosystem-guide.md Part 0
+  - P00-001：「K8s 原生只有 Service → Pod」改成「只用核心 Service 時」；補 Ingress／Gateway API add-on 支援權重分流，
+    身分、mTLS、L7 授權仍靠 mesh；replica 硬湊改成「官方 canary 範例 stable 3、canary 1 湊出 3:1」。
+  - P00-002：加 blockquote「本文只講 sidecar 模式」＋ ambient（per-node ztunnel，Rust；選用 waypoint，Envoy；可共存）；
+    元件表 Istio 列加「sidecar 模式下」限定。
+  - P00-011：「所有 Istio 設定對它都無效」改成兩邊分開講：自己的 inbound 政策（AuthorizationPolicy／PeerAuthentication）失效，
+    client 端 VS/DR 照樣生效；補 Pod label sidecar.istio.io/inject 與優先序。
+  - P00-014：istiod 只從自己 cluster（config cluster）讀 Istio 設定；multicluster 有 remote secret 時還讀他 cluster 的 Service/Endpoints。
+- 連動修改（為了前後一致）：「所以你會看到兩套系統疊在一起」那句搬回 sidecar/CRD 句後面（ambient 說明插進來後它的「所以」失去指涉）；
+  P00-011 那段加了「namespace 或 Pod 任一邊明確設成 disabled／"false" 就不注入」—— 帳本建議改法沒寫，但 P03-008 寫了且註明「與 P00-011 一致」，
+  來源同一頁（sidecar-injection 的 rule 1）。
+- Files: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：5 個 URL 全部 WebFetch，所有來源引文都找得到。1 項錯誤 —— 我把「istio-injection 優先」寫成「namespace label 與 Pod label 同時存在時」，
+    但原文是「istio-injection 與 istio.io/rev 同時在同一個 namespace 上」；namespace enabled ＋ Pod "false" 其實不注入，正好相反。
+    另 1 項 minor：gateway 頁只說 traffic weighting，沒有說 HTTPRoute。
+  - Standards：無硬性違規；judgement —— 「所以」句失去指涉、「那個 label」指涉不清、括號列的能力與下方清單不對應、ambient 組成重複兩次。
+  - 修正（2b42251）：優先序限定在同一 namespace、加 disabled 否決；「那個 label」寫明；「所以」句搬回；HTTPRoute 改「支援依權重分流」；表格去重。
+- Review round 2：
+  - Spec：引文全部找到；P00-011 三條規則逐條對過一致；minor —— 括號改成「加密、可觀測性」偏離帳本「身分、mTLS、L7 授權」；nit：Pod 層級 istio.io/rev。
+  - Standards：無硬性違規；引號引用「資料面＝所有 Envoy」在 guide 找不到；P00-011 括號重複主句。
+  - 修正（f455ca8）三項都改了，但已達兩輪上限，未再 review → passes 維持 false，寫進 notes。
+- 帳本外的觀察（沒改）：P00-011 下面的 `kubectl get ns ea-pmc --show-labels` 只看得到 namespace label，看不到 Pod 層級的
+  sidecar.istio.io/inject／istio.io/rev；若要補指令需另開帳本列。
+- **Learnings for future iterations:**
+  - 帳本「建議改法」措辭含糊時（如「兩種 label 同時存在時 istio-injection 優先」），回到官方頁看原句的限定範圍再寫 —— 本輪第 1 輪 Spec 就抓到寫反。
+  - 為了讓 review A 軸滿意而改措辭時，要回頭對照帳本建議改法，不然下一輪換 Spec 軸說偏離帳本（本輪 P00-001 括號被兩軸拉鋸）。
+  - 在 guide 裡用「」引用 guide 自己的字樣時，要逐字複製，reviewer 會 grep。
+  - Bash 工具裡不要在 heredoc 前面留 `cat > /dev/null;` 之類讀 stdin 的指令 —— 會卡到 timeout；含單引號的 node 片段一律用 Write 寫成 repo 內暫存 .js 再跑、跑完刪掉。
+---
