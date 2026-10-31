@@ -347,3 +347,9 @@ Started: (not yet run)
   第 2 輪未另開 sub-agent：修正皆直接採用 reviewer 建議並已對照官方指令，validate.sh exit 0。
 - Learnings: 官方 istioctl secret 範例用 select(.name=="default")，不要用 [0]（ROOTCA 可能排前面）。
 ---
+## 2026-11-01 - US-018
+- 修正 Part 3 成因 3／4／5：P03-007（pilot-agent request GET stats＋distroless／ssl.handshake／XFCC 註記）、P03-008（指回 Part 0 sidecar 注入段落，不重述）、P03-009（保守寫法：比對連線實際目的 port）、P03-010（paths 為正規化後，BASE／RFC 3986）、P03-011（custom-columns 列出 selector／targetRefs）。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md
+- Review round 1: Standards 無硬性違規（3 個 nit：Part 0 指標名稱、精準除錯引用、註解混兩件事）；Spec 引文皆在頁面上找到，2 點（「不論哪種」含糊→改成「所以」；XFCC 區塊仍用 curl config_dump，屬 P03-015 範圍，未動）。已修 nit 並以 fix commit 收；未再跑第二輪（只剩措辭 nit）。
+- Learnings: node 改檔時反斜線被吞，已寫進 patterns.md。
+---

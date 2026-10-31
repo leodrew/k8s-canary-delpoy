@@ -186,9 +186,9 @@
   （實際比對的是 `s*`、寫進檔案的是真換行）。改 validate.sh 的 JS 片段直接用 Edit 工具；
   含單引號的 node 片段用 Write 寫成 repo 內暫存 .js 再跑、跑完刪掉。
 - `GUIDE_FENCE_JS` 包在 bash 單引號裡，在裡面加註解不能出現 ASCII 單引號。
+- 用 node 腳本改 guide 時，要寫進檔案的反斜線（如 ``）會在跳脫層裡消失（實測留下空的 ``）；改完 grep／印出該處確認，必要時用 `String.fromCharCode(92)`。
 - Bash 工具裡不要在 heredoc 前面留 `cat > /dev/null;` 之類讀 stdin 的指令 —— 會卡到 timeout。
 
 ## 留給特定帳本列的提醒（修到那一列時照做；做完就把該條刪掉）
 
-- **P03-008**：注入規則已經在 Part 0 寫齊，指回 Part 0 即可，不要再重述一次（兩份會漂移）。
 - **P04-008**：指回 Part 0「表中三列的補充」裡的 PeerAuthentication 說明，不要再列一次依賴 mTLS 的欄位清單。
