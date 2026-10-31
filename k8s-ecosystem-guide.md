@@ -712,7 +712,7 @@ spec:
 
 #### 這是在解決什麼問題
 
-**預設情況下，每一個 sidecar 都載入「整個 mesh 所有服務」的設定。** 100 個服務的 cluster，每個 sidecar 都有 100 份 cluster/listener 設定；1000 個服務時，單一 sidecar 的記憶體可能吃到數百 MB，而且**任何一個服務變動都會觸發全 mesh 的 config push**。
+**預設情況下，每一個 sidecar 都載入「整個 mesh 所有服務」的設定。** Istio 官方（Configuration Scoping）：「Each proxy instance will receive configuration for all namespaces as well.」而 proxy 的記憶體用量跟著它持有的設定總量成長（官方效能頁：「The memory consumption of the proxy depends on the total configuration state the proxy holds.」）。所以 mesh 裡的服務越多，每個 sidecar 吃的記憶體越多；實際數字依你的 mesh 而異，用 `istioctl proxy-config` 看設定量、`kubectl top pod --containers` 量 `istio-proxy` 的實際用量，不要套別人的數字。
 
 `Sidecar` 資源就是告訴 Envoy：「你只需要認識這幾個服務就好」。它有三個效果：
 
@@ -720,7 +720,7 @@ spec:
 2. **軟性 egress 管控**——沒列進來的服務，sidecar 根本沒有它的路由設定
 3. **減少 config push 風暴**
 
-> **重要澄清**：`Sidecar` **不是安全邊界**。它讓 sidecar「不知道」某個服務，但如果 `outboundTrafficPolicy` 是 `ALLOW_ANY`（Istio 預設），流量還是可能以 passthrough 的方式出去。要真正擋住，得靠 `REGISTRY_ONLY` + NetworkPolicy。
+> **重要澄清**：`Sidecar` **不是安全邊界**。它讓 sidecar「不知道」某個服務，但如果 `outboundTrafficPolicy` 是 `ALLOW_ANY`（Istio 預設），流量還是可能以 passthrough 的方式出去。`outboundTrafficPolicy: REGISTRY_ONLY` 也只是盡力而為的防呆（抓漏寫的 ServiceEntry），官方 Sidecar 參考頁明講它「does not act as one, or as any form of an outbound firewall」。官方建議的強制做法是 Egress Gateway ＋ NetworkPolicy（Pod 的 egress 只允許打到 egress gateway；Istio security best practices：「When combined with a Network Policy, you can enforce all traffic, or some subset, goes through the egress gateway.」）。
 
 #### 最小可用 YAML
 
@@ -738,7 +738,7 @@ spec:
         - "istio-system/*"         # 控制平面 / 監控（幾乎一定要留）
         - "ea-epmm/epmm-api-svc.ea-epmm.svc.cluster.local"   # 明確列出跨 ns 依賴
   outboundTrafficPolicy:
-    mode: ALLOW_ANY                # 未知目的地放行（預設）。改 REGISTRY_ONLY 才是嚴格模式
+    mode: ALLOW_ANY                # 未知目的地放行（預設）。REGISTRY_ONLY 只擋沒註冊的目的地，不是防火牆
 ```
 
 `egress.hosts` 的語法是 `<namespace>/<dns-name>`：
@@ -757,7 +757,7 @@ spec:
 
 **規則一：一個 namespace 只能有「一個」沒有 `workloadSelector` 的 Sidecar。**
 
-沒有 selector 的 Sidecar = 這個 namespace 的預設值。如果你在同一個 namespace 放了兩個沒有 selector 的 Sidecar，**Istio 的行為是未定義的**（實務上會隨機挑一個生效），而且不會有明顯錯誤訊息。這是最陰的雷。
+沒有 selector 的 Sidecar = 這個 namespace 的預設值。如果你在同一個 namespace 放了兩個沒有 selector 的 Sidecar，**Istio 的行為是未定義的**（官方只說未定義，沒說會挑哪一個），而且 `kubectl apply` 不會擋。能抓到它的是 `istioctl analyze -n ea-pmc`，會報 IST0111（More than one sidecar resource in a namespace has no workload selector）；多個 selector 命中同一個 workload 則報 IST0110。建議把 `istioctl analyze` 放進 CI。這是最陰的雷。
 
 **規則二：有 `workloadSelector` 的會完全覆蓋（不是合併）namespace 預設值。**
 
@@ -816,8 +816,8 @@ kubectl top pod -n ea-pmc --containers | grep istio-proxy
 
 #### 踩雷
 
-- **忘了留 `istio-system/*`**：telemetry、tracing 上報會失敗，而且症狀是「監控沒資料」而不是「連線失敗」，很難聯想。
-- **只寫 `"ea-epmm/*"` 卻用短名呼叫**：Sidecar 的 hosts 比對的是 FQDN，你 app 裡如果用 `http://epmm-api-svc/`，DNS 解析階段就失敗了（見 Part 4）。
+- **忘了留 `istio-system/*`**：官方範例都保留這一項。指標是 Prometheus 主動去 scrape 的，跟 sidecar 的 egress 無關；受影響的是 sidecar 要主動連過去的 istio-system 服務（例如裝在 istio-system 的 tracing collector、egress gateway）。拿掉前先用 `istioctl proxy-config cluster` 確認沒有東西依賴它。
+- **跨 namespace 卻用短名呼叫**：從 ea-pmc 呼叫 `http://epmm-api-svc/` 會被 K8s DNS 的 search domain 展開成 `epmm-api-svc.ea-pmc.svc.cluster.local`，本來就查不到（K8s 官方：「DNS queries that don't specify a namespace are limited to the Pod's namespace」），沒套 Sidecar 也一樣。跨 namespace 一定要寫 `epmm-api-svc.ea-epmm` 或完整 FQDN（見 Part 4）。Sidecar `hosts` 的 dnsName 要寫 FQDN 是另一件事。
 - **`REGISTRY_ONLY` 沒配 ServiceEntry**：所有外部呼叫（Keycloak、外部 API）全掛。切換前先確認所有外部依賴都有 ServiceEntry。
 
 ---
