@@ -5,7 +5,9 @@
 > argoproj）查證後的結果。**基準是查證當下的官方最新版文件**；版本相關的功能在「建議改法」
 > 裡註明最低版本。
 >
-> - **判定**：正確／錯誤／過時／不精確／環境特定／無法驗證
+> - **判定**：正確／錯誤／過時／不精確／環境特定／無法驗證／改成指標
+>   （「改成指標」只用在 Part 14／15 的完整 manifest 與 SOP 小節：那些內容的唯一真實來源是
+>   `canary-manual/CANARY-COMPLETE.md`，loop 要把它們換成「兩三句摘要＋指向對應章節」，不逐行修正）
 > - **使用者確認**：✓ 同意要改／✗ 不改（附理由）／待定
 > - 只有「使用者確認 ✓」且判定不是「正確」的列，才會變成 loop 的修正故事。
 > - 「環境特定」的列不上網查，改併入 guide 文末「需向他人確認」清單。
@@ -14,19 +16,23 @@
 
 ## 判定統計
 
-| 批 | 範圍 | 說法總數 | 正確 | 錯誤 | 過時 | 不精確 | 環境特定 | 無法驗證 |
-|---|---|---|---|---|---|---|---|---|
-| ① | Part 0 | 73 | 61 | 1 | 1 | 8 | 0 | 2 |
-| ① | Part 1 | 41 | 25 | 2 | 0 | 9 | 4 | 1 |
-| ② | Part 2.1–2.2 | 53 | 38 | 4 | 1 | 9 | 1 | 0 |
-| ② | Part 2.3–2.5 | 49 | 28 | 4 | 0 | 15 | 0 | 2 |
-| ② | Part 3 | 40 | 24 | 3 | 1 | 11 | 0 | 1 |
-| ③ | Part 4 | 42 | 25 | 5 | 0 | 9 | 3 | 0 |
-| ③ | Part 5（上半） | 38 | 27 | 2 | 1 | 7 | 0 | 1 |
-| ③ | Part 5（下半） | 34 | 21 | 3 | 0 | 9 | 0 | 1 |
-| ④ | Part 6.1–6.2 | 70 | 51 | 3 | 1 | 14 | 0 | 1 |
-| ④ | Part 6.3–6.4 | 52 | 33 | 3 | 3 | 11 | 1 | 1 |
-| ④ | Part 6.5–6.6 | 52 | 32 | 4 | 2 | 11 | 0 | 3 |
+| 批 | 範圍 | 說法總數 | 正確 | 錯誤 | 過時 | 不精確 | 環境特定 | 無法驗證 | 改成指標 |
+|---|---|---|---|---|---|---|---|---|---|
+| ① | Part 0 | 73 | 61 | 1 | 1 | 8 | 0 | 2 | 0 |
+| ① | Part 1 | 41 | 25 | 2 | 0 | 9 | 4 | 1 | 0 |
+| ② | Part 2.1–2.2 | 53 | 38 | 4 | 1 | 9 | 1 | 0 | 0 |
+| ② | Part 2.3–2.5 | 49 | 28 | 4 | 0 | 15 | 0 | 2 | 0 |
+| ② | Part 3 | 40 | 24 | 3 | 1 | 11 | 0 | 1 | 0 |
+| ③ | Part 4 | 42 | 25 | 5 | 0 | 9 | 3 | 0 | 0 |
+| ③ | Part 5（上半） | 38 | 27 | 2 | 1 | 7 | 0 | 1 | 0 |
+| ③ | Part 5（下半） | 34 | 21 | 3 | 0 | 9 | 0 | 1 | 0 |
+| ④ | Part 6.1–6.2 | 70 | 51 | 3 | 1 | 14 | 0 | 1 | 0 |
+| ④ | Part 6.3–6.4 | 52 | 33 | 3 | 3 | 11 | 1 | 1 | 0 |
+| ④ | Part 6.5–6.6 | 52 | 32 | 4 | 2 | 11 | 0 | 3 | 0 |
+| ⑤ | Part 7 | 56 | 33 | 3 | 1 | 14 | 3 | 2 | 0 |
+| ⑤ | Part 12 | 53 | 27 | 7 | 1 | 17 | 1 | 0 | 0 |
+| ⑤ | Part 14 | 62 | 27 | 16 | 8 | 8 | 0 | 1 | 2 |
+| ⑤ | Part 15 | 68 | 17 | 21 | 11 | 10 | 1 | 2 | 6 |
 
 ---
 
@@ -727,3 +733,302 @@
 | P06-452 | 2819, 2890 | subset 未定義就 503 | https://istio.io/latest/docs/ops/best-practices/traffic-management/ |
 
 ---
+ managedRoutes 為 nil 時："Rollout has missing field '%s'"（代入後為 spec.strategy.canary.trafficRouting.managedRoutes）；managedRoutes 有寫但漏列該 route 時："Steps define a route that does not exist in spec.strategy.canary.trafficRouting.managedRoutes" ||| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P07-001 | 2906 | Deployment 滾動更新是全有全無的……不能控制換多少比例 | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "the new ReplicaSet can be scaled up immediately when the rolling update starts, such that the total number of old and new Pods does not exceed 130% of desired Pods." | 滾動更新期間新舊版本本來就會並存，只是比例綁死在 Pod 數上，而且會自動推進到 100%。建議改成「比例只能用 Pod 數表達，而且無法停在某個比例上對特定使用者分流」，不要說「全有全無」。 | ✓ |
+| P07-002 | 2998 | consistentHash: # 解決 session 黏著（見 7.4） | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "Consistent Hash-based load balancing can be used to provide soft session affinity based on HTTP headers, cookies or other properties." / "The affinity to a particular destination host may be lost when one or more hosts are added/removed" | 這是「軟」黏著，只在同一個 subset 裡有效。7.4 表格自己也說它擋不住跨 subset。註解改成「subset 內的軟黏著，不解決 canary 跨版本問題」。 | ✓ |
+| P07-003 | 3000–3001 | httpCookie: name: JSESSIONID, ttl: 10800s | 錯誤 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "Lifetime of the cookie. If specified, a cookie with the TTL will be generated if the cookie is not present." | 設了 ttl，Envoy 會在 cookie 不存在時自己產生一個同名 cookie，會跟 Spring 的 JSESSIONID 打架（前一批已確認）。改用專屬名稱，例如 `istio-affinity`。 | ✓ |
+| P07-004 | 3056 | 只改這兩個數字就完成灰度 | 不精確 | https://istio.io/latest/blog/2017/0.1-canary/ | "the autoscalers bound to the 2 version Deployments will automatically scale the replicas accordingly" | v2 寫死 `replicas: 1`、也沒有 HPA。權重拉到 50% 或 100% 時，一個 Pod 會被打爆。要補一句：推進權重的同時要擴 v2，或替 v2 也配一個 HPA。 | ✓ |
+| P07-005 | 3122 | 你的 Spring Boot 用 in-memory HttpSession + Keycloak OIDC | 環境特定 | — | — | 跟上層 CLAUDE.md 的描述一致，沒有另外查證。 | ✓ |
+| P07-006 | 3130 | 解法 A：DestinationRule 用 `httpCookie: JSESSIONID` | 錯誤 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "If specified, a cookie with the TTL will be generated if the cookie is not present." | 「只在 subset 內生效」這段是對的，但 cookie 名稱同 P07-003，要改成專屬名稱。 | ✓ |
+| P07-007 | 3150 | 用解法 A + 只在離峰時段灰度就夠 | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "Consistent Hash-based load balancing can be used to provide soft session affinity" | 跟 3130 自相矛盾：A 擋不住 weight 把同一位使用者送到另一個 subset。離峰只是降低受影響的人數。改成「A 無法避免登出，只能降低影響；要保證不登出用 B 或 C」。 | ✓ |
+| P07-008 | 3150 | 你現在其實已經在承受「使用者偶爾被登出」的風險 | 環境特定 | — | — | 推論本身成立（ClientIP 在 mesh 下沒作用，前一批已確認），但實際影響要看他們的叢集，沒有查證。 | ✓ |
+| P07-009 | 3170 | scaleTargetRef name: pmc-epmmformquerygui | 不精確 | https://istio.io/latest/blog/2017/0.1-canary/ | "the autoscalers bound to the 2 version Deployments will automatically scale the replicas accordingly" | 文件內部不一致：7.2 的 Deployment 叫 `-v1`、`-v2`，沒有叫這個名字的 Deployment。而且 7.2 兩份 Deployment 都沒有 `resources.requests`，依 3183 自己的說法 HPA 不會動。建議改成每一版各一個 HPA，並在 7.2 的 YAML 補上 requests。 | ✓ |
+| P07-010 | 3172 | 1 個的話滾動更新會有空窗 | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "The absolute number is calculated from percentage by rounding down." (maxUnavailable) / "The absolute number is calculated from the percentage by rounding up. The default value is 25%." (maxSurge) | 1 個 replica 套預設值時 maxUnavailable=0、maxSurge=1，會先起新 Pod 再砍舊的，不會有空窗（前提是有 readinessProbe，7.2 沒設）。建議至少 2 個的理由應寫成：節點故障、drain 和 PDB。 | ✓ |
+| P07-011 | 3184–3189 | 範例裡啟用了 memory averageUtilization: 80（只註明「慎用」） | 不精確 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ | "If multiple metrics are specified in a HorizontalPodAutoscaler, this calculation is done for each metric, and then the largest of the desired replica counts is chosen." | 多個指標取最大值，所以 JVM 記憶體降不下來時，這一項會讓 HPA 永遠縮不回去。這跟 3271 的踩雷互相矛盾。範例中應把 memory 那段註解掉。 | ✓ |
+| P07-012 | 3195 | istio_requests_per_second # 需要 prometheus-adapter | 無法驗證 | https://istio.io/latest/docs/reference/config/metrics/ | — | Istio 標準指標是 `istio_requests_total`（counter），沒有找到官方叫這個名字的指標。實際上要在 adapter 裡自己寫 rate 規則定義它，而且任何 custom.metrics API 的實作都可以，不一定是 prometheus-adapter。建議註明「名稱由 adapter 規則自訂」。 | ✓ |
+| P07-013 | 3272 | 你的 Spring Boot 可能要 60 秒 | 環境特定 | — | — | 沒有查證。 | ✓ |
+| P07-014 | 3289–3309 | Rollout 範例沒有 selector、template（也沒有 workloadRef） | 無法驗證 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ | —（查證途中被額度限制擋下，沒有取得原文） | 依我所知 Rollout 必須有 selector 加 template，或用 workloadRef，否則 controller 會判 InvalidSpec。至少要標「已省略 selector/template」。 | ✓ |
+| P07-015 | 3292 | canaryService / stableService # Argo 自動維護這兩個 Service | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ | "Finally, a canary and stable Service should be deployed." | 這兩個 Service 要自己建立，Argo 只會在發布期間改它們的 selector。 | ✓ |
+| P07-016 | 3292–3298 | host-level（canaryService/stableService）搭配 7.2 的 `app-routing` VS | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ | "containing two route destinations with `host` values that match the `canaryService` and `stableService`" | 7.2 的 `main` route 兩個 destination 是同一個 host、靠 subset 區分，跟 host-level 的要求不合。二選一：(a) 改用 `trafficRouting.istio.destinationRule: {name, canarySubsetName: v2, stableSubsetName: v1}`，拿掉 canaryService/stableService；(b) 把 VS 改成兩個 host 對應兩個 Service。 | ✓ |
+| P07-017 | 3304 | analysis: # 自動跑指標分析，不通過就回滾 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ | "Analysis can be run in the background -- while the canary is progressing through its rollout steps." | inline analysis 只在 20% 之後跑一次，5% 和 20% 的兩個階段完全沒有自動回滾。範例也沒給 AnalysisTemplate，看不到 failureLimit／inconclusiveLimit 這些中止條件。建議改用 `strategy.canary.analysis`（背景分析），並把 template 一起列出來。 | ✓ |
+| P07-018 | 3314、3357 | Deployment 要改寫成 Rollout CRD ／ Argo 要你改 workload 定義 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | "Instead of removing Deployment you can scale it down to zero and reference it from the Rollout resource:" / "Reference an existing Deployment using `workloadRef` field." | 補充 workloadRef：可以保留原本的 Deployment，用 scaleDown 的 never／onsuccess／progressively 漸進接管。 | ✓ |
+| P07-019 | 3319、3353 | Flagger 不改你的 Deployment | 不精確 | https://docs.flagger.app/usage/how-it-works | "the target deployment is scaled to zero" | Flagger 會另外建 `<name>-primary` 承接正式流量，再把原本的 Deployment 縮到 0 當成 canary 用。另外會建 `<name>`、`-primary`、`-canary` 三個 Service。應寫成「不用改寫 YAML，但會接管它的副本數」。 | ✓ |
+| P07-020 | 3335 | threshold: 5 # 連續 5 次分析失敗就回滾 | 不精確 | https://docs.flagger.app/usage/deployment-strategies | "max number of failed metric checks before rollback" | 官方沒說「連續」。原始碼（fluxcd/flagger pkg/controller/scheduler.go）只有 `SetStatusFailedChecks(cd, cd.Status.FailedChecks+1)`，成功時不歸零，所以是整次分析的累計失敗次數。把「連續」拿掉。 | ✓ |
+| P07-021 | 3348 | cmd: "hey -z 1m -q 10 http://myapp.example.com/" | 不精確 | https://docs.flagger.app/tutorials/istio-progressive-delivery | "hey -z 1m -q 10 -c 2 http://podinfo-canary.test:9898/" | 官方範例直接打 canary Service。打公開網域要經過權重，只有 stepWeight% 會到 canary，低流量時分析樣本不夠。改成 `http://pmc-epmmformquerygui-canary.ea-pmc:8080/`。 | ✓ |
+| P07-022 | 3361 | HPA 只能看 CPU / memory / 自訂指標 | 不精確 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ | "For HorizontalPodAutoscalers that scale on custom (object) or external metrics, you can set `spec.minReplicas` to `0`." | HPA 本身就支援 External 指標，3207–3211 也示範了。KEDA 的價值在內建 scaler 和不用自己架 adapter，不是 HPA 看不到外部指標。 | ✓ |
+| P07-023 | 3371 | minReplicaCount: 0 # 【HPA 做不到】 | 過時 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ | "Feature state: Beta since Kubernetes v1.37; enabled by default" / "Setting `minReplicas: 0` requires at least one object or external metric to be configured; the API server rejects the HorizontalPodAutoscaler otherwise." | 改成「原生 HPA 從 v1.37 起（HPAScaleToZero 進入 beta、預設開啟）可以縮到 0，但只限 Object/External 指標。KEDA 的優勢是內建 scaler，而且從 0 喚醒更成熟」。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P07-024 | 2910 | 用 Pod 數湊 1% 至少要 100 個 Pod | https://istio.io/latest/blog/2017/0.1-canary/ |
+| P07-025 | 2914 | Istio 讓流量比例和 Pod 數量解耦 | https://istio.io/latest/blog/2017/0.1-canary/ |
+| P07-026 | 2977 | Service 的 selector 不加 version，才能同時選中 v1 和 v2 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P07-027 | 2988、3021 | `networking.istio.io/v1` 的 DR 和 VS | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P07-028 | 2996 | 頂層 trafficPolicy 會套用到所有 subset（subset 可覆寫） | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P07-029 | 3004 | maxRequestsPerConnection: 0 代表不限制 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P07-030 | 3006–3009 | consecutive5xxErrors 5、interval 10s、baseEjectionTime 30s 都是合法值（剛好等於預設）；maxEjectionPercent 是「最多可剔除的 % 數」（預設 10%） | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P07-031 | 3032 | 有寫 gateways 時必須加 `mesh`，sidecar 才會套用 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-032 | 3039 | header match 用小寫 `x-canary` 搭配 exact | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-033 | 3077–3087 | JSON patch 路徑 `/spec/http/1/route/0/weight` 指向 `main` route（index 0 是 canary-testers） | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-034 | 3095–3101 | `istio_requests_total` 和 `istio_request_duration_milliseconds_bucket`，以及 `destination_workload`、`response_code` 這兩個 label | https://istio.io/latest/docs/reference/config/metrics/ |
+| P07-035 | 3106、3112–3115 | 鏡射會丟掉回應；`mirror` 加 `mirrorPercentage` 的寫法正確（沒寫時預設 100%） | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-036 | 3118 | 有副作用的請求被鏡射後，副作用會真的發生 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-037 | 3124、3130 | weight 是每個請求各自決定；consistentHash 只在 subset 內生效 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P07-038 | 3141 | cookie header 用 RE2 regex 比對 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P07-039 | 3150 | sessionAffinity: ClientIP 在 Istio 下沒有作用（前一批已確認） | https://kubernetes.io/docs/reference/networking/virtual-ips/ |
+| P07-040 | 3161、3213 | `autoscaling/v2`；behavior 是 v2 的欄位（從 v1.23 起 stable，之前在 v2beta2） | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-041 | 3182–3183、3261、3269 | 使用率的分母是 requests；容器沒設 requests 時 HPA 對該指標不採取動作 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-042 | 3216–3224、3263 | scaleUp 預設穩定窗 0、100%/15s 和 4 Pods/15s、selectPolicy Max（範例等於預設值） | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-043 | 3227、3262 | scaleDown 穩定窗預設 300 秒 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-044 | 3264 | selectPolicy: Disabled 會關掉該方向的縮放（可以做到只擴不縮） | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-045 | 3240、3247 | PDB 用 `policy/v1`；minAvailable 和 maxUnavailable 只能二選一 | https://kubernetes.io/docs/tasks/run-application/configure-pdb/ |
+| P07-046 | 3253 | minAvailable 等於 replicas 時，node drain 永遠卡住 | https://kubernetes.io/docs/tasks/run-application/configure-pdb/ |
+| P07-047 | 3268 | manifest 留著 replicas 會讓 apply 跟 HPA 來回拉扯，應該刪掉 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-048 | 3272 | HPA 預設 15 秒同步一次 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/ |
+| P07-049 | 3283、3298、3301 | `argoproj.io/v1alpha1` Rollout、`routes: [main]` 對得上 VS 的 route 名稱、`pause.duration` 的寫法 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P07-050 | 3304 | inline analysis 失敗會 abort 整個 rollout | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P07-051 | 3322–3343 | `flagger.app/v1beta1` Canary；interval、maxWeight、stepWeight 的欄位；request-duration 是 P99（毫秒） | https://docs.flagger.app/tutorials/istio-progressive-delivery |
+| P07-052 | 3354 | Flagger 會自己產生 VS 和 DR | https://docs.flagger.app/tutorials/istio-progressive-delivery |
+| P07-053 | 3364、3370、3373 | `keda.sh/v1alpha1` ScaledObject；scaleTargetRef 只寫 name 時預設是 apps/v1 Deployment；cooldownPeriod 預設 300 | https://keda.sh/docs/latest/reference/scaledobject-spec/ |
+| P07-054 | 3376–3381 | kafka trigger 的 bootstrapServers、consumerGroup、topic、lagThreshold 欄位 | https://keda.sh/docs/latest/scalers/apache-kafka/ |
+| P07-055 | 3384–3389 | cron trigger 的 timezone、start、end、desiredReplicas；配合 minReplicaCount 0 可以在時段外縮到 0 | https://keda.sh/docs/latest/scalers/cron/ |
+| P07-056 | 3395 | KEDA 會自己建 HPA；admission webhook 會擋下已經被 HPA 管理的 workload | https://keda.sh/docs/latest/concepts/admission-webhooks/ |
+
+---
+
+## Part 12：用 Argo Rollouts 取代人工 pilot run
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P12-001 | 4500–4505（12.5 L4756、12.6 L4778/4788、12.7 L4817 也一樣） | 12.2 骨架的 `trafficRouting` 只有 `istio.virtualService`，steps 卻用了 `setHeaderRoute` | 錯誤 | https://github.com/argoproj/argo-rollouts/blob/master/pkg/apis/rollouts/validation/validation.go ／ https://argo-rollouts.readthedocs.io/en/stable/features/specification/ | managedRoutes 為 nil 時（guide 的情況）："Rollout has missing field '%s'"（代入 spec.strategy.canary.trafficRouting.managedRoutes）；managedRoutes 有寫但漏列該 route 時："Steps define a route that does not exist in spec.strategy.canary.trafficRouting.managedRoutes" | 在 `trafficRouting` 補上 `managedRoutes: [{name: canary-test}]`。12.5/12.6 的 `mirror`、`canary-testers` 也要列進去，列的順序就是優先序。另外註明 setHeaderRoute／setMirrorRoute 需要 Argo Rollouts v1.3 以上（release-1.2 的文件沒有這兩個功能，release-1.3 才有） | ✓ |
+| P12-002 | 4563 | 「之後所有操作都固定走 v2」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ | "All routes listed in managed routes will be removed at the end of a rollout or on an abort." | 改成「只在 header route 存在的那幾個 step 有效」。12.2 的步驟 3 就會把它移除 | ✓ |
+| P12-003 | 4565–4576、4899–4909 | 指向 Part 9 發現 2／3／4 的環境現況（沒有 mesh、route 沒有 name、session 存在 in-memory） | 環境特定 | — | 未研究（環境特定） | 不在本批範圍 | ✓ |
+| P12-004 | 4605 | `annotations: sidecar.istio.io/inject: "false"` | 過時 | https://istio.io/latest/docs/reference/config/annotations/ | "This annotation has been deprecated in favor of the sidecar.istio.io/inject label" | 改放 pod template 的 `labels`。另外 Istio 1.27 起預設是 native sidecar，有注入的 Job 也能正常結束（前批已確認） | ✓ |
+| P12-005 | 4686–4696、4708–4712、4723–4726、5446–5455、5510–5513 | 以 `destination_workload="pmc-epmmformquerygui"` 算成功率、延遲、樣本數 | 不精確 | https://github.com/istio/istio/blob/master/pkg/kube/util.go ／ https://istio.io/latest/docs/reference/config/metrics/ ／ https://argo-rollouts.readthedocs.io/en/stable/analysis/prometheus/ | "// Heuristic for ArgoCD Rollout" ／ "name := strings.TrimSuffix(controllerRef.Name, "-"+pod.Labels["rollouts-pod-template-hash"])"；"It is set to destination if report is from a server Istio proxy and source if report is from a client Istio proxy or a gateway."；官方範例用 `destination_service=~"{{args.service-name}}"` | Istio 對 Rollout 的兩組 ReplicaSet 都回報同一個 workload 名，所以這條 query 量到的是 stable＋canary 的合計，不是 canary。12.11 步驟 3 的 canary 權重是 0，量到的幾乎全是 stable。另外沒有過濾 reporter，經過 gateway 的請求會算兩次，enough-traffic 的門檻 20 實際只要 10 個請求。改成 `reporter="destination",destination_service_name="pmc-epmmformquerygui-canary"`，用 args 傳入 | ✓ |
+| P12-006 | 4714–4719、4735 | 12.4 的 `enough-traffic` 沒寫 failureLimit，說「流量不夠就不下結論」 | 錯誤 | https://github.com/argoproj/argo-rollouts/blob/master/pkg/apis/rollouts/v1alpha1/analysis_types.go ／ https://github.com/argoproj/argo-rollouts/blob/master/analysis/analysis.go | "FailureLimit is the maximum number of times the measurement is allowed to fail, before the entire metric is considered Failed (default: 0)"；"Once all metrics are complete, the worst status is used as the overall AnalysisRun status" | failureLimit 預設是 0，只要有一次樣本低於 20，整個 AnalysisRun 就 Failed，Rollout 跟著 abort，跟「不下結論」正好相反。metrics 之間沒有依附關係。要把樣本數檢查併進同一條 query／條件，或設計成 success／failure 兩個條件之間有空隙，讓它落到 Inconclusive | ✓ |
+| P12-007 | 4737 | 「`interval` 拉長，讓每次取樣涵蓋足夠的請求」 | 不精確 | https://prometheus.io/docs/prometheus/latest/querying/basics/ | "Range vector literals work like instant vector literals, except that they select a range of samples back from the current instant." | 每次取樣涵蓋多少請求是由 query 的 `[2m]` 決定，不是 interval。要涵蓋更多請求就把 range 拉長 | ✓ |
+| P12-008 | 4745、4747、5488、5490 | 「Inconclusive：查詢沒有資料／無法判斷 → 暫停等人」 | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ ／ analysis_types.go | "One example of how analysis runs could become `Inconclusive`, is when a metric defines no success or failure conditions."；"`Inconclusive` analysis runs might also happen when both success and failure conditions are specified, but the measurement value did not meet either condition."；NaN 範例："successCondition: result >= 0.95 … phase: Failed … value: NaN"；"ConsecutiveErrorLimit … before the metric is considered error (default: 4)" | 只寫 successCondition 時：0/0 = NaN 會判 Failed；空陣列必須用 `len(result)` 處理，否則算 Error，連續超過 4 次就變 Error。rollout/analysis.go 把 Error 和 Failed 同樣處理成 abort。結論是「沒資料」在這份 YAML 下會自動 abort，不會停下來等人。要停下來等人，得同時寫 successCondition 和 failureCondition，並設 inconclusiveLimit | ✓ |
+| P12-009 | 4817–4824、4832 | 階段 1 先移除 header route，再 `pause: {}`，說「使用者一樣做 pilot run」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ | "To disable header based traffic routing just need to specify empty `setHeaderRoute` with only the name of the route." | pause 之前 header route 已經關掉，pilot 使用者只能靠 5% 的隨機權重碰到 v2，這正是 L4469 自己批評的情況。應該把 `pause: {}` 移到移除 header route 之前 | ✓ |
+| P12-010 | 4851–4852 | 階段 3 沒有 `setHeaderRoute` 就直接跑 `smoke-test` | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ | "Header-based traffic routing is configured using the `setHeaderRoute` step, which contains a list of header matchers." | 這時 `x-canary` header 不會被路由到 canary（權重 0），smoke test 測到的是 v1。要保留 setHeaderRoute 的開啟和關閉兩步 | ✓ |
+| P12-011 | 4861 | 「失敗時 Argo 會自動 abort 回滾，並發通知」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/notifications/ | "Both triggers and templates are configured in the `argo-rollouts-notification-configmap` ConfigMap." | 註明要先設好 notification ConfigMap，並在 Rollout 上加訂閱 annotation（12.8） | ✓ |
+| P12-012 | 4878–4879、5105–5106 | 「30 分鐘還沒完成 = 判定失敗」；「不設的話只是標記失敗但卡住」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ | "The maximum time in seconds in which a rollout must make progress during an update, before it is considered to be failed. Argo Rollouts will continue to process failed rollouts … Note that progress will not be estimated during the time a rollout is paused."；"Optional and default is false." | 改成「連續 1800 秒沒有進展（pause 期間不計）」。不設 abort 時 controller 會照常繼續處理，只是在 status 標上 ProgressDeadlineExceeded | ✓ |
+| P12-013 | 4884–4887 | 背景分析「整個 rollout 期間持續監控」；「startingStep: 2 從第 2 個 step 開始」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ | "startingStep: 2 # delay starting analysis run until setWeight: 40%"；"Delay starting the analysis run until step 3 (Set Weight 40%)"；"The `count` can have 0 as value which means that it will run until the end of the Rollout execution for background analysis" | startingStep 從 0 起算，2 是第 3 個 step。引用的 success-rate 有 `count: 5`，跑完 5 次就結束，不會持續整個 rollout。背景分析要另寫一份不設 count 的 template | ✓ |
+| P12-014 | 4919–4920、5564 | `deploy/pmc-epmmformquerygui`、`deploy/pmc-epmmformquerygui-stable` | 不精確 | `canary-manual/track-b/release/20-rollout.yaml` | 檔內 `kind: Rollout`，沒有 Deployment；Track A 的 Deployment 叫 `-stable`／`-canary` | 第一個名字在兩軌都不存在，第二個只存在於 Track A。Track B 改用 `kubectl get pod -l app=pmc-epmmformquerygui` 挑一個 pod。istio-proxy 映像裡有沒有 curl 屬環境特定，未研究 | ✓ |
+| P12-015 | 4943、5088、5516 | 「內容與 `canary-manual/track-b/` 的檔案相同」；`track-b/00-configmap.yaml`；`track-b/05-analysistemplate.yaml` | 不精確 | `canary-manual/CANARY-COMPLETE.md §10 #11` ／ `canary-manual/track-b/` | 實際檔案是 `base/00-serviceaccount…04-analysistemplate.yaml`、`release/10-configmap-1.2.3.yaml`、`release/20-rollout.yaml`；§10 #11：「`10-configmap` 還被截斷」 | 改成實際路徑，並列出差異。repo 的步驟 3 是 `pause: {}`，guide 是 analysis；repo 的 image／ConfigMap 是 1.2.3，沒有 1.3.0；repo 的 user-name-attribute 是 `sub`，也沒有 cors／sso；repo 多一個 `-svc` Service 和 ServiceAccount | ✓ |
+| P12-016 | 4945、5150 | 「可以直接 apply 的完整版」；`SPRING_CONFIG_ADDITIONAL_LOCATION` | 不精確 | `canary-manual/CANARY-COMPLETE.md §3.1` | 「Spring Boot 2.4+ 對非 `optional:` 且找不到的 `spring.config.location` 丟 `ConfigDataLocationNotFoundException` → **CrashLoopBackOff**」 | image 本身的 `SPRING_CONFIG_LOCATION=file:/config/application.yaml` 還在，pod 會 CrashLoop。標成「未完成、不可直接 apply」。依 k8s/CLAUDE.md，要等 track-b 的 ConfigMap 依附錄 C 補齊後，才能改成 `SPRING_CONFIG_LOCATION` | ✓ |
+| P12-017 | 5022 | `user-name-attribute: preferred_username` | 不精確 | `canary-manual/CANARY-COMPLETE.md 附錄 C` | 「但**絕對不能寫成 `preferred_username`**」 | 改成 `sub`，跟 track-b 檔案一致 | ✓ |
+| P12-018 | 5026–5035 | `app.cors.*`、`app.sso.*` | 不精確 | `canary-manual/CANARY-COMPLETE.md 附錄 C、§10 #13` | 「`app.cors.*`、`app.test-endpoints.*`、`app.sso.*` ｜ **哪裡都不要放** ｜ 沒有任何程式讀它們」 | 刪掉。post-logout 的正確 key 是 `app.post-logout-redirect-uri`（§3.5） | ✓ |
+| P12-019 | 5214 | 「沒宣告的話 setHeaderRoute 不生效」 | 不精確 | validation.go（同 P12-001） | managedRoutes 為 nil 時（guide 的情況）："Rollout has missing field '%s'"（代入 spec.strategy.canary.trafficRouting.managedRoutes）；managedRoutes 有寫但漏列該 route 時："Steps define a route that does not exist in spec.strategy.canary.trafficRouting.managedRoutes" | 不是「不生效」，是整個 Rollout 驗證失敗（InvalidSpec），完全不會推進 | ✓ |
+| P12-020 | 5312–5317、5335–5339 | `httpCookie: name: JSESSIONID, ttl: 10800s` | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto ／ `canary-manual/CANARY-COMPLETE.md §3.3` | "If specified, a cookie with the TTL will be generated if the cookie is not present."；§3.3：「親和 cookie 改名 `epmm-affinity`」 | 改名 `epmm-affinity`，避免和 Spring 的 session cookie 同名、兩邊互寫 | ✓ |
+| P12-021 | 4950–4968、5361–5363 | 「六份資源」只列 Service ×2，VirtualService 卻有 `pmc-epmmformquerygui-svc` 這個 host | 不精確 | `canary-manual/track-b/base/01-services.yaml`、`00-serviceaccount.yaml` | repo 有第三個 Service `pmc-epmmformquerygui-svc`，還有 ServiceAccount | 補上 `-svc` Service 和 ServiceAccount（Rollout 用了 `serviceAccountName`） | ✓ |
+| P12-022 | 5386–5389 | `retryOn: "5xx,reset,connect-failure"` | 不精確 | `canary-manual/CANARY-COMPLETE.md §3.4` | 「Istio 的 retry **不分 HTTP method**。`5xx` 會讓一個失敗的 `POST` 表單最多重送 3 次。」 | 改成 `reset,connect-failure,refused-stream` | ✓ |
+| P12-023 | 5408–5409 | 「必須先刪掉 Deployment，否則兩個 controller 會搶 pod」 | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | "The Rollout won't try to manage existing Deployment Pods."；"a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment. **Not following this approach might result in downtime**." | 先建 Rollout，確認健康後再刪 Deployment，或用 `workloadRef` 加 `scaleDown: onsuccess`。照現在的順序（先刪、Rollout 最後套）會有停機空窗 | ✓ |
+| P12-024 | 5411–5418 | 套用清單 `00-configmap…05-analysistemplate`，最後一行 `--dry-run=server`，註解寫「套用前先驗語法」 | 不精確 | `canary-manual/track-b/`（實際檔案配置） | 實際檔案在 `base/`、`release/`，而且有 `00-serviceaccount.yaml` | 檔名改成實際路徑，補上 ServiceAccount（缺了 pod 建不起來），dry-run 移到最前面 | ✓ |
+| P12-025 | 5503–5505 | `enough-traffic`：`count: 5`、`failureLimit: 5`，說這樣「省掉很多假警報」 | 錯誤 | analysis_types.go ／ analysis.go | "maximum number of times the measurement is allowed to fail, before the entire metric is considered Failed"；"the worst status is used as the overall AnalysisRun status" | 5 次量測最多 5 次失敗，永遠不會超過 failureLimit，這個指標形同虛設；它也擋不住 success-rate 自己失敗。`track-b/base/04-analysistemplate.yaml` 的 `success-rate-safe` 有同樣的問題。改法同 P12-006 | ✓ |
+| P12-026 | 5555 | 「想在失敗時停下來等人…把 `analysis` 後面接一個 `pause: {}`」 | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ | "The success or failure of the analysis run decides if the rollout will proceed to the next step, or abort the rollout completely." | analysis 一失敗就 abort，根本走不到下一個 pause。要「失敗就停下來等人」，應設計成 Inconclusive（success／failure 條件之間留空隙），或用 `dryRun` 只收集數據 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P12-027 | 4474、4583、5095 | `argoproj.io/v1alpha1` 的 Rollout／AnalysisTemplate | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P12-028 | 4498、5208–5209、5269、5296 | Argo 會把 `rollouts-pod-template-hash` 寫進 stable／canary Service 的 selector | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P12-029 | 4505、5219、5372 | VirtualService 有多條 route 時，必須用名字指定 primary（"optional if there is a single route in VirtualService, required otherwise"） | 同上 |
+| P12-030 | 4509、5223 | `setCanaryScale.replicas` 只在有 trafficRouting 時可用 | https://argo-rollouts.readthedocs.io/en/stable/features/canary/ |
+| P12-031 | 4511–4516、4555–4561、5227–5232 | setHeaderRoute 的 `headerName`／`headerValue`（exact／regex 擇一）語法 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P12-032 | 4528、4764、4784、5242 | 同名、不帶 match 就是移除 header／mirror route | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P12-033 | 4519–4524、4613 | analysis step 傳 args，Job 裡用 `{{args.canary-host}}` 取值 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P12-034 | 4594–4596 | Job metric 以 exit 0 判成功（"successful if the Job completes and had an exit code of zero"），`count: 1`／`failureLimit: 0` 合理 | https://argo-rollouts.readthedocs.io/en/stable/analysis/job/ |
+| P12-035 | 4682、5441 | failureLimit: 1 代表第 2 次失敗才判 Failed | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P12-036 | 4685、5444、5478、5568 | Istio addon 的 Prometheus 是 `prometheus.istio-system`、port 9090 | https://github.com/istio/istio/blob/master/samples/addons/prometheus.yaml |
+| P12-037 | 4687–4712 | `istio_requests_total`、`istio_request_duration_milliseconds`、`response_code`、`destination_workload(_namespace)` 都是 Istio 標準名稱 | https://istio.io/latest/docs/reference/config/metrics/ |
+| P12-038 | 4744、5487 | 判定 Failed 會 abort，canary 權重歸 0 | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P12-039 | 4745（行為部分）、5488 | Inconclusive 會讓 rollout 停在當前 step，等人 resume 或 abort | 同上 |
+| P12-040 | 4757–4761 | setMirrorRoute 的 `percentage` 和 `match.method.exact: GET` 語法 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P12-041 | 4768 | mirror 的回應被丟棄（"the response is ignored"） | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P12-042 | 4823、4826 | `pause: {}` 會無限期等待，直到手動 promote（"Pauses indefinitely until manually resumed"） | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P12-043 | 4868–4871 | `get rollout --watch`、`pause`、`abort`、`promote --full`（"skipping analysis, pauses, and steps"） | https://argo-rollouts.readthedocs.io/en/stable/generated/kubectl-argo-rollouts/kubectl-argo-rollouts_promote/ |
+| P12-044 | 4883、5210、5548 | abortScaleDownDelaySeconds 預設 30 秒，abort 後延遲縮掉 canary | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P12-045 | 4895–4896 | `notifications.argoproj.io/subscribe.<trigger>.<service>` 格式，`on-rollout-aborted`／`on-rollout-completed` 是內建 trigger | https://argo-rollouts.readthedocs.io/en/stable/features/notifications/ |
+| P12-046 | 4920 | 15020 的 `/stats/prometheus` 是合併後的指標 | https://istio.io/latest/docs/ops/integrations/prometheus/ |
+| P12-047 | 4971、5302 | host-level 分流不需要 subset，每個 Service 各配一份 DestinationRule（"The user can also create specific DestinationRules for each of the services."） | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P12-048 | 4999 | immutable ConfigMap 可減輕 kube-apiserver 負擔；Track B 是版本化命名，所以可以用 | https://kubernetes.io/docs/concepts/configuration/configmap/#configmap-immutable |
+| P12-049 | 5246–5248 | `setCanaryScale.matchTrafficWeight: true` 會恢復讓 canary 規模跟著權重走 | https://argo-rollouts.readthedocs.io/en/stable/features/canary/ |
+| P12-050 | 5369 | managed route 會插在手寫的 route 之前（"placed in the specified order above any manually defined routes"） | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P12-051 | 5398–5399 | 用 Argo CD 要忽略 VirtualService 的 weight 差異 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P12-052 | 5480 | Prometheus 回傳 vector，所以取 `result[0]` | https://argo-rollouts.readthedocs.io/en/stable/analysis/prometheus/ |
+| P12-053 | 5539–5551 | 失敗流程：Degraded → 權重回到 stable → 延遲縮掉 canary（"the Rollout would be considered in a `Degraded`"） | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+
+---
+
+## Part 14：保留人工 pilot run 的 Canary 發布（概念逐行查證＋manifest／SOP 改成指標）
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P14-001 | 5897 | 「pilot 使用者（帶 canary=always cookie）」 | 過時 | canary-manual/CANARY-COMPLETE.md §0 | 「只有帶 `canary=always` cookie 的 pilot 使用者會被 Istio 送進 canary。cookie 由 stable pod 在**登入成功那一刻**依名單自動發放。」 | 圖說改成「BFF 依名單自動發 cookie」，名單維護指向 §7.1 | ✓ |
+| P14-002 | 5909 | 「驗證期間對正式使用者的風險：零」 | 不精確 | canary-manual/CANARY-COMPLETE.md §0 | 「這代表 pilot 期間對正式使用者的路由風險是零 —— 但程式風險不是零，發 cookie 的那段程式跑在 stable 的每一次登入上。」 | 改成「路由風險為零；程式風險不為零（§10 #1）」 | ✓ |
+| P14-003 | 5911 | 「canary 掛掉的影響：完全沒有影響」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.2 | 「→ 沒有 endpoint → 503（access log 的 response_flags = UH）→ 他們永遠打不到 stable，app 端「清 cookie」的邏輯根本沒機會執行 → 卡死到 cookie 過期為止（8 小時）」 | 改成：正式使用者不受影響；持有 cookie 的人會吃 503 UH，而且 cookie 是自動發的，持有者不知道自己有 | ✓ |
+| P14-004 | 5923 | 「每次發布要改：只改 canary 的 image tag」 | 不精確 | canary-manual/CANARY-COMPLETE.md §5 步驟 1 | 「`replicas: 1  # 0 → 1`」；「**ConfigMap 與 Deployment 的改動必須在同一個 commit。** 這是回滾能運作的前提。」 | 改成：canary ConfigMap（若有差異）＋ image ＋ replicas 0→1 ＋ `sync-config-hash.sh`，全部放同一個 commit | ✓ |
+| P14-005 | 5931 | 「promote 的動作 = 把 stable 的 image 改成 canary 現在跑的那一版，然後 canary 縮到 0」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「**promote 不是「stable 換 image、canary 縮到 0」那麼簡單。** 縮到 0 會讓還握著 cookie 的人吃 503」 | 改成兩個 commit：① canary data 複製進 stable ConfigMap、stable 換 image、canary 設 `APP_CANARY_ENABLED=false` 且 replicas 維持 1、跑 sync；② 排空之後才設 replicas 0 | ✓ |
+| P14-006 | 6459 | 「真的需要多個 canary pod 時，必須在 canary subset 上加 `consistentHash`」 | 錯誤 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ ／ canary-manual/CANARY-COMPLETE.md §8.3 | 「Subsets inherit the traffic policies specified at the DestinationRule level.」／§8.3：「**canary 開超過 1 個 replica** ／ in-flight OAuth2 `state` 在 pod 記憶體，使用者會拿到 `authorization_request_not_found`」 | 刪掉這句。頂層的 consistentHash 本來就會被 subset 繼承，而且 repo 規定 canary 一律只開 1 個 replica | ✓ |
+| P14-007 | 6463 | 「沒有 `name: http`／`appProtocol: http` 時，Istio 可能用 L4 處理，cookie 路由會直接失效」 | 不精確 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ | 「Istio can automatically detect HTTP and HTTP/2 traffic.」「If the protocol cannot automatically be determined, traffic will be treated as plain TCP traffic.」 | 改成：沒宣告時靠自動偵測，通常認得出 HTTP；偵測失敗才當 TCP。明確宣告才可靠（`appProtocol` 優先於 port name）。CANARY §4.1 也有同樣的過強說法 | ✓ |
+| P14-008 | 6512、6654 | 「對這個 Service 的【所有 endpoint】做 round-robin」 | 錯誤 | https://istio.io/latest/docs/concepts/traffic-management/ | 「By default, Istio uses a least requests load balancing policy」；「Without virtual services, Envoy distributes traffic using least requests load balancing」 | round-robin 改成 least request；「約 1/3」保留，並註明是近似值 | ✓ |
+| P14-009 | 6576 | 「`retries`：不行」 | 不精確 | https://istio.io/latest/docs/concepts/traffic-management/ | 「The default retry behavior for HTTP requests is to retry twice before returning the error.」 | 改成：VS 的 retries 不生效，但仍會套用 Istio 預設重試（attempts 2，retryOn connect-failure,refused-stream,unavailable,cancelled） | ✓ |
+| P14-010 | 6604 | 「Prometheus 抓 metrics（如果 Prometheus 有 sidecar）」也算受影響的內部呼叫方 | 無法驗證 | https://istio.io/latest/docs/ops/integrations/prometheus/ | （本輪抓取失敗，沒有引文） | Prometheus 抓的目的地是 pod IP／埠，不是 Service host，照理不會比對到這條 VS。建議刪掉或補查之後改寫 | ✓ |
+| P14-011 | 6639–6644 | 方法 2：「有 x-app-track: stable = mesh 生效；完全沒有這個 header = 沒生效」 | 不精確 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ | 「The reserved word `mesh` is used to imply all the sidecars in the mesh.」 | mesh 規則是在「呼叫端」sidecar 執行。`kubectl run` 的臨時 pod 沒注入 sidecar 時一樣拿不到 header，不代表 VS 缺 mesh。要先確認測試 pod 是 2/2；另外舊式 sidecar 會讓 `--rm -i` 的 pod 不會結束 | ✓ |
+| P14-012 | 6660、6680 | 「使用者要能確認自己真的在 canary 上」（靠 x-app-track） | 不精確 | canary-manual/CANARY-COMPLETE.md §10 #5 | 「**`x-app-track` 只證明 pod，不證明 bytes** ／ header 對了畫面仍可能是舊的（快取） ／ 要同時看 ETag，見 6.4」 | 加註，並指向 §6.4 | ✓ |
+| P14-013 | 6664–6678 | pilot-run 範例只比對 cookie，沒有 uri 條件 | 過時 | canary-manual/CANARY-COMPLETE.md §3.4 | 「`【修正】` 規則 1 加 `uri: prefix: /gui_epmmFormQuery`。」 | 改成指向 §3.4（track-a/base/03 目前也還沒改） | ✓ |
+| P14-014 | 6702 | 「流量切換：你自己 `kubectl`」 | 不精確 | canary-manual/CANARY-COMPLETE.md §0 適用範圍 | 「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 改成「改 YAML → commit → pipeline apply；正式流量權重不調整」 | ✓ |
+| P14-015 | 6703 | Track A 的 promote：「把 stable 的 image 改成 canary 的」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「1. 把 `11-configmap-canary.yaml` 的 `data:` 整段複製進 `10-configmap-stable.yaml` 2. `20-deployment-stable.yaml` 的 `image` 改成 `1.3.0` 3. `21-deployment-canary.yaml` 的 `APP_CANARY_ENABLED` 改成 `"false"`，**`replicas` 維持 1**」 | 同 P14-005 | ✓ |
+| P14-016 | 6708 | 「同時存在 Deployment 的話兩個 controller 會互搶 pod。切換前必須先刪掉 Track A 的兩個 Deployment」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | 「The Rollout won't try to manage existing Deployment Pods.」；「a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment. Not following this approach might result in downtime.」 | 改成：不會搶同一批 pod。本 repo 互斥的原因是共用 `app` label 與 VS `app-routing`。「先刪 Deployment」正是官方警告會造成中斷的順序 | ✓ |
+| P14-017 | 6764–6770 | 14.11 圖的「現在」欄：「cookie 指定 canary／人工 pilot run」 | 過時 | canary-manual/CANARY-COMPLETE.md §0 | 「cookie 由 stable pod 在**登入成功那一刻**依名單自動發放。」 | 「現在」欄補上「BFF 依名單自動發 cookie」 | ✓ |
+| P14-018 | 5933–6452（14.4） | 五份完整 manifest | 改成指標 | canary-manual/CANARY-COMPLETE.md §2、§3.2–§3.9 | 「## 3. 怎麼寫這些 YAML」「以下是**修正後**的版本。跟目前 repo 裡的 `track-a/` 有差異的地方都標了 `【修正】`。」 | 保留「四層 label 串接」圖（pod label → Service 只比對 app → DR 以 version 分 subset → VS 選 subset）和四種接錯方式表（UH／NC）。說明實際檔案在 `canary-manual/track-a/{base,release,runtime}/`，目標狀態以 §3 為準；刪掉整段 YAML 複本 | ✓ |
+| P14-019 | 5936 | 「內容與 `canary-manual/track-a/` 的檔案完全相同」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §2 | 「├── 10-configmap-stable.yaml ／ ├── 11-configmap-canary.yaml」「└── 05-configmap-canary-pilot.yaml」 | 實際的 track-a 已經是 `SPRING_CONFIG_LOCATION`、`config-hash`、-stable／-canary ConfigMap、canary-pilot volume、readiness／liveness 分開。刪掉這句（由指標取代） | ✓ |
+| P14-020 | 6068、6198 | `SPRING_CONFIG_ADDITIONAL_LOCATION` | 錯誤 | canary-manual/CANARY-COMPLETE.md §3.1 | 「`【修正】` **Deployment 改用 `SPRING_CONFIG_LOCATION`，路徑對上 mount 點：**」 | 改成 `SPRING_CONFIG_LOCATION`（validate.sh 檢查 [6] 會擋回頭的寫法） | ✓ |
+| P14-021 | 6030、6169 | `checksum/config: "REPLACE_WITH_SHA256_OF_CONFIGMAP"` | 過時 | canary-manual/CANARY-COMPLETE.md §3.6 | 「改成 ConfigMap data 區塊的 sha256 前 8 碼，由 scripts/sync-config-hash.sh 回寫。」 | 改成 `config-hash`。佔位字串永遠不會變，改了設定也不會觸發滾動更新 | ✓ |
+| P14-022 | 6126、6255 | 兩份 Deployment 都掛 `pmc-epmmformquery-config` | 錯誤 | canary-manual/CANARY-COMPLETE.md §3.7 | 「`volumes[config].configMap.name` ／ `pmc-epmmformquery-config-canary`」 | 每份掛自己那一軌的 ConfigMap（CLAUDE.md 規則 4） | ✓ |
+| P14-023 | 6064–6129、6194–6258 | 沒有 canary-pilot volume；canary 沒有 `APP_CANARY_ENABLED` | 過時 | canary-manual/CANARY-COMPLETE.md §3.6、§3.7 | 「mountPath: /app/canary          # 【關鍵】掛目錄，不是 subPath」；「`env` 多一個 ／ `APP_CANARY_ENABLED: "true"`」 | 由指標取代 | ✓ |
+| P14-024 | 6083、6091、6099、6213–6229 | 三個探針都打 `/gui_epmmFormQuery/actuator/health` | 過時 | canary-manual/CANARY-COMPLETE.md §3.6 | 「`【修正】` liveness 與 readiness 分開，不要共用同一個端點。」 | 由指標取代，並引用「探針目前是假的」那段警告 | ✓ |
+| P14-025 | 6308 | `httpCookie: name: JSESSIONID` | 過時 | canary-manual/CANARY-COMPLETE.md §3.3 | 「`【修正】` **親和 cookie 改名 `epmm-affinity`。**」 | track-a/base/02 目前仍是 JSESSIONID，目標狀態還沒落地 | ✓ |
+| P14-026 | 6334–6339 | 註解「canary 若要開超過 1 個 replica，解開這段」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.3 | 「**canary 開超過 1 個 replica** ／ in-flight OAuth2 `state` 在 pod 記憶體，使用者會拿到 `authorization_request_not_found`」 | 刪掉 | ✓ |
+| P14-027 | 6385、6415 | `retryOn: "5xx,reset,connect-failure"` | 錯誤 | canary-manual/CANARY-COMPLETE.md §3.4 | 「`【修正】` **`retryOn` 拿掉 `5xx`。** Istio 的 retry **不分 HTTP method**。`5xx` 會讓一個失敗的 `POST` 表單最多重送 3 次。」 | 改成 `reset,connect-failure,refused-stream`（track-a/base/03 也還沒改） | ✓ |
+| P14-028 | 6365–6370、6400–6406 | pilot-run 沒有 uri 條件；primary 留著 `weight: 0` 的 canary destination | 過時 | canary-manual/CANARY-COMPLETE.md §3.4 | 「`【修正】` 規則 2 拿掉 `weight: 0` 的 canary destination。」 | 由指標取代 | ✓ |
+| P14-029 | 6439–6447 | 套用順序（沒有 ConfigMap、沒有 runtime/）＋ `kubectl scale ... --replicas=0` | 錯誤 | canary-manual/CANARY-COMPLETE.md §4.2、§0 | 「kubectl apply -f track-a/runtime/    # pilot 名單（先建立，Deployment 才掛得到）」；「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 改成 base → runtime → release 三次目錄 apply；canary 靜止時的 0 寫在 YAML 裡，而且只能在排空後設（§3.7） | ✓ |
+| P14-030 | 6725–6758（14.10） | 完整流程速查 | 改成指標 | canary-manual/CANARY-COMPLETE.md §5、§8.1 | 「## 5. 每次發布」「**所有動作都只是「改 YAML + apply」。**」 | 摘要：開分支 → canary ConfigMap＋Deployment（image、replicas 1）＋ sync-config-hash 放同一個 commit → 驗 cookie 路由（§6.1）→ pilot run → 兩段式 promote → 回滾用 git revert | ✓ |
+| P14-031 | 6731–6733 | `kubectl set image`／`scale --replicas=1` | 錯誤 | canary-manual/CANARY-COMPLETE.md §0 | 「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 這樣做也繞過 git，下次 apply 會被蓋掉，而且不會更新 config-hash | ✓ |
+| P14-032 | 6745–6748 | promote 後立刻 `scale canary --replicas=0` | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「縮到 0 會讓還握著 cookie 的人吃 503 —— 跟「canary 不通過」那條路徑是同一個坑。正確的順序是**先讓 canary 變成無害，排空之後才縮**。」 | 照 §5 步驟 4a 做 | ✓ |
+| P14-033 | 6750–6751 | 「不通過 → 關掉 canary（使用者完全無感）」`scale --replicas=0` | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.2 | 「### 8.2 為什麼 `replicas: 0` 是 outage 不是不方便」 | 改用 §8.1 第 1 張牌（`APP_CANARY_ENABLED=false` ＋ image 改回，replicas 維持 1） | ✓ |
+| P14-034 | 6754 | `kubectl rollout undo deploy/...-stable` | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.3 | 「固定名稱的 ConfigMap 是可變的。undo 還原 pod template（含舊的 `config-hash`），但 ConfigMap 內容已經是新的 → pod 用**舊 annotation** 重啟卻掛到**新設定**。沒有錯誤訊息」 | 改成 git revert ＋ apply（§8.4） | ✓ |
+| P14-035 | 6757 | 「`canary.sh` 把這些包成 deploy / verify / status / promote / rollback / undo 六個指令」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §10 #12 | 「**`scripts/canary.sh` 與 `README.md` 仍在教 `replicas: 0`** ／ 照著做就會製造 8.2 的 outage ／ 待修；在那之前不要用那個腳本的 `rollback` / `promote`」 | 刪掉，或改成「勿用（US-010 未完成）」 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P14-201 | 5884 | 權重是逐請求的機率分流 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-202 | 5886–5887 | in-memory session 在 pod／軌之間跳動會被要求重新登入 | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P14-203 | 5902 | canary 的正式流量權重永遠是 0 | canary-manual/CANARY-COMPLETE.md §0 |
+| P14-204 | 5929 | `version` label 會成為 metrics 的版本維度 | https://istio.io/latest/docs/ops/deployment/application-requirements/ |
+| P14-205 | 6457 | sidecar 底下 `sessionAffinity: ClientIP` 不生效 | canary-manual/CANARY-COMPLETE.md §3.2（前批已驗證） |
+| P14-206 | 6455–6457 | canary 只能 1 個 replica | canary-manual/CANARY-COMPLETE.md §3.7 |
+| P14-207 | 6469、6532–6538 | 沒有 mesh 時內部流量按 endpoint 數大約平均分到兩軌（約 1/3） | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P14-208 | 6504 | 呼叫端 outbound 被 iptables 導到 15001（本輪沒能重新抓取） | https://istio.io/latest/docs/ops/deployment/application-requirements/ |
+| P14-209 | 6481–6487 | gateways 省略時是 mesh；列了 gateway 就只套用到 gateway | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-210 | 6520、6592 | 沒有 VS 引用時 subset 不會被用到 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P14-211 | 6541–6566 | `hosts` 要同時包含內部 FQDN | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-212 | 6575 | timeout 預設是關閉的 | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P14-213 | 6574、6577–6581 | route／headers／rewrite／fault／mirror／corsPolicy 在沒有 mesh 時對內部呼叫不生效 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-214 | 6591–6594 | DR 的 trafficPolicy、PeerAuthentication、AuthorizationPolicy 不依賴 VS | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P14-215 | 6595 | kubelet 探針不經過 VS 路由 | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P14-216 | 6613 | NR 對應 404、沒有 route | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P14-217 | 6625 | catch-all 規則要放最後（第一條符合的規則勝出） | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-218 | 6647 | `istioctl x describe pod` 可以看到套用到 pod 的規則 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P14-219 | 6662、6677 | 用 VS 的 `headers.response.set` 加 header，不用改程式 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P14-220 | 6684–6692 | `.*canary=always.*` 太寬鬆；帶分隔符的 regex 才精準；cookie 格式是 `a=1; b=2` | https://istio.io/latest/docs/reference/config/networking/virtual-service/ ／ RFC 6265 §4.2.1 |
+| P14-221 | 6700–6701 | Track A 不用安裝；Track B 靠 `pause: {}` ＋ promote 推進 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ |
+| P14-222 | 6704 | 之後可以直接加 analysis step | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P14-223 | 6706 | 建議先用 Track A | canary-manual/CANARY-COMPLETE.md §0 |
+| P14-224 | 6715 | `setHeaderRoute` 需要宣告 `managedRoutes` | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P14-225 | 6720 | VS 有多條 route 時 `routes` 必填 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P14-226 | 6723 | 用過明確的 `setCanaryScale` 之後，要 `matchTrafficWeight: true` 才恢復跟權重走 | https://argo-rollouts.readthedocs.io/en/stable/features/canary/ |
+| P14-227 | 6775 | pilot-run-guide 要求驗證人員寫下第 6 項實際測了什麼 | canary-manual/pilot-run-guide.md:62 |
+
+---
+
+## Part 15：兩種上版方式的完整對照與 SOP（概念逐行查證＋SOP 改成指標）
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P15-001 | 6800、7302 | 「兩個 controller 互相搶 pod —— pod 反覆被建立和刪除」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | 「The Rollout won't try to manage existing Deployment Pods.」 | 改成：各自透過 ownerReference 管自己的 ReplicaSet；本 repo 互斥是因為共用 `app` label 與 VS | ✓ |
+| P15-002 | 6802 | 「切換 track 要刪掉 Deployment、建立 Rollout…有服務中斷的風險」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | 「When migrating a Deployment which is already serving live production traffic, a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment.」 | 補上官方的 `workloadRef`（scaleDown：never／onsuccess／progressively）遷移路徑 | ✓ |
+| P15-003 | 6822–6855 | 做法二「同一個服務用 Track B（推薦）」、6855「直接上 Track B 並保留 `pause: {}`」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §0、§10 #11 | 「Track A（純 Deployment + Istio）。Track B（Argo Rollouts）目前**沒有跟上自動分流**，見第 10 章。」；「自動分流在 Track B 跑不起來。**要嘛補齊，要嘛把 track-b 標成不維護**」 | 改成：本 repo 現況只支援 Track A，Track B 是未來選項 | ✓ |
+| P15-004 | 6850、6853 | 「`promote --full`…前面已經跑完的 analysis 仍然生效」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/generated/kubectl-argo-rollouts/kubectl-argo-rollouts_promote/ | 「Perform a full promotion, skipping analysis, pauses, and steps」 | 只有已經停在 analysis 之後的 pause 時才成立；analysis 還在跑時下 `--full` 會直接跳過它 | ✓ |
+| P15-005 | 6867、6882 | 「ConfigMap：2 份（版本化）」、Track A「版本化（也可用 -stable/-canary）」 | 過時 | canary-manual/CANARY-COMPLETE.md §2 命名規則 | 「**改動重點：整個 repo 只剩 image tag 一處帶版本號。**」 | Track A 欄改成「固定 -stable／-canary」，這不是選項（validate.sh 檢查 [8] 會擋版本號） | ✓ |
+| P15-006 | 6873 | 「檔案總數 5 ／ 6」 | 過時 | canary-manual/CANARY-COMPLETE.md §2 | 「└── runtime/       變更頻率：pilot 期間一天數次    → 獨立，不經過發布流程」 | 改成 Track A 9 檔（base 4＋release 4＋runtime 1）、Track B 7 檔 | ✓ |
+| P15-007 | 6891 | 「權重誰改：Track A 你手動 `kubectl patch`」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §3.4 | 「這套機制的定位是「不做百分比分流」，那就不要留一個 weight 欄位在那裡引誘人去改它」 | 改成「Track A 不調權重」 | ✓ |
+| P15-008 | 6892 | promote 機制：「改 stable Deployment 的 image + ConfigMap 引用」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「1. 把 `11-configmap-canary.yaml` 的 `data:` 整段複製進 `10-configmap-stable.yaml`」 | 指向 §5 步驟 4a | ✓ |
+| P15-009 | 6893 | 回滾：「`kubectl rollout undo` / 縮 canary 到 0」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.3 | 「**單獨把 canary `replicas` 設成 0** ／ 見 8.2」 | 改成 git revert（§8.4）、§8.1 第 1 張牌 | ✓ |
+| P15-010 | 6898–6899 | 「ConfigMap 的內容：完全一樣」「pod template…完全一樣，可以整段複製」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §10 #11 | 「`20-rollout.yaml` 沒有 `APP_TRACK` / `APP_CANARY_ENABLED` / 名單掛載，`10-configmap` 還被截斷」 | 另外 track-b 仍是 ADDITIONAL（merge），track-a 是 LOCATION（replace），整段複製會把語意搞混 | ✓ |
+| P15-011 | 6904 | 只開 1 個 replica 的理由只寫 in-memory session | 不精確 | canary-manual/CANARY-COMPLETE.md §3.7 | 「in-flight 的 OAuth2 `state`、`HttpSession`、authorized-client token 全部在 pod 記憶體裡。」 | 補上 OAuth2 state | ✓ |
+| P15-012 | 6908–7067（15.4） | 完整 kubectl 權限版的 Track A SOP | 改成指標 | canary-manual/CANARY-COMPLETE.md §4.1、§5、§8 | 「## 5. 每次發布」 | 摘要：本環境 CD 只能 apply，這份 SOP 不再維護；前置檢查看 §4.1，發布看 §5，關閉／回滾看 §8 | ✓ |
+| P15-013 | 6912、6987 | 指向 `canary-manual/SOP.md`、`README.md` 的排查表 | 過時 | canary-manual/CANARY-COMPLETE.md 開頭「這份取代了什麼」 | 「`SOP.md` ／ 已被取代（需要完整 kubectl 權限的版本）」 | 排查改指 §9 | ✓ |
+| P15-014 | 6924 | 用 `kubectl get endpoints` 檢查兩個 subset | 過時 | canary-manual/CANARY-COMPLETE.md §4.3 | 「兩個 subset 都要有 endpoint（沒有就是 503 UH 的來源）」 | Endpoints 列的是兩軌合併、分不出 subset，且該 API 自 v1.33 已 deprecated。改用 istioctl proxy-config endpoint | ✓ |
+| P15-015 | 6929–6940 | 版本化 ConfigMap ＋ `immutable: true` | 錯誤 | canary-manual/CANARY-COMPLETE.md §2.2 | 「固定名稱的 ConfigMap 是**可變**的（必須拿掉 `immutable: true`，否則 `kubectl apply` 會噴 `field is immutable`）。」 | 由指標取代 | ✓ |
+| P15-016 | 6947–6959 | patch image＋configMap.name＋config-version、`./canary.sh deploy` | 錯誤 | canary-manual/CANARY-COMPLETE.md §2 命名規則 | 「舊做法有「三處版本號」（image、`configMap.name`、`config-version` annotation）要人工同步，少改一處就是「新版程式配舊版設定」。」 | 由指標取代 | ✓ |
+| P15-017 | 7009–7021 | promote 後立刻 scale canary 0、`./canary.sh promote` | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「正確的順序是**先讓 canary 變成無害，排空之後才縮**。」 | 由指標取代 | ✓ |
+| P15-018 | 7035–7041 | 5b `scale --replicas=0`「使用者完全無感」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.2 | 「現在 cookie 是系統自動發的，持有者可能是幾十個人，**而且他們不知道自己有**。」 | 由指標取代 | ✓ |
+| P15-019 | 7045–7052 | `rollout undo`「會把 image **和** ConfigMap 引用一起還原」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §2.2 | 「**`kubectl rollout undo` 不再會回滾設定。**」 | 由指標取代 | ✓ |
+| P15-020 | 7056–7064 | 清理舊 ConfigMap、`./canary.sh cleanup` | 錯誤 | canary-manual/CANARY-COMPLETE.md §2.1 | 「但 `scripts/canary.sh cleanup` 預設只留 3 個。回滾超過 3 版 → ConfigMap 不存在 → pod 卡在 `ContainerCreating`。」 | 刪掉 | ✓ |
+| P15-021 | 7068–7195（15.5） | Track B（Argo）SOP | 改成指標 | canary-manual/CANARY-COMPLETE.md §0、§10 #11 | 「**Track B（Argo Rollouts）沒有跟上**」 | 摘要：需要 `kubectl argo rollouts` 指令，與 apply-only 不相容；track-b manifest 沒依附錄 C 補齊、跑不了自動分流。只保留一句「若日後補齊 Track B，以 Argo 官方文件為準」 | ✓ |
+| P15-022 | 7203 | 「緊急修補：Track B 的 `promote --full` ／ 指標仍會跑」 | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/generated/kubectl-argo-rollouts/kubectl-argo-rollouts_promote/ | 「To skip analysis, pauses and steps entirely, use '--full' to fully promote the rollout」 | 改成「會跳過還沒跑的 analysis」 | ✓ |
+| P15-023 | 7203–7204 | 緊急／夜間用 Track B 全自動 | 環境特定 | canary-manual/CANARY-COMPLETE.md §0 | 「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 標明本環境不適用 | ✓ |
+| P15-024 | 7217–7308（15.7） | 兩種 track 之間的切換 | 改成指標 | canary-manual/CANARY-COMPLETE.md §0、§10 #11 | 「Track A（純 Deployment + Istio）。Track B（Argo Rollouts）目前**沒有跟上自動分流**」 | 摘要：本 repo 兩軌互斥、只維護 Track A，不提供切換 SOP；真要遷移時以 Argo 官方 migrating（workloadRef）為準 | ✓ |
+| P15-025 | 7231–7242、7278–7290 | `track-b/00-configmap.yaml`、`track-a/01-deployment-stable.yaml` 等路徑 | 過時 | canary-manual/CANARY-COMPLETE.md §2 | 「├── base/ … ├── release/ … └── runtime/」 | 這些檔名都不存在，實際是 `track-*/base/`、`release/` 底下的編號檔 | ✓ |
+| P15-026 | 7236–7242 | 先套 VS 再建 Rollout（自己也寫了「會造成短暫的 503」） | 錯誤 | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | 「Not following this approach might result in downtime.」 | 刪掉這個順序 | ✓ |
+| P15-027 | 7254 | 「先讓 Rollout 把 pod 跑起來（此時新舊 pod 並存）」 | 錯誤 | repo 根目錄 CLAUDE.md | 「track-a 是兩份 Deployment… track-b 是 Argo Rollouts 的一份 Rollout。兩者同時存在時兩個 controller 會搶 pod。」 | 並存時 Rollout 的 pod 帶 `app` label，會被 track-a 的 `-svc` 選進 endpoint。Argo 官方雖然建議並存遷移，本 repo 規則是互斥，要寫明 | ✓ |
+| P15-028 | 7280 | `kubectl scale ...canary --replicas=0` | 錯誤 | canary-manual/CANARY-COMPLETE.md §0 | 「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 刪掉 | ✓ |
+| P15-029 | 7331、7342 | 「`replicas` 寫死在 YAML」「canary 一定要寫（靠它開關 0 / 1）」 | 不精確 | canary-manual/CANARY-COMPLETE.md §8.1 | 「`replicas: 1 → 0` ／ 瞬間 ／ **503 UH，卡到 cookie 過期（8h）** ／ **不可單獨使用**，只能在確認排空後收尾」 | 改成：開＝replicas 1；關＝`APP_CANARY_ENABLED=false` ＋ image 改回，排空後才設 0 | ✓ |
+| P15-030 | 7333 | 「`kubectl delete`：舊 ConfigMap 清不掉」 | 過時 | canary-manual/CANARY-COMPLETE.md §2.1 | 「**版本化命名 + cleanup 會互咬。** 舊做法把 ConfigMap 命名成 `...-config-1.2.3` 並保留舊版供回滾」 | 名稱固定之後不會累積，這一列可以刪 | ✓ |
+| P15-031 | 7334 | 「promote 改的是 `status`，apply 只能改 `spec` → 改用 `spec.paused`」 | 無法驗證 | https://argo-rollouts.readthedocs.io/en/stable/features/specification/ | 「Pause allows a user to manually pause a rollout at any time.」；pause step：「Pauses indefinitely until manually resumed」 | 官方文件沒有寫 promote 的實作細節，也沒說 `spec.paused` 能取代 pause step。15.12 自己也說要先驗證 | ✓ |
+| P15-032 | 7343–7345 | 「省略 replicas 的話，`kubectl apply` 不會管這個欄位，HPA 設定的值就保留得住」 | 不精確 | https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/ | 「Keep in mind that the removal of `spec.replicas` may incur a one-time degradation of Pod counts as the default value of this key is 1」 | 補上 `kubectl apply edit-last-applied` 的遷移步驟 | ✓ |
+| P15-033 | 7354–7376 | 目錄樹有 `10-configmap-1.2.3.yaml`／`10-configmap-1.3.0.yaml`、沒有 runtime/ | 過時 | canary-manual/CANARY-COMPLETE.md §2 | 「│   ├── 10-configmap-stable.yaml ／ │   ├── 11-configmap-canary.yaml」 | 換成 §2 的樹 | ✓ |
+| P15-034 | 7384（另 7704） | 「發布途中 apply 它會把權重打回 100/0，直接中斷 canary」 | 不精確 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ | 「the controller will instantly set the VirtualService weights back to the canary weight」 | 改成「controller 會立刻改回，但權重會短暫跳動」。VS 仍然要放 base/；Argo CD 要設 ignoreDifferences | ✓ |
+| P15-035 | 7391 | 「`10-`：release ConfigMap（每版一個檔）」 | 過時 | canary-manual/CANARY-COMPLETE.md §2 | 「所以 ConfigMap（`10-`/`11-`）一定先於 workload（`20-`/`21-`）建立。」 | 改成 10-／11- 兩份固定，並補上 runtime 的 05- | ✓ |
+| P15-036 | 7394 | 「`kubectl apply -f release/` 會按檔名排序套用」 | 無法驗證 | https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/ ／ https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ | 官方只說 `-f <directory>` 會建立目錄內所有物件，沒有寫順序；後果有官方依據：「If you reference a ConfigMap that doesn't exist and you don't mark the reference as `optional`, the Pod won't start.」 | 註明這是 kubectl 走目錄的實作行為，不是文件保證（CANARY §2 也依賴它） | ✓ |
+| P15-037 | 7398–7607（15.10） | Track A 的 apply-only SOP | 改成指標 | canary-manual/CANARY-COMPLETE.md §5 | 「### 步驟 1【改動】canary 的設定與 image」 | 摘要：主線就是 §5 的步驟 0–5，【改動】／【驗證】的分法保留；關閉看 §8.2 | ✓ |
+| P15-038 | 7407–7419 | 起始狀態：`configMap.name: ...-1.2.3`、`config-version` | 過時 | canary-manual/CANARY-COMPLETE.md §3.6 | 「# 【修正】原本是 config-version: "1.2.3"。」 | 由指標取代 | ✓ |
+| P15-039 | 7423–7447 | 新增 `10-configmap-1.3.0.yaml`，帶 `immutable: true`、label `config-version` | 錯誤 | canary-manual/CANARY-COMPLETE.md §2.2 | 「（必須拿掉 `immutable: true`，否則 `kubectl apply` 會噴 `field is immutable`）」 | 改成直接改 `11-configmap-canary.yaml` | ✓ |
+| P15-040 | 7453–7482 | 「三處版本號 + replicas 共四個地方」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §2 命名規則 | 「現在 ConfigMap 名稱固定，annotation 改成**內容雜湊**（第 2.2 節），所以只剩一處需要人工維護。」 | 由指標取代 | ✓ |
+| P15-041 | 7553–7561 | promote 的同一個 commit 把 canary `replicas: 1 → 0` | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4a | 「`21-deployment-canary.yaml` 的 `APP_CANARY_ENABLED` 改成 `"false"`，**`replicas` 維持 1**」 | 由指標取代 | ✓ |
+| P15-042 | 7581–7592 | 5b `replicas: 0`「使用者完全無感」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §5 步驟 4b | 「**同樣不是 `replicas: 0`。** 見第 8 章。」 | 由指標取代 | ✓ |
+| P15-043 | 7598–7602 | 操作對照總表（三處版本號、promote／不通過都是 `1 → 0`） | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.1 | 「`APP_CANARY_ENABLED=false` + image 改回 stable 版 ／ 下一次頁面導航 ／ **乾淨排空，零 503** ／ **預設做法**」 | 由指標取代 | ✓ |
+| P15-044 | 7630 | 「revert 它（會把三處版本號改回 1.2.3）」 | 過時 | canary-manual/CANARY-COMPLETE.md §5 步驟 5 | 「git revert <promote 那個 commit 的 sha>     # ConfigMap 與 Deployment 一起還原」 | 改寫 | ✓ |
+| P15-045 | 7636 | 「revert 把 image 和 ConfigMap 引用**一起**改回去」 | 不精確 | canary-manual/CANARY-COMPLETE.md §2.2 | 「**ConfigMap 與 Deployment 的改動必須在同一個 commit。** 回滾一律 `git revert <該 commit>` → 重跑 apply」 | 現在還原的是 ConfigMap 內容＋image＋config-hash，前提是放在同一個 commit；用 §8.4 比對 hash 驗證 | ✓ |
+| P15-046 | 7638–7659 | 「舊 ConfigMap 絕對不能刪」、保留 3 版、接受累積 | 過時 | canary-manual/CANARY-COMPLETE.md §2.1 | 「回滾超過 3 版 → ConfigMap 不存在 → pod 卡在 `ContainerCreating`。這正是「回滾時找不到檔案」。」 | 名稱固定後這個問題已經消失，刪掉或改成歷史說明 | ✓ |
+| P15-047 | 7657 | prune「會刪掉不在這次 apply 檔案裡、但帶有該 label 的所有資源」 | 不精確 | https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/ | 「Allowlist-based pruning: This mode has existed since kubectl v1.5 but is still in alpha due to usability, correctness and performance issues with its design.」 | 補上 alpha 狀態、只刪帶 last-applied annotation 且在 allowlist 內的物件；「不建議」的結論不變 | ✓ |
+| P15-048 | 7663–7726（15.12） | Track B 在 apply-only 下的限制 | 改成指標 | canary-manual/CANARY-COMPLETE.md §0、§10 #11 | 「CD 只能 `kubectl apply`（不能 patch / scale / delete）」 | 摘要：promote 需要 CLI；apply-only 只能靠 `spec.paused`，而且沒驗證過；VS 必須放 base/；結論是 apply-only 用 Track A（與 §0 一致） | ✓ |
+| P15-049 | 7727–7771（15.13） | Azure Pipeline 設定建議 | 改成指標 | canary-manual/CANARY-COMPLETE.md §2、§4.1 | 「base/          變更頻率：極低（網路設定）      → 單獨 stage，額外簽核」 | 摘要：base 和 release 分 stage、base 加核准；validate stage 用 `--dry-run=server`（§4.1）；去問平台團隊用的是哪個 task | ✓ |
+| P15-050 | 7759 | 「`KubernetesManifest@1` 支援 deploy / promote / reject / scale / patch / delete」 | 不精確 | https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/kubernetes-manifest-v1 | 「Allowed values: `bake`, `createSecret` (create secret), `delete`, `deploy`, `patch`, `promote`, `scale`, `reject`.」「Choosing the `canary` strategy with the `deploy` action leads to the creation of workload names suffixed with `-baseline` and `-canary`.」 | 補充：那裡的 promote／reject 是這個 task 自己的 baseline／canary 機制，跟 Argo promote 或本 repo 的 stable／canary 無關；scale／patch 在本 repo 是禁止的捷徑 | ✓ |
+| P15-051 | 7767 | 「如果問完發現其實可以跑指令，就回頭用 15.4 / 15.5 那兩份 SOP」 | 錯誤 | canary-manual/CANARY-COMPLETE.md §8.3 | 「**`kubectl rollout undo`** ／ 固定名稱的 ConfigMap 是可變的。」 | 就算有權限，也不能用 15.4 裡的 scale 0 和 rollout undo | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P15-201 | 6793 | 同一個服務不能這次用 A、下次用 B（repo 規定互斥） | repo 根目錄 CLAUDE.md |
+| P15-202 | 6836 | `setHeaderRoute` 支援 regex 比對 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P15-203 | 6840 | 只帶 name 的空 `setHeaderRoute` 會移除那條 route | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P15-204 | 6851、6894 | analysis 失敗會自動 abort | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P15-205 | 6869–6870、6884–6886 | Track B 是 host-level 分流：2 個 Service、2 份 DR、沒有 subsets | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P15-206 | 6883 | Argo 會動態改 Service 的 selector | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P15-207 | 6887–6890 | pilot-run 由 Argo 動態插入，放在手寫 route 之上 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/ |
+| P15-208 | 6889 | `primary` 這個 route 名稱是必要的 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+| P15-209 | 7132 相關 | Inconclusive 會讓 rollout 暫停在當前 step | https://argo-rollouts.readthedocs.io/en/stable/features/analysis/ |
+| P15-210 | 7209 | 只能 apply 的 CD 就用 Track A | canary-manual/CANARY-COMPLETE.md §0 |
+| P15-211 | 7311、7319 | pipeline 只能 apply；本人只有唯讀 | canary-manual/CANARY-COMPLETE.md §0 |
+| P15-212 | 7332、7610 | 回滾靠 git revert ＋ 重新 apply | canary-manual/CANARY-COMPLETE.md §2.2、§5 步驟 5 |
+| P15-213 | 7338–7341 | YAML 裡寫死 replicas 會跟 HPA 打架 | https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/ |
+| P15-214 | 7382–7383 | base 要跟 release 分開 | canary-manual/CANARY-COMPLETE.md §2 |
+| P15-215 | 7394 | ConfigMap 不存在時 Pod 起不來 | https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/ |
+| P15-216 | 7657 | 不建議用 prune | https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/ |
+| P15-217 | 7709 | 用 Argo CD 時要忽略 VS weight 的差異 | https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/ |
+
+---
+
+## 超出 guide 範圍的發現（批次 ⑤）
+
+這兩項不是 guide 的錯，是查證途中順帶發現的 repo 本身的問題。不進修正 guide 的故事，處理方式由使用者決定：
+
+| ID | 對象 | 發現 | 來源 | 處理 | 使用者確認 |
+|---|---|---|---|---|---|
+| X-001 | `canary-manual/track-a/base/02-destinationrule.yaml`、`03-virtualservice.yaml` | 還沒落地 CANARY-COMPLETE.md 3.3／3.4 的【修正】：親和 cookie 仍叫 `JSESSIONID`、`retryOn` 含 `5xx`、主路由留著 `weight: 0` 的 canary destination、pilot 規則沒有 uri 條件。所以 P14-013／025／027／028 判「過時（相對目標狀態）」而非「錯誤」 | canary-manual/CANARY-COMPLETE.md §3.3、§3.4 | 只記錄，另開 PRD 修 manifest（照 CLAUDE.md「改 manifest 就要加檢查」）；已寫進 CLAUDE.md「已知過時」清單 | ✓ |
+| X-002 | repo 根目錄 `CLAUDE.md`「兩者同時存在時兩個 controller 會搶 pod」 | Argo 官方："The Rollout won't try to manage existing Deployment Pods."，並建議遷移時讓 Rollout 與 Deployment 並存。兩軌互斥的規則仍成立，但真正原因是共用 `app` label（會被對方的 Service 選進 endpoint）與同一條 VirtualService | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | loop 最後的 retro 故事改寫這句的理由（互斥規則不變） | ✓ |

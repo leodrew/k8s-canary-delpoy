@@ -53,6 +53,11 @@ bash scripts/validate.sh      # 或 npm run validate
     `SPRING_CONFIG_ADDITIONAL_LOCATION`。**在這個 repo 那是錯的**：US-006 已改成
     `SPRING_CONFIG_LOCATION`（replace 語意），validate.sh 的檢查 [6] 會擋改回去的寫法。
     兩份說法衝突時以這份和 CANARY-COMPLETE.md 為準。
+  - **`track-a/base/` 還沒落地 CANARY-COMPLETE.md 3.3／3.4 的四項【修正】**：DR 的
+    親和 cookie 仍叫 `JSESSIONID`（應改 `epmm-affinity`）、VS 的 `retryOn` 仍含 `5xx`、
+    主路由仍留著 `weight: 0` 的 canary destination、pilot 規則沒有
+    `uri: prefix: /gui_epmmFormQuery`。guide 查證（批次 ⑤，P14-013／025／027／028）
+    時發現，刻意不放進那次 loop —— 要另開 PRD，照「改 manifest 就要加檢查」的規則做。
 
 ## Ralph 工作流（`ralph/`）
 
