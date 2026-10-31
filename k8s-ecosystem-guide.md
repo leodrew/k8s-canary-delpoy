@@ -555,7 +555,7 @@ spec:
 |---|---|---|
 | `ALLOW` | 白名單。**一旦有任何 ALLOW policy 選中這個 workload，不符合的一律拒絕** | 最常用 |
 | `DENY` | 黑名單。優先於 ALLOW 判斷 | 緊急封鎖某來源、擋掉 `/actuator` 外部存取 |
-| `AUDIT` | 只記 log 不擋 | **上線前先跑這個**，確認規則沒寫錯 |
+| `AUDIT` | 不影響放行／拒絕，只把命中的請求「標記」成要稽核；要有另外設定並啟用的稽核 plugin 才會真的產生紀錄 | **不能拿來預演**（見「踩雷」最後一條） |
 | `CUSTOM` | 交給外部授權服務（ext_authz，如 OPA） | 需要複雜商業邏輯授權 |
 
 **判斷順序（非常重要）：**
@@ -575,8 +575,8 @@ CUSTOM  →  DENY  →  ALLOW
 |---|---|---|---|
 | `principals` | mTLS 憑證裡的 **ServiceAccount** 身分 | **必須** | 填 app 名稱（如 `pmc-epmmformquerygui`）而不是 **SA 名稱** |
 | `namespaces` | 來源 namespace（一樣從憑證取） | **必須** | 以為是比對封包來源 IP |
-| `ipBlocks` | **直連的 source IP**（Envoy 看到的 remote address） | 不用 | 在 mesh 內幾乎必錯——比到的是 ingressgateway 或 node 的 IP |
-| `remoteIpBlocks` | **`X-Forwarded-For` 裡的原始 client IP** | 不用 | 沒設 `numTrustedProxies` 就會取到錯的那一段 |
+| `ipBlocks` | **封包的來源位址**（L3 的 source IP） | 不用 | 以為 client IP 一定在這裡——前面隔著 LB／ingressgateway 時，比到的是上一跳（LB、node 或 gateway Pod）的 IP，不是原始 client |
+| `remoteIpBlocks` | **原始 client IP**（由 `X-Forwarded-For` 或 PROXY protocol 決定） | 不用 | 沒設 `numTrustedProxies`（或 PROXY protocol）就會取到錯的那一段 |
 | `requestPrincipals` | **JWT 的 `iss/sub`**（end-user 身分） | 不用（但要有 RequestAuthentication） | 忘了配一條 RequestAuthentication，JWT 根本沒被驗 |
 
 `principals` 的格式一定是：
@@ -614,9 +614,12 @@ spec:
 ```
 
 ```yaml
-# 寫法 B：remoteIpBlocks —— 比對 X-Forwarded-For 的原始 client IP
+# 寫法 B：remoteIpBlocks —— 比對原始 client IP（來自 X-Forwarded-For 或 PROXY protocol）
 # 適用：在 ingressgateway 上做「只有公司內網能進」的白名單
-# 前置：MeshConfig 必須設 numTrustedProxies
+# 前置：必須設 numTrustedProxies（值 = gateway 前面受信任的 proxy 層數）。
+#       可設在全域 meshConfig.defaultConfig.gatewayTopology，或用 gateway Pod 的
+#       proxy.istio.io/config annotation 個別設。
+#       走 PROXY protocol 時，LB 與 gateway 都要支援。
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
@@ -636,7 +639,12 @@ spec:
 ```
 
 ```yaml
-# 寫法 C：DENY + notRemoteIpBlocks —— 黑名單式（更保險，因為 DENY 優先）
+# 寫法 C：DENY + notRemoteIpBlocks —— 黑名單式（DENY 優先於 ALLOW 判斷）
+# 前置：跟寫法 B 一樣，必須設 numTrustedProxies（或走 PROXY protocol）。
+#       沒設時 remote IP 退回上一跳（LB 或 node IP，通常就在 10.0.0.0/8 內），
+#       notRemoteIpBlocks: ["10.0.0.0/8"] 永遠成立不了 → DENY 不觸發 →
+#       所有外部流量靜默放行，而且沒有任何錯誤訊息。
+# 注意：B 允許 10/8 與 172.16/12，這裡只排除 10/8，語意不同；要等價就把 172.16.0.0/12 也列進來。
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
@@ -650,12 +658,12 @@ spec:
   rules:
     - from:
         - source:
-            notRemoteIpBlocks: ["10.0.0.0/8"]   # 「不是內網的」一律擋
+            notRemoteIpBlocks: ["10.0.0.0/8", "172.16.0.0/12"]   # 「不是內網的」一律擋（與寫法 B 的內網範圍一致）
 ```
 
 > **A 跟 B 的選擇準則**：問自己「我要擋的那個 IP，在到達這個 Envoy 之前經過幾層 proxy？」
-> - 0 層（Pod 直連 Pod）→ 用 `ipBlocks`
-> - 1 層以上（經過 VIP / ingressgateway / CDN）→ 用 `remoteIpBlocks`，並確認 `numTrustedProxies`
+> - client IP 在 L3 就被保留（Pod 直連 Pod，或 LB Service 設了 `externalTrafficPolicy: Local`）→ 用 `ipBlocks`
+> - client IP 只存在 `X-Forwarded-For` 或 PROXY protocol 裡 → 用 `remoteIpBlocks`，並確認 `numTrustedProxies`
 
 #### 目標比對與條件
 
@@ -666,7 +674,6 @@ spec:
             principals: ["cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"]
       to:
         - operation:
-            hosts:   ["epmm-api-svc.ea-epmm.svc.cluster.local"]
             methods: ["GET", "POST"]
             paths:   ["/api/v1/*"]
             ports:   ["8080"]              # 字串！寫成數字 8080 會被 API server 拒絕
@@ -689,11 +696,12 @@ spec:
 
 #### 踩雷
 
+- **`hosts` 是對 Host header 做精確比對**：client 用短名（`epmm-api-svc`）、或 Host 帶 port（`...:8080`）都比對不到，ALLOW 不命中就 403。官方建議 `hosts`／`notHosts` 只用在 gateway 擋外部流量，sidecar 上不要寫；真要用就同時寫 `host` 與 `host:*` 兩種。
 - **`paths` 的萬用字元只支援前綴/後綴**：`/api/*`、`*/health` 可以；`/api/*/detail` 這種中間的萬用字元**不支援**。
 - **`paths` 比對的是「未正規化」的路徑**。`/api/v1/../admin` 這類寫法可能繞過規則，務必在 MeshConfig 開啟 `pathNormalization`。
 - **`ports` 一定要用字串**。
 - **policy 放錯 namespace**：AuthorizationPolicy 要放在**被保護方**的 namespace，不是呼叫方。放在 `istio-system`（root ns）= 全 mesh 生效。
-- **上線前先用 `AUDIT` 跑一輪**，看 log 確認沒誤傷再改 `ALLOW`。
+- **上線前的預演不要用 `AUDIT`**：`AUDIT` 沒有另外設稽核 plugin 就不會有任何紀錄，也無法預演 `ALLOW` 會擋掉什麼。預演改用 `istio.io/dry-run: "true"` annotation（Alpha，目前只支援 `ALLOW`、`DENY`）：加在原本的 policy 上，看 Envoy log 與 metrics 的 shadow 結果，確認沒誤傷後把 annotation 拿掉。
 
 ---
 
