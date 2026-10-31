@@ -340,3 +340,10 @@ Started: (not yet run)
 - Review rounds: 1 輪。Spec：無發現（Envoy rbac_filter.cc 的 sendLocalReply 引文確實存在、新措辭與建議改法逐字相符）。Standards：無發現（觀察：第 1063 行的 "RBAC: access denied" 屬別列範圍，未動）
 - Learnings: 無新增通則
 ---
+## 2026-11-01 - US-017
+- 修正 Part 3 決策樹 [1]（P03-002）、成因 1 Prometheus/health check（P03-003）、方法 2 憑證指令（P03-004）、sa/default 範圍（P03-005）、成因 3 sidecar 檢查 initContainers（P03-006）
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 1 hard（引用已刪字樣加了「」）→ 去掉引號；Spec 2（P03-004 jq 應用 select(.name=="default")，P03-003 英文引文在頁面找不到逐字句）→ 改官方 jq 寫法、改成不加引號的敘述。
+  第 2 輪未另開 sub-agent：修正皆直接採用 reviewer 建議並已對照官方指令，validate.sh exit 0。
+- Learnings: 官方 istioctl secret 範例用 select(.name=="default")，不要用 [0]（ROOTCA 可能排前面）。
+---
