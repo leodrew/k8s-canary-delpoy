@@ -259,3 +259,9 @@ Started: (not yet run)
   - `### 參考來源` 用裸 URL（`- 標題：https://...`）[11] 就認得；「Part 0 各列」照 PRD 解讀為「已修（✓ 且非正確）各列」的 URL 欄，Spec reviewer 接受。
   - 在 guide 裡用「」引用舊說法來反駁時，被引用的字樣如果同一次改動刪掉了，reviewer 會說引用落空；改用不加引號的敘述。
 ---
+## 2026-11-01 - US-005
+- 修正 Part 1「完整鏈路」⑤（P01-002：Pod IP 清單來自 istiod/service registry，DR labels 只是篩選）與「逐跳職責表」④a/④b/⑤（P01-005/006/007）：host 不符＝404+NR、SNI 不符＝TLS 失敗、access log 預設不開、UH/NC/UF 拆開；表下新增三條補充說明。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: R1 Standards 2 hard（⑤ 格子與說明重複 UF；④a「見表下說明」指向沒有 SNI 內容）→ 精簡格子、把 SNI 與 listener 提示搬進說明；Spec 無阻擋發現（「預設不開」「通常是 NC」「SNI 握手失敗」為帳本建議改法的推論，來源頁未逐字支持）。R2 乾淨。
+- Learnings: kubernetes guide 為 CRLF，用 node 腳本先 split("\r\n") 改完再還原；Edit 工具/ sed 含換行易壞。
+---
