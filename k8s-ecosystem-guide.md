@@ -377,7 +377,7 @@ selector:
 
 這是最反直覺、也最容易踩雷的一點。
 
-**沒有 Istio 時**：Pod A 打 `pmc-epmmformquerygui-svc:8080` → DNS 解析到 Service 的 ClusterIP（VIP）→ 封包送到 VIP → **kube-proxy 的 iptables/IPVS 規則**做 DNAT，隨機挑一個 Pod IP。負載平衡、session affinity 都發生在 kube-proxy。
+**沒有 Istio 時**：Pod A 打 `pmc-epmmformquerygui-svc:8080` → DNS 解析到 Service 的 ClusterIP（VIP）→ 封包送到 VIP → **kube-proxy 的 iptables（目前預設）或 nftables 規則**做 DNAT，挑一個 Pod IP（iptables 模式預設隨機挑；IPVS 模式則依 scheduler）。IPVS 模式自 v1.35 起 deprecated、v1.40 預設停用、v1.43 移除（KEP-5495）。負載平衡、session affinity 都發生在 kube-proxy。
 
 **有 Istio 時**：Pod A 打 `pmc-epmmformquerygui-svc:8080` → DNS 一樣解析到 ClusterIP → 但封包在離開 Pod 前就被 **iptables 攔截導向自己的 sidecar（port 15001）** → sidecar 認出這個 ClusterIP 對應哪個 Service → **sidecar 自己從 endpoint 清單挑一個 Pod IP，直接連過去**。
 
@@ -389,8 +389,8 @@ selector:
 
 **這造成三個直接後果：**
 
-1. **`Service.spec.sessionAffinity: ClientIP` 在 mesh 內失效。** 因為那是 kube-proxy 的功能，而流量根本沒經過 kube-proxy 的負載平衡邏輯。要在 Istio 下做黏著，必須用 DestinationRule 的 `consistentHash`（見 Part 6 Service 章節與 Part 7）。
-2. **`Service` 的 port 名稱決定 Istio 用 L4 還是 L7 處理。** 沒命名好，`VirtualService` 的 header/path 比對會默默失效。
+1. **`Service.spec.sessionAffinity: ClientIP` 在 mesh 內失效。** 因為那是 kube-proxy 選 backend 時套用的功能，而流量根本沒經過 kube-proxy 的負載平衡邏輯。（這一點是由機制推得，不是 Istio 官方逐字寫的結論；可用 `istioctl proxy-config endpoint` 與實測驗證。）要在 Istio 下做黏著，應改用 DestinationRule 的 `consistentHash`（見 Part 6 Service 章節與 Part 7）。注意它只是「軟性」黏著（Istio 官方：「soft session affinity」、「the guarantees are weaker」）：Pod 增減時會重新分配，不能取代共享 session。從 ingressgateway 進來的流量若用 `useSourceIp`，雜湊到的會是 gateway 的 IP，應優先用 `httpCookie` 或 header。
+2. **Istio 用 L4 還是 L7 處理，由 `appProtocol`（優先）或 Service port 名稱前綴決定。** 兩者都沒寫時，sidecar 會自動偵測 HTTP／HTTP2，偵測不出來才當純 TCP，這時 `VirtualService` 的 header/path 比對才會失效。建議明確寫 `appProtocol: http`，不要靠偵測。
 3. **Headless Service（`clusterIP: None`）行為不同**，因為沒有 VIP 可攔截，sidecar 走的是原始目的地路徑。
 
 ### 關鍵觀念二：Client IP 在哪一跳被弄丟
