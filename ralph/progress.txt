@@ -311,3 +311,19 @@ Started: (not yet run)
   - 在 guide 裡用「」引用 guide 自己的字樣時，要逐字複製，reviewer 會 grep。
   - Bash 工具裡不要在 heredoc 前面留 `cat > /dev/null;` 之類讀 stdin 的指令 —— 會卡到 timeout；含單引號的 node 片段一律用 Write 寫成 repo 內暫存 .js 再跑、跑完刪掉。
 ---
+
+## 2026-10-31 - US-002 第 3 輪 review（完成，passes: true）
+- 本 iteration 沒有改 guide：照 prd.json notes，以 BASE 8642a38 重跑 code-review，涵蓋 f455ca8 的修正。
+- Review round 3：
+  - Spec：5 個來源 URL 全部 WebFetch，所有來源引文逐字找到；(a) 缺漏 0、(b) 範圍外 0、(c) 寫錯 0。
+    nit：「config cluster」字樣不在引用頁（頁面用 primary cluster），帳本建議改法本身就用這個字，不算偏離；
+    Pod 層級 istio.io/rev 仍未提（帳本沒寫）。
+  - Standards：沒有硬性違規；前兩輪的修正都還在。判斷題（未修，留給之後）：
+    (1) P00-001 括號裡的「以及下面的可觀測性」是第 2 輪為了對應下方 P99 那一條加的，帳本建議改法沒寫 —— 在此補記為連動修改；
+    (2) 括號套括號加破折號，讀起來吃力；(3) P00-011「反過來，…任一邊設 disabled 就不注入」的「反過來」不精確（意思是「即使另一邊開著」）；
+    (4) 「config cluster」沒解釋；(5) P03-008 修的時候應該指回 Part 0 的注入規則，不要再重述一次，否則兩份會漂移。
+- Files: ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 兩輪上限之後才修的發現，下一個 iteration 只要以同一個 BASE 再 review 一次即可，不必重做故事。
+  - 修 P03-008（US-018）時讀一下這裡的 (5)：注入規則已經在 Part 0 寫齊。
+---
