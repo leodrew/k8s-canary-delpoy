@@ -1199,7 +1199,7 @@ kubectl get authorizationpolicy -n istio-system \
 # （不要用 grep selector：它只列出「有」selector 的，危險的「沒有」反而看不到）
 ```
 
-放在 `istio-system` 的 policy **必須有 `selector`**，否則就是全 mesh 生效。
+放在 `istio-system` 的 policy **必須有 `selector` 或 `targetRefs`**（兩者擇一即可），兩者都沒有才會套用到全 mesh（Istio：「If the selector and the targetRef are not set, the selector will match all workloads.」）。
 
 ---
 
