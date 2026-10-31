@@ -1343,27 +1343,37 @@ GUIDE="k8s-ecosystem-guide.md"
 # 再對剩下的部分套 OPEN / CLOSE；區塊內容也要剝掉同樣層數的 `>`。
 # 內容行少了 `>`（blockquote 在 ``` 之前就結束了）時 fenceBody 回傳 null：
 # 渲染出來那個區塊已經斷了，[10] 把它當成壞區塊報出來，[11] 把它當成區塊結束。
+#
+# fence 的長相照 CommonMark：三個以上的反引號或波浪號；結尾必須是同一種字元、長度
+# 不短於開頭（```` 開的區塊，裡面的 ``` 只是內容 —— 這正是有人用四個反引號的原因）。
+# 反引號 fence 的 info string 不能含反引號，所以散文裡的行內程式碼 ```` ```yaml ````
+# 不是 fence。之前只認 ``` 並把 ~~~／```` 一律 FAIL，結果是行內程式碼被誤報、
+# ```` 收尾的區塊吞掉下一個 fence，報錯的位置與原因都不對；照規格認得它們就沒有這兩個問題。
+#
+# 「哪些行屬於哪個區塊」只在 fenceBlocks 走一次，[10] 與 [11] 都用它的結果 ——
+# 各自寫一份 walk 的話，fence 沒關、blockquote 斷掉這類邊界情況兩邊遲早會分歧。
 GUIDE_FENCE_JS='
-const OPEN = /^(\s*)```\s*([^`\s]*)[^`]*$/;
-const CLOSE = /^\s*```\s*$/;
+const OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
+const CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
 // 最多剝 max 層 `>`（預設全剝）。
 function splitQuote(l, max = Infinity) {
   let depth = 0, m;
   while (depth < max && (m = l.match(/^ {0,3}> ?/))) { depth++; l = l.slice(m[0].length); }
   return { depth, rest: l };
 }
-// 這兩套判定只認 ```，不認 ~~~ 與四個以上的反引號（CommonMark 都算 fence）。guide 目前
-// 沒有那兩種；真的出現時要讓它 FAIL，不能讓那種區塊無聲地不被檢查 —— [10] 用這個擋。
-const UNSUPPORTED_FENCE = /^\s*(~~~|````)/;
-// 回傳 { depth, indent, lang } 或 null。
+// 回傳 { depth, indent, ch, len, fence, lang } 或 null。
 function fenceOpen(l) {
   const q = splitQuote(l);
   const m = q.rest.match(OPEN);
-  return m ? { depth: q.depth, indent: m[1], lang: m[2] } : null;
+  if (!m) return null;
+  const info = m[3].trim();
+  if (m[2][0] === "`" && info.includes("`")) return null; // 行內程式碼，不是 fence
+  return { depth: q.depth, indent: m[1], ch: m[2][0], len: m[2].length, fence: m[2], lang: info.split(/\s+/)[0] };
 }
 function fenceClose(l, open) {
   const q = splitQuote(l);
-  return q.depth === open.depth && CLOSE.test(q.rest);
+  const m = q.rest.match(CLOSE);
+  return q.depth === open.depth && !!m && m[1][0] === open.ch && m[1].length >= open.len;
 }
 // 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；blockquote 已經結束時回傳 null。
 function fenceBody(l, open) {
@@ -1371,6 +1381,32 @@ function fenceBody(l, open) {
   if (q.depth < open.depth) return null;
   const rest = splitQuote(l, open.depth).rest;
   return rest.startsWith(open.indent) ? rest.slice(open.indent.length) : rest;
+}
+// 整份文件走一次，回傳每個區塊：start 是開頭 fence 的行；內容是 start+1 .. end-1。
+//   status "closed"       —— end 是結尾 fence 那一行。
+//   status "quote-broken" —— end 是少了 `>` 的那一行（它不屬於區塊，照一般行處理）。
+//   status "unclosed"     —— 沒有結尾，end === lines.length（照 CommonMark 一路吃到檔尾）。
+function fenceBlocks(lines) {
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const open = fenceOpen(lines[i]);
+    if (!open) continue;
+    let j = i + 1;
+    while (j < lines.length && !fenceClose(lines[j], open) && fenceBody(lines[j], open) !== null) j++;
+    const status = j >= lines.length ? "unclosed" : fenceClose(lines[j], open) ? "closed" : "quote-broken";
+    blocks.push({ start: i, end: j, open, status });
+    i = status === "quote-broken" ? j - 1 : j;
+  }
+  return blocks;
+}
+// 屬於某個區塊的行（fence 行與內容行）。標題、skip 標記、參考來源連結都只看這以外的行。
+function fencedLines(blocks) {
+  const s = new Set();
+  for (const b of blocks) {
+    const last = b.status === "closed" ? b.end : b.end - 1;
+    for (let k = b.start; k <= last; k++) s.add(k);
+  }
+  return s;
 }
 '
 
@@ -1389,74 +1425,65 @@ const isYamlLang = s => /^(yaml|yml)$/i.test(s);
 const errors = [];
 let parsed = 0;
 let skipped = 0;
+let yamlBlocks = 0; // 找到的 yaml 區塊數（不論解析成敗），只用來判斷「比對規則是否對不上文件」
 
-for (let i = 0; i < lines.length; i++) {
-  const line = lines[i];
-  const open = fenceOpen(line);
+const blocks = fenceBlocks(lines);
+const fenced = fencedLines(blocks);
 
-  if (open) {
-    let j = i + 1;
-    while (j < lines.length && !fenceClose(lines[j], open) && fenceBody(lines[j], open) !== null) j++;
-    if (j >= lines.length) {
-      errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊沒有結尾的 ``` —— 後面整份文件都會被當成程式碼");
-      break;
-    }
-    if (!fenceClose(lines[j], open)) {
-      errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊在 blockquote 裡，但第 " + (j + 1) + " 行少了 \">\" 前綴 ——");
-      errors.push("    blockquote 在結尾的 ``` 之前就結束了，渲染出來的區塊是斷的。");
-      i = j - 1;
-      continue;
-    }
-    if (isYamlLang(open.lang)) {
-      const marker = i > 0 ? splitQuote(lines[i - 1]).rest.match(MARKER) : null;
-      if (marker) {
-        // 原因是空的那種已經在掃到標記那一行時報過了，這裡只負責略過。
-        skipped++;
-      } else {
-        // fence 本身有縮排（例如在清單項目底下）或在 blockquote 裡時，內容也帶著同樣的
-        // 縮排／`>` 前綴，先剝掉（fenceBody，見 GUIDE_FENCE_JS）。
-        const body = lines.slice(i + 1, j).map(l => fenceBody(l, open)).join("\n");
-        try {
-          y.loadAll(body);
-          parsed++;
-        } catch (e) {
-          const at = e.mark ? "（錯誤在檔案第 " + (i + 2 + e.mark.line) + " 行）" : "";
-          errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊解析失敗：" + (e.reason || e.message) + at);
-        }
-      }
-    }
-    i = j;
+for (const b of blocks) {
+  const i = b.start, open = b.open;
+  if (isYamlLang(open.lang)) yamlBlocks++;
+  if (b.status === "unclosed") {
+    errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊沒有結尾的 " + open.fence + " —— 後面整份文件都會被當成程式碼");
     continue;
   }
-
-  if (UNSUPPORTED_FENCE.test(splitQuote(line).rest)) {
-    errors.push("第 " + (i + 1) + " 行：~~~ 或四個以上反引號的 fence 這個檢查認不得，裡面的 YAML 不會被驗證。");
-    errors.push("    改用 ```（三個反引號）；真的需要時先擴充 GUIDE_FENCE_JS。");
+  if (b.status === "quote-broken") {
+    errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊在 blockquote 裡，但第 " + (b.end + 1) + " 行少了 \">\" 前綴 ——");
+    errors.push("    blockquote 在結尾的 " + open.fence + " 之前就結束了，渲染出來的區塊是斷的。");
     continue;
   }
-
-  if (line.includes("validate:skip-yaml")) {
-    // blockquote 裡的區塊，標記也寫在 blockquote 裡（> <!-- ... -->），先剝掉 > 再比對。
-    const m = splitQuote(line).rest.match(MARKER);
-    if (!m) {
-      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記格式不對，要寫成一整行 <!-- validate:skip-yaml 原因 -->");
-      continue;
-    }
-    if (m[1].trim() === "") {
-      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記沒有寫原因。略過一個區塊的檢查必須說明為什麼它不能被解析，");
-      errors.push("    否則下一個人無從判斷這個豁免還該不該存在。");
-    }
-    const next = lines[i + 1];
-    const nextOpen = next === undefined ? null : fenceOpen(next);
-    if (!nextOpen || !isYamlLang(nextOpen.lang)) {
-      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記的下一行不是 ```yaml / ```yml fence。");
-      errors.push("    標記只作用在緊接著的那一個區塊（中間不能有空行）；區塊被搬走了就把標記一起刪掉。");
-    }
+  if (!isYamlLang(open.lang)) continue;
+  const marker = i > 0 ? splitQuote(lines[i - 1]).rest.match(MARKER) : null;
+  if (marker) {
+    // 原因是空的那種在下面掃標記時報，這裡只負責略過。
+    skipped++;
+    continue;
+  }
+  // fence 本身有縮排（例如在清單項目底下）或在 blockquote 裡時，內容也帶著同樣的
+  // 縮排／`>` 前綴，先剝掉（fenceBody，見 GUIDE_FENCE_JS）。
+  const body = lines.slice(i + 1, b.end).map(l => fenceBody(l, open)).join("\n");
+  try {
+    y.loadAll(body);
+    parsed++;
+  } catch (e) {
+    const at = e.mark ? "（錯誤在檔案第 " + (i + 2 + e.mark.line) + " 行）" : "";
+    errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊解析失敗：" + (e.reason || e.message) + at);
   }
 }
 
-if (parsed + skipped === 0) {
-  errors.push(file + "：一個 ```yaml 區塊都沒找到。這代表 fence 的比對規則跟文件對不上了，");
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i];
+  if (fenced.has(i) || !line.includes("validate:skip-yaml")) continue;
+  // blockquote 裡的區塊，標記也寫在 blockquote 裡（> <!-- ... -->），先剝掉 > 再比對。
+  const m = splitQuote(line).rest.match(MARKER);
+  if (!m) {
+    errors.push("第 " + (i + 1) + " 行：skip-yaml 標記格式不對，要寫成一整行 <!-- validate:skip-yaml 原因 -->");
+    continue;
+  }
+  if (m[1].trim() === "") {
+    errors.push("第 " + (i + 1) + " 行：skip-yaml 標記沒有寫原因。略過一個區塊的檢查必須說明為什麼它不能被解析，");
+    errors.push("    否則下一個人無從判斷這個豁免還該不該存在。");
+  }
+  const next = lines[i + 1];
+  const nextOpen = next === undefined ? null : fenceOpen(next);
+  if (!nextOpen || !isYamlLang(nextOpen.lang)) {
+    errors.push("第 " + (i + 1) + " 行：skip-yaml 標記的下一行不是 yaml / yml fence。");
+    errors.push("    標記只作用在緊接著的那一個區塊（中間不能有空行）；區塊被搬走了就把標記一起刪掉。");
+  }
+}
+
+if (yamlBlocks === 0) {
+  errors.push(file + "：一個 yaml 區塊都沒找到。這代表 fence 的比對規則跟文件對不上了，");
   errors.push("    這一項在這種狀態下會永遠綠燈 —— 先修比對規則。");
 }
 
@@ -1517,18 +1544,11 @@ if (!/^Part \d+$/.test(part)) {
 }
 
 // 只收 code fence 外面的標題：bash 區塊裡的 "## ..." 是註解，不是章節。
-// fenceOpen / fenceClose / fenceBody 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一組。
+// fenceBlocks / fencedLines 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一份 walk。
 const heads = [];
-const fenced = new Set(); // fence 行與區塊內容行：[11] 收連結時也要跳過它們
-let fence = null;
+const fenced = fencedLines(fenceBlocks(lines)); // [11] 收連結時也要跳過這些行
 lines.forEach((l, i) => {
-  if (fence) {
-    if (fenceClose(l, fence)) { fenced.add(i); fence = null; return; }
-    if (fenceBody(l, fence) !== null) { fenced.add(i); return; }
-    fence = null; // blockquote 在 ``` 之前結束，區塊跟著結束；這一行照一般行處理
-  }
-  const o = fenceOpen(l);
-  if (o) { fenced.add(i); fence = o; return; }
+  if (fenced.has(i)) return;
   const h = l.match(/^(#{1,6})\s+(.*?)\s*$/);
   if (h) heads.push({ i, level: h[1].length, text: h[2] });
 });

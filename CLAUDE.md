@@ -149,8 +149,9 @@ bash scripts/validate.sh      # 或 npm run validate
   fence 判定（`GUIDE_FENCE_JS`，[10]／[11] 共用）認得帶縮排、帶 info string、以及長在
   blockquote 裡（`> ```yaml`）的 fence，內容會先剝掉同樣的縮排與 `>` 前綴再解析；
   blockquote 在結尾 ``` 之前就斷掉（某一行漏了 `>`）也算 FAIL。要支援新的 fence 長相
-  時改那一處，不要在個別檢查裡另寫一套判定。`~~~` 與四個反引號的 fence 認不得，出現就 FAIL
-  （不讓那種區塊無聲地不被檢查）。blockquote 裡的區塊，標記也寫在 blockquote 裡（`> <!-- ... -->`）。刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
+  時改那一處，不要在個別檢查裡另寫一套判定。fence 照 CommonMark 認：三個以上的反引號或 `~~~`，
+  結尾要同字元、長度不短於開頭（```` 包住的 ``` 只是內容）；散文裡的行內程式碼 ```` ```yaml ```` 不是 fence。
+  「哪些行屬於哪個區塊」由 `fenceBlocks` 走一次，[10]／[11] 共用它的結果，不要各自再寫一份 walk。blockquote 裡的區塊，標記也寫在 blockquote 裡（`> <!-- ... -->`）。刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
   不能有空行）放這個標記就略過。**原因必填**，空的 FAIL；標記後面接的不是 yaml fence
   也 FAIL（區塊被搬走、標記留在原地的典型樣子）。**同一區塊並列兩種寫法（A／B、錯／對）
   造成 duplicated key 時不要用 skip，拆成兩個區塊** —— skip 的區塊等於沒有閘門；只有
