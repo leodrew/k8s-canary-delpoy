@@ -1373,12 +1373,20 @@ function fenceOpen(l) {
 function fenceClose(l, open) {
   const q = splitQuote(l);
   const m = q.rest.match(CLOSE);
-  // 結尾 fence 的縮排最多比開頭深 3 格（CommonMark；開頭的縮排就是清單項目的內容欄）。
+  // 結尾 fence 的縮排最多比開頭深 3 格（CommonMark 量的是容器內容欄；這裡用開頭 fence 的縮排近似它，
+  // 開頭不在內容欄時會多放寬幾格，但真正的結尾那時會比開頭淺 → fenceBody 判 broken，是大聲 FAIL）。
   // 不擋的話，區塊內容裡縮排更深的 ```（例如 ConfigMap `|` 字串裡夾著一段 markdown）
   // 會被當成結尾：區塊提早結束，真正的結尾 ``` 變成一個沒有語言的新區塊，把後面的
   // ```yaml 區塊整個吞成內容 —— 那個區塊就永遠不被解析（無聲 PASS，實測過）。
-  return q.depth === open.depth && !!m && m[1].length <= open.indent.length + 3 &&
+  // 縮排算「欄」不算字元：tab 展開到下一個 4 的倍數（CommonMark）。用 .length 的話一個
+  // tab 只算 1，內容裡 tab 縮排的 ``` 一樣會被當結尾 —— 同一個無聲 PASS 換條路進來（實測過）。
+  return q.depth === open.depth && !!m && indentCols(m[1]) <= indentCols(open.indent) + 3 &&
     m[2][0] === open.ch && m[2].length >= open.len;
+}
+function indentCols(s) {
+  let c = 0;
+  for (const ch of s) c = ch === "\t" ? c + 4 - (c % 4) : c + 1;
+  return c;
 }
 // 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；區塊所在的容器已經結束時回傳 null：
 //   - blockquote 結束了（這一行的 `>` 比 fence 少）；
@@ -1391,7 +1399,7 @@ function fenceBody(l, open) {
   const q = splitQuote(l);
   if (q.depth < open.depth) return null;
   const rest = splitQuote(l, open.depth).rest;
-  if (rest.trim() !== "" && rest.match(/^\s*/)[0].length < open.indent.length) return null;
+  if (rest.trim() !== "" && indentCols(rest.match(/^\s*/)[0]) < indentCols(open.indent)) return null;
   return rest.startsWith(open.indent) ? rest.slice(open.indent.length) : rest;
 }
 // 整份文件走一次，回傳每個區塊：start 是開頭 fence 的行；內容是 start+1 .. end-1。
