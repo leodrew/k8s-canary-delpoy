@@ -1067,7 +1067,7 @@ spec:
         |      rbac_access_denied_matched_policy[...] 的那個 Envoy 就是擋下的那個
         |      （輔助線索：response header 的 x-envoy-upstream-service-time 只代表
         |      回應那一跳的 Envoy 有把請求轉給上游；服務直接打服務、沒經 gateway 時，
-        |      「沒有這個 header → gateway 擋的」不成立，不能單靠它下結論）
+        |      據此推論沒有該 header 就是 gateway 擋的並不可靠，不能單靠它下結論）
         |
         ├─ [2] 這個 workload 到底被哪些 policy 選中？
         |      istioctl x authz check <pod> -n <ns>
@@ -1086,7 +1086,7 @@ spec:
 
 典型情境：你替 `epmm-api` 寫了一條「允許 pmc-epmmformquerygui」的 ALLOW policy，結果 **其他沒被列進名單的服務全部被擋**，因為它們沒被列進去。
 
-> 注意：預設情況下 Prometheus 與 kubelet probe 通常**不會**被擋。Istio 預設會把 kubelet 的 health check probe 改寫到 sidecar 的 15020 port（probe rewrite，官方文件：「This option is enabled by default.」），Prometheus 也是從 `:15020/stats/prometheus` 抓合併後的 metrics（metrics merging），這兩條路徑都不經過 inbound RBAC filter。只有在你關掉 probe rewrite 或 metrics merge、讓 kubelet 或 Prometheus 直接打 app port 時，它們才會被這條 ALLOW policy 擋下。
+> 注意：預設情況下 Prometheus 與 kubelet probe 通常**不會**被擋。Istio 預設會把 kubelet 的 health check probe 改寫到 sidecar 的 15020 port（probe rewrite，官方文件說明在所有內建的 Istio configuration profile 中預設啟用），Prometheus 也是從 `:15020/stats/prometheus` 抓合併後的 metrics（metrics merging），這兩條路徑都不經過 inbound RBAC filter。只有在你關掉 probe rewrite 或 metrics merge、讓 kubelet 或 Prometheus 直接打 app port 時，它們才會被這條 ALLOW policy 擋下。
 
 ```bash
 # 看這個 pod 被哪些 policy 管
@@ -1137,7 +1137,7 @@ kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui \
 # JSON 裡的憑證是 base64 編碼的 inlineBytes，直接 grep 找不到 spiffe://；
 # 要先解 base64、再用 openssl 展開，看 Subject Alternative Name（官方 Istio 排錯文件的寫法）
 istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json \
-  | jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' \
+  | jq -r '[.dynamicActiveSecrets[] | select(.name == "default")][0].secret.tlsCertificate.certificateChain.inlineBytes' \
   | base64 -d | openssl x509 -noout -text | grep -A1 'Subject Alternative Name'
 # 應該看到 URI:spiffe://cluster.local/ns/ea-pmc/sa/<serviceAccount>
 ```
