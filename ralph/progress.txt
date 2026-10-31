@@ -197,3 +197,36 @@ Started: (not yet run)
   - 拆「錯／對」並列的區塊時，每個區塊的註解要跟著留在對的那一塊（`# 錯的寫法` 在上、`# ✅` 在下），只在中間
     插 ``` ＋空行＋```yaml，內容一字不動。
 ---
+
+## 2026-10-31 - US-001 第三次嘗試（passes 仍為 false：第 2 輪 Standards 留下非無聲的項目，見 prd.json notes）
+- BASE 沿用 a8304e4（本故事第一個改動之前）。
+- 17bf27d（fix）：處理前次 notes。
+  - GUIDE_FENCE_JS 改成 splitQuote／fenceOpen／fenceClose／fenceBody：先剝 `>` 前綴（記層數）再套 OPEN／CLOSE，
+    區塊內容剝掉同樣層數的 `>` 與 fence 縮排；blockquote 在結尾 ``` 之前斷掉 → [10] FAIL、[11] 視為區塊結束。
+  - [11] URL 結尾的 ASCII 句讀（. , ; : ! ?）剝掉，`https://kubernetes.io.` 不再假 FAIL。
+- Review round 1：
+  - Standards：blockquote 內的 skip 標記（`> <!-- ... -->`）認不得；~~~／```` fence 無聲漏檢（潛在）；
+    [11] 會算 <!-- --> 註解與 code fence 裡的連結（假 PASS）；fenceBody 重複 `>` regex（Duplicated Code）。
+  - Spec：無發現（notes 兩項確認已修）；另提 4581 行的連帶錯誤訊息屬雜訊、可選。
+  - 修正 18078fa：標記先 splitQuote 再比對；UNSUPPORTED_FENCE（~~~／````）→ FAIL；[11] 只收 fence 外、
+    註解外的連結；fenceBody 重用 splitQuote(l, depth)。
+- Review round 2：Spec 無發現。Standards 無無聲漏檢，但留下：行內程式碼 ```` ```yaml ```` 開頭的散文會假 FAIL、
+  長度 ≥4 的結尾 fence 不被認得（錯誤位置不對）、兩份 fence walk（判斷題）、全部區塊壞掉時多印一行誤導訊息。
+  已達兩輪上限 → 寫進 notes，passes 維持 false。
+- 反向測試（全部在備份上做、cp 還原、cmp 確認）：
+  - [10] blockquote 區塊 4574 行縮排改壞 → FAIL（第 4571 行區塊解析失敗，錯誤在 4574 行）；
+    4576 行拿掉 `>` → FAIL（blockquote 斷掉）；一般區塊 207 行改壞 → FAIL（回歸）。
+  - `> <!-- validate:skip-yaml 測試用 -->` ＋ 改壞的 blockquote 區塊 → PASS（略過）；原因空白 → FAIL。
+  - `~~~yaml` 與 ````yaml 區塊 → FAIL。（第一次插在 100 行時 PASS —— 那行在 ASCII 圖的 fence 裡，內容本來就不該被當 fence；
+    換到散文位置才是有效的測試。）
+  - [11]（暫時 VERIFIED_PARTS=("Part 0") ＋ 插入 ### 參考來源）：`https://kubernetes.io/docs/concepts/. For more.` → PASS；
+    medium.com. ＋ evil-kubernetes.io. → FAIL；官方連結只在單行／多行 <!-- --> 或 bash fence 裡 → FAIL；可見的官方連結 → PASS。
+  - validate.sh exit 0（127 項）。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/progress.txt, ralph/prd.json
+- **Learnings for future iterations:**
+  - 反向測插入內容前，先確認插入點不在既有 fence 裡（這份 guide 開頭就有大段 ASCII 圖的 fence），否則「該 FAIL 卻 PASS」
+    看起來像檢查壞了，其實是測錯位置。用 `## Part N` 標題的前一行當插入點比較保險。
+  - 傳給 `node -e` 的參數以 `-` 開頭會被 node 當成選項吃掉（`bad option`）；測試字串用 `*` 當清單符號。
+  - 在 heredoc 寫的 node 改寫腳本裡用 template literal 帶 `\n`／`\s`，跳脫層數會出乎意料（實際寫進檔案的是真換行與 `s`）；
+    改完一定 grep 一下結果，或直接用 Edit 工具。
+---

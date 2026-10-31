@@ -21,7 +21,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": "兩輪 code-review 後仍有 1 項未處理（Standards 軸第 2 輪，passes 維持 false 待人工確認）：檢查 [10] 偵測不到 blockquote 裡的 fence（`> ```yaml`）。guide 目前剛好一個：k8s-ecosystem-guide.md 第 4571 行附近 Argo Rollouts「前置條件」的 VirtualService 片段 —— 讀者會照抄的那種，把它的縮排改壞 [10] 仍 PASS。建議：GUIDE_FENCE_JS 的 OPEN/CLOSE 允許可選的 `(?:>s?)*` 前綴，取出區塊內容時跟縮排一樣剝掉（[11] 的標題掃描用同一組規則，一起受惠）；或刻意不支援時讓 blockquote 裡的 fence 直接 FAIL。修完記得反向測：把 4573 行縮排改壞 → [10] 必須 FAIL。另一項低優先：[11] 裸寫的 `https://kubernetes.io.`（ASCII 句點結尾）hostname 會變 `kubernetes.io.` 而誤判 FAIL（只會假 FAIL、不會假 PASS）。其餘驗收條件、兩輪 Spec 軸皆無發現。"
+      "notes": "第三次嘗試（17bf27d、18078fa）已修掉前次 notes 的兩項（blockquote fence、URL 結尾 ASCII 句點）以及第 1 輪新發現（blockquote 內的 skip 標記、~~~／```` fence 改為 FAIL、[11] 不算 code fence 與 <!-- --> 註解裡的連結、fenceBody 重用 splitQuote）。第 2 輪 review：Spec 軸無發現；Standards 軸沒有任何「壞 YAML 或缺官方來源卻無聲 PASS」的問題，但留下幾項會大聲 FAIL、診斷卻指錯方向的項目，passes 依規則維持 false 待人工判斷：(1) 假 FAIL：散文裡的行內程式碼 ```` ```yaml ```` 開頭的行會被 UNSUPPORTED_FENCE（/^s*(~~~|````)/）當成 fence 報錯；CommonMark 中反引號 fence 的 info string 不能含反引號，建議只在 4+ 反引號之後的剩餘部分不含反引號時才 FAIL（CLAUDE.md 本身就用這種寫法，日後 guide 若寫到閘門就會撞到）。(2) 長度 ≥4 的結尾 fence（```` 收 ``` 開的區塊，CommonMark 允許）不被 CLOSE 認得，區塊會吞到下一個 fence，報錯位置與原因都不對（大聲 FAIL，非無聲）。(3) 判斷題：[10] 的 while 掃描與 [11] 的 forEach 狀態機是兩份 fence walk（只共用 open/close/body helper），fence 沒關時兩者行為已不同；可抽成共用的 fenceBlocks(lines)。(4) 小：所有 yaml 區塊都解析失敗時，parsed+skipped===0 會額外印「一個區塊都沒找到…先修比對規則」，誤導原因。(5) 已接受：> 內的標記後接沒有 > 的 fence 仍會略過（不檢查層數）。guide 目前沒有 ~~~／```` fence，以上都不影響現有內容。"
     },
     {
       "id": "US-002",
