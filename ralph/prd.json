@@ -63,8 +63,8 @@
         "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "BASE b01f8cf。兩輪 review 後仍有發現，已在 2c5ab9b 修掉但未經第 3 輪 review → passes 維持 false。第 2 輪發現（皆已修）：Spec —— P00-045 的 targetRefs 範例「同 namespace 的 Gateway」會被誤讀成 Istio Gateway（來源頁是 Gateway API 的 gateway.networking.k8s.io Gateway）→ 寫明；Standards（判斷題）—— 圖 ⑦⑧ 動詞不一致（選 Pod vs 比對 Pod）→ 統一成「比對 Pod」；英文引文後接全形冒號 → 改「也就是說」。下一輪：以 BASE b01f8cf 重跑 code-review 即可，不必重做故事。"
+      "passes": true,
+      "notes": "BASE b01f8cf。第 3 輪 review（涵蓋 2c4dd3a、2c5ab9b）：Spec 4 個 URL 全部 WebFetch、引文逐字找到，0 項發現 → passes: true。Standards 指出第 140 行（P00-014，US-002 的範圍）仍寫「Service / Endpoints」—— 不屬本故事帳本列，未改，記在 progress.txt。"
     },
     {
       "id": "US-004",

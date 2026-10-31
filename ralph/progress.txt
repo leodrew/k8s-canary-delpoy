@@ -360,3 +360,19 @@ Started: (not yet run)
   - ASCII 圖的標籤欄對齊用 node 量寬度（CJK 算 2）再調空白；改字之後不量會歪。
   - 官方原文用英文逐字引用，不要把翻譯放進「」當原文 —— reviewer 會抓。
 ---
+
+## 2026-10-31 - US-003 第 3 輪 review（完成，passes: true）
+- 本 iteration 沒有改 guide：照 prd.json notes，以 BASE b01f8cf 重跑 code-review，涵蓋 2c4dd3a、2c5ab9b 的修正。
+- Review round 3：
+  - Spec：4 個來源 URL（K8s Service 頁、Pod v1 API 頁、Istio security concepts、Istio AuthorizationPolicy reference）全部 WebFetch，
+    所有引文逐字找到；(a) 缺漏 0、(b) 範圍外 0（三項連動修改都已記在 progress.txt）、(c) 寫錯 0。
+    nit：⑨ 說「只有 named port 才必須定義」對 Service 路由正確，但 probe 用 port 名字時也需要；帳本寫 targetRefs 可指 Gateway/Service，guide 只舉 Gateway（Service 只支援 waypoint，合理省略）。
+  - Standards：報 1 項「硬性」—— 第 140 行（Part 0 multicluster 那句）仍寫「Service / Endpoints」，與 ⑧ 改成 EndpointSlice 不一致。
+    判定為範圍外：那一行是帳本 P00-014（US-002，已 passes）的位置，不在 US-003 的 ledgerIds（P00-024 只管 166、223 行），依 prompt 第 6 步不改。
+    判斷題（未修）：Endpoints／EndpointSlice 兩詞在 guide 並存（Part 16 由 P16-002 負責）；「503 UH」在三處重複；AuthorizationPolicy 表格格子偏擠；
+    ASCII 圖 ③⑦⑩ 的【】欄位與 ⑧⑨ 差 1–2 欄（未改動的既有行，非本 diff 引入）。
+- 帳本外的觀察（沒改，留給人工／另開帳本列）：第 140 行「Service / Endpoints」若要改 EndpointSlice，需要補到 P00-014 或新增一列。
+- Files: ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - Standards reviewer 不看帳本，會把同一個詞在其他帳本列範圍內的出現也當成本故事的硬性違規；判定前先查帳本的行號欄，屬於別列就記觀察、不改。
+---
