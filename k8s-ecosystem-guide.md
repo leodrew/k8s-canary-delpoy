@@ -1218,22 +1218,34 @@ kubectl logs -n ea-epmm deploy/epmm-api -c istio-proxy --tail=100 | grep -i rbac
 istioctl proxy-config log deploy/epmm-api -n ea-epmm --level rbac:warning
 ```
 
-log 會直接告訴你 `enforced denied, matched policy ns[ea-epmm]-policy[xxx]-rule[0]` —— **policy 名稱和第幾條 rule 都會印出來**。
+被 **DENY policy** 命中時，log 會印出 `enforced denied, matched policy ns[ea-epmm]-policy[xxx]-rule[0]` —— 這時 policy 名稱和第幾條 rule 都看得到。
+
+但最常見的成因 1（有 ALLOW policy、請求沒命中任何 rule）不是這樣：Envoy 的 RBAC filter 會印 `enforced denied, matched policy none`。**看到 `matched policy none`，就是 ALLOW 名單沒對上**，回頭檢查 ALLOW policy 的 `from`／`to`／`when`，而不是找哪條 policy 擋的。
 
 **看實際下發到 Envoy 的 RBAC 設定：**
 
 ```bash
 istioctl proxy-config listener deploy/epmm-api -n ea-epmm \
-  --port 8080 -o json | grep -A50 envoy.filters.http.rbac
+  --port 15006 -o json | grep -A50 envoy.filters.http.rbac
 ```
+
+sidecar 的 inbound 流量全部由 iptables 導到 `0.0.0.0:15006` 這個 listener（Istio：「every sidecar has a listener bound to `0.0.0.0:15006` which is where IP tables routes all inbound pod traffic to.」），所以要看 `15006`；`--port 8080` 篩到的頂多是 outbound listener，裡面沒有 inbound 的 RBAC filter。輸出裡再找 destination port 為 8080 的那條 filter chain。官方也示範另一種寫法：`pilot-agent request GET config_dump`（在 `-c istio-proxy` 容器裡執行）再 grep。
 
 **看來源身分有沒有正確傳過來：**
 
 ```bash
-# 在目標 pod 裡看收到的 XFCC header（含來源 SPIFFE 身分）
+# config_dump 只看得到 Envoy「怎麼處理 XFCC」的設定（forward_client_cert_details），
+# 看不到某個請求實際收到的 header，所以不能用它來確認來源身分
 kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
-  curl -s localhost:15000/config_dump | grep -i forward_client_cert
+  pilot-agent request GET config_dump | grep -i forward_client_cert
 ```
+
+要看**實際收到**的 XFCC header（`x-forwarded-client-cert`），用下面任一種方式：
+
+* 讓目標 app 回顯 request header（例如 httpbin 的 `/headers`，或在 Spring 裡印出 `X-Forwarded-Client-Cert`）。
+* 把 `%REQ(X-FORWARDED-CLIENT-CERT)%` 加進 sidecar 的 access log 格式。
+
+header 裡出現 `URI=spiffe://…` 就是來源的身分；Istio 文件也說「That header's presence is evidence that mutual TLS is used.」
 
 ---
 
@@ -1249,10 +1261,14 @@ kubectl auth can-i list pods \
 kubectl auth can-i --list \
   --as=system:serviceaccount:ea-pmc:pmc-epmmformquerygui -n ea-pmc
 
-# 2. 找出這個 SA 有哪些綁定
+# 2. 找出這個 SA 有哪些「直接」綁定；同時 grep 它所屬的群組名
+#    （SA 的群組是 system:serviceaccounts 與 system:serviceaccounts:<ns>，
+#     另外所有已驗證身分都屬於 system:authenticated）
 kubectl get rolebinding,clusterrolebinding -A -o json \
-  | grep -B5 -A5 pmc-epmmformquerygui
+  | grep -E -B5 -A5 'pmc-epmmformquerygui|system:serviceaccounts|system:authenticated'
 ```
+
+注意 grep 只找得到字面上寫了名字的綁定。SA 也會透過群組拿到權限（K8s：「ServiceAccounts have names prefixed with `system:serviceaccount:`, and belong to groups that have names prefixed with `system:serviceaccounts:`.」），所以**最終以步驟 1 的 `kubectl auth can-i --list --as=…` 為準**。
 
 補權限（最小權限原則，只給讀自己 namespace 的 ConfigMap）：
 
@@ -1296,6 +1312,28 @@ roleRef:
 | 全 mesh 突然大量 403 | root ns 有沒帶 selector 的 policy | `kubectl get authorizationpolicy -n istio-system` |
 | 不確定哪條規則擋的 | — | `istioctl proxy-config log <pod> --level rbac:debug` |
 | `cannot get resource ... API group` | 這是 K8s RBAC，不是 Istio | `kubectl auth can-i --list --as=system:serviceaccount:<ns>:<sa>` |
+
+### 參考來源
+
+本 Part 經查證修正的說法所依據的官方文件（查證帳本 `tasks/guide-verification-ledger.md` 的 P03 各列）：
+
+- Envoy — rbac_filter.cc 原始碼：https://raw.githubusercontent.com/envoyproxy/envoy/main/source/extensions/filters/http/rbac/rbac_filter.cc
+- Envoy — RBAC filter：https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/rbac_filter
+- Envoy — Router filter：https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/router_filter
+- Envoy — HTTP connection manager（forward_client_cert_details）：https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/network/http_connection_manager/v3/http_connection_manager.proto
+- Istio — Security Problems：https://istio.io/latest/docs/ops/common-problems/security-issues/
+- Istio — Health Checking of Istio Services：https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/
+- Istio — Prometheus integration：https://istio.io/latest/docs/ops/integrations/prometheus/
+- Istio — 1.27 upgrade notes：https://istio.io/latest/news/releases/1.27.x/announcing-1.27/upgrade-notes/
+- Istio — Harden Docker Container Images：https://istio.io/latest/docs/ops/configuration/security/harden-docker-images/
+- Istio — Installing the Sidecar：https://istio.io/latest/docs/setup/additional-setup/sidecar-injection/
+- Istio — AuthorizationPolicy reference：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- Istio — Security Best Practices：https://istio.io/latest/docs/ops/best-practices/security/
+- Istio — Debugging Your Configuration（proxy-config）：https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/
+- Istio — istioctl reference：https://istio.io/latest/docs/reference/commands/istioctl/
+- Istio — Authentication Policy：https://istio.io/latest/docs/tasks/security/authentication/authn-policy/
+- Kubernetes — Service Accounts：https://kubernetes.io/docs/concepts/security/service-accounts/
+- Kubernetes — Using RBAC Authorization：https://kubernetes.io/docs/reference/access-authn-authz/rbac/
 
 ---
 
