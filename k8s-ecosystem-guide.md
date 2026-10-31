@@ -826,9 +826,9 @@ kubectl top pod -n ea-pmc --containers | grep istio-proxy
 
 #### 這是在解決什麼問題
 
-前面三個都在 Envoy 裡。但如果攻擊者拿到一個 Pod 的 shell，他可以**直接打其他 Pod 的 IP 和 port，繞過 mesh 的 L7 管控**（尤其是打那些 sidecar 沒攔截的 port）。NetworkPolicy 在 CNI 層擋，**攻擊者連封包都送不出去**。
+前面三個都在 Envoy 裡。但如果攻擊者拿到一個 Pod 的 shell，他能繞過的是**自己這個 Pod 的 sidecar**；Istio 官方的說法是「the security boundary is that a client may not bypass another pod's sidecar」——只要他打的是對方被攔截的 TCP port，封包仍會經過**對方**的 sidecar 與 AuthorizationPolicy。真正的缺口在 sidecar 管不到的地方：UDP／ICMP（官方：「Redirection only handles TCP based traffic. Any UDP or ICMP packets will not be captured or modified.」）、port 22、sidecar 自己的 port，以及被 `excludeInboundPorts` 排除在攔截之外的 port。NetworkPolicy 在 CNI 層擋（前提是 CNI 有實作 NetworkPolicy），補的就是這幾塊。
 
-這是「深度防禦」的最底層：Istio policy 保護的是「經過 mesh 的流量」，NetworkPolicy 保護的是「所有 IP 封包」。
+這是「深度防禦」的最底層：Istio policy 保護的是「經過 mesh 的流量」，NetworkPolicy 管的是 Pod 層級的 L3/L4 流量（CNI 有實作時）；但 Pod 所在節點進出的流量永遠放行（官方：「traffic to and from the node where a Pod is running is always allowed, regardless of the IP address of the Pod or the node」）。
 
 #### 最小可用 YAML
 
@@ -857,7 +857,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system   # 這個 label 是 K8s 1.22+ 自動加的
+              kubernetes.io/metadata.name: kube-system   # 這個 label 從 1.21 起預設自動加（beta，feature gate NamespaceDefaultLabelName），1.22 GA 後不能關、值不能改
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
@@ -885,6 +885,9 @@ spec:
         - { protocol: TCP, port: 8080 }
 ---
 # 步驟 4：Istio 環境必開——放行 ingressgateway 與控制平面
+# 注意：下面只用 istio-system 比對。官方建議 gateway 裝在跟控制平面不同的 namespace
+# （範例是 istio-ingress），gateway 若在那裡就會被擋，要另加一個 namespaceSelector；
+# 先用 kubectl get pod -A -l istio=ingressgateway 確認 gateway 在哪。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -905,7 +908,8 @@ spec:
               kubernetes.io/metadata.name: istio-system
       ports:
         - { protocol: TCP, port: 15012 }    # istiod XDS
-        - { protocol: TCP, port: 15017 }    # webhook
+        # 不需要 15017：那是 kube-apiserver 打進 istiod 的 webhook 方向，工作負載不會往外連。
+        # 若 istio-system 也套了 default-deny，要在 istio-system 那邊另外放行 API server 打進 15017 的 ingress。
 ```
 
 #### 常用 key
