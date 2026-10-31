@@ -279,3 +279,9 @@ Started: (not yet run)
 - Review 1: Standards 5 項輕微（註解與正文重複 annotation 說法、表格格子與表下說明重複、欄位級說明掛在單列下、「永遠」過度絕對）→ 全部修正；Spec 無阻擋性發現（P01-015 引文被截斷，用 offset 後確認前半）。未跑第 2 輪（修改僅為措辭精簡）。
 - Learnings: 無新增通則。
 ---
+## 2026-11-01 - US-008
+- 修正 Part 2 §2.1（P02-001..005）：身分欄位依賴 mTLS 而非 PeerAuthentication 物件、PERMISSIVE 下 DENY 的 principals 可被明文繞過；portLevelMtls 需非空 selector.matchLabels（Istio >=1.23 CRD 拒絕）；mesh-wide 與名稱 default 無關；probe 改寫目標 15020、annotation 為 rewriteAppHTTPProbers、TCP/gRPC 也會改寫、關掉後 TCP probe 假綠燈。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md（刪 P02-001 提醒）
+- Review round 1: Standards 無硬性違規（引文含 **strict** 粗體不逐字、selector 註解與表格重複 -> 已修）；Spec 無缺漏，所有引文經 WebFetch/curl 確認（>=1.23 版本界線只在帳本，官方頁未載明）。修正後未再開第二輪 sub-agent review（只動兩處措辭，validate.sh 通過）。
+- Learnings: 引文不要帶 markdown 粗體；WebFetch 摘要器可能漏報句子，用 curl 驗證。
+---
