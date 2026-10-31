@@ -397,16 +397,20 @@ selector:
 
 你要做 IP 白名單（Part 2.2 的 `ipBlocks` / `remoteIpBlocks`）時，第一個問題永遠是「我現在拿到的 IP 是誰的 IP」。
 
-| 情境 | 目標 Pod 看到的 source IP | 真實 client IP 在哪 |
+| 情境 | ingressgateway 看到的 source IP | 真實 client IP 在哪 |
 |---|---|---|
-| VIP 做 SNAT（多數 F5 預設） | ingressgateway 的 Pod IP | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
-| Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | `X-Forwarded-For` |
+| VIP 做 SNAT（多數 F5 預設） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
+| Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | 只有更前面的 L7 proxy（例如 F5）先寫進 `X-Forwarded-For` 才拿得到；否則**完全遺失**（見表下說明） |
 | Service `externalTrafficPolicy: Local` | 保留真實 client IP 到 gateway | gateway 會把它寫進 `X-Forwarded-For` |
 
-**所以：在 mesh 內部做 IP 比對，`ipBlocks` 幾乎永遠是錯的**（你比到的是 ingressgateway 的 IP）。要比對真實 client 必須用 `remoteIpBlocks`，而且**必須先在 MeshConfig 設 `numTrustedProxies`**，否則 Envoy 不知道 `X-Forwarded-For` 裡哪一段可以信。
+表中 `externalTrafficPolicy: Cluster` 那一列的補充：封包送到 `Type=NodePort`／LoadBalancer Service 時預設會被 SNAT（K8s 官方：「Packets sent to Services with `Type=NodePort` are source NAT'd by default.」），node 在 L4 就把來源換成自己的 IP，kube-proxy 不會寫 `X-Forwarded-For`，Envoy 之後 append 進去的只是那個 node IP。另外，表中的欄位是 **ingressgateway** 看到的 source IP；目標 Pod 看到的永遠是 gateway Pod IP。
+
+**所以：在 mesh 內部做 IP 比對，`ipBlocks` 幾乎永遠是錯的**（你比到的是 ingressgateway 的 IP）。要比對真實 client 必須用 `remoteIpBlocks`，而且**必須先設定 `numTrustedProxies`**（可設在全域 MeshConfig，也可在 gateway Pod 加 `proxy.istio.io/config` annotation 個別設；改完已在跑的 ingressgateway Pod 要重啟才生效），否則 Envoy 不知道 `X-Forwarded-For` 裡哪一段可以信。
 
 ```yaml
-# MeshConfig（istio ConfigMap 或 IstioOperator）
+# IstioOperator 的 spec.meshConfig（Helm 的 values 則是頂層 meshConfig:）
+# 直接改 istio ConfigMap 時，key 是 mesh、內容從 defaultConfig: 開始，沒有 meshConfig: 這一層
+# 此設定只對 gateway 生效；個別 gateway 可用 Pod annotation proxy.istio.io/config 覆蓋
 meshConfig:
   defaultConfig:
     gatewayTopology:
@@ -414,12 +418,27 @@ meshConfig:
       forwardClientCertDetails: SANITIZE_SET
 ```
 
-`numTrustedProxies: N` 的意思是「從 `X-Forwarded-For` 最右邊往左數第 N+1 個是真實 client」。**填錯 = 白名單擋錯人**，這個數字要跟網路組確認實際有幾層 proxy。
+`numTrustedProxies: N` 的意思是：以 gateway **收到**的 `X-Forwarded-For` 來看，從最右邊往左數第 N 個位址是受信任的 client 位址（Envoy：「the trusted client address is the Nth address from the right end of XFF.」）。gateway 轉發時會再 append 一個下游 IP，所以 app 端看到的 XFF 裡它變成第 N+1 個。Envoy 把結果寫進 `X-Envoy-External-Address`；XFF 項數少於 N 時，退回使用直接連線的來源 IP。**填錯 = 白名單擋錯人**，這個數字要跟網路組確認實際有幾層 proxy。
 
 ---
 
 > **延伸閱讀**：istio-ingressgateway 跟一般 Service 到底差在哪、以及 routable / non-routable 雙 VIP 怎麼配，見 [Part 10](#part-10istio-ingressgateway-與一般-service-的差別含雙-vip-架構)。
 > Gateway / VirtualService / DestinationRule 為什麼是「查表」不是「跳點」、以及兩座 cluster 時 request 落在哪一邊，見 [Part 16](#part-16active-zone-dns-下-request-落在哪fz2-部好卻-404用-mesh-送到-fz2)。
+
+### 參考來源
+
+本 Part 經查證修正的說法所依據的官方文件（查證帳本 `tasks/guide-verification-ledger.md` 的 P01 各列）：
+
+- Istio — DestinationRule reference：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- Istio — Access logging：https://istio.io/latest/docs/tasks/observability/logs/access-log/
+- Envoy — Access log substitution formatter：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
+- Kubernetes — Virtual IPs and Service Proxies：https://kubernetes.io/docs/reference/networking/virtual-ips/
+- KEP-5495 — Deprecate IPVS mode in kube-proxy：https://github.com/kubernetes/enhancements/blob/master/keps/sig-network/5495-deprecate-ipvs-mode-in-kube-proxy/README.md
+- Istio — Protocol Selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+- Kubernetes — Using Source IP：https://kubernetes.io/docs/tutorials/services/source-ip/
+- Istio — Gateway Network Topologies：https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/
+- Istio — MeshConfig reference：https://istio.io/latest/docs/reference/config/istio.mesh.v1alpha1/
+- Envoy — HTTP header manipulation（X-Forwarded-For）：https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers
 
 ---
 
