@@ -454,7 +454,7 @@ meshConfig:
 
 mTLS 解決的是：Istio 的 CA（istiod）幫每個 workload 簽發一張憑證，憑證的 SAN 欄位寫著 `spiffe://cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui`。連線時雙方交換憑證，**Envoy 就能拿到一個密碼學上可信的身分**，而不是靠 IP 猜。
 
-**身分欄位依賴 mTLS。** AuthorizationPolicy 的 `principals` / `namespaces` 這些欄位要有 mTLS 才比對得到東西（哪些欄位依賴 mTLS，見 Part 0「表中三列的補充」的 PeerAuthentication 一條；Part 3 成因 #3 也會用到）。前置條件是「mTLS」，不是「PeerAuthentication 物件」：兩端都有 sidecar 時，沒有 PeerAuthentication 也會自動升級成 mTLS（Istio：「For peer authentication, Istio automatically upgrades all traffic between two PEPs to mutual TLS.」）。真正的陷阱在 `PERMISSIVE`：明文請求沒有 principal，ALLOW 規則擋得掉明文，但 DENY 裡的 `principals` 規則會被明文繞過。所以官方強烈建議搭配 `STRICT`（Istio：「it is strongly recommended to always use these fields with **strict** mutual TLS mode.」）。
+**身分欄位依賴 mTLS。** AuthorizationPolicy 的 `principals` / `namespaces` 這些欄位要有 mTLS 才比對得到東西（哪些欄位依賴 mTLS，見 Part 0「表中三列的補充」的 PeerAuthentication 一條；Part 3 成因 #3 也會用到）。前置條件是「mTLS」，不是「PeerAuthentication 物件」：兩端都有 sidecar 時，沒有 PeerAuthentication 也會自動升級成 mTLS（Istio：「For peer authentication, Istio automatically upgrades all traffic between two PEPs to mutual TLS.」）。真正的陷阱在 `PERMISSIVE`：明文請求沒有 principal，ALLOW 規則擋得掉明文，但 DENY 裡的 `principals` 規則會被明文繞過。所以官方強烈建議搭配 `STRICT`（Istio：「it is strongly recommended to always use these fields with strict mutual TLS mode」）。
 
 #### 最小可用 YAML
 
@@ -478,7 +478,7 @@ metadata:
   name: pmc-query-mtls
   namespace: ea-pmc
 spec:
-  selector:                          # portLevelMtls 必須搭配非空的 selector.matchLabels；少了它，Istio ≥1.23 在 apply 時就被 CRD 驗證拒絕（更舊版本才是靜默忽略）
+  selector:                          # portLevelMtls 必須搭配非空的 selector.matchLabels（細節見下方「常用 key」表）
     matchLabels:
       app: pmc-epmmformquerygui
   mtls:
