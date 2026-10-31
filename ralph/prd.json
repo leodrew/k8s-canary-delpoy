@@ -64,7 +64,7 @@
       ],
       "priority": 3,
       "passes": false,
-      "notes": ""
+      "notes": "BASE b01f8cf。兩輪 review 後仍有發現，已在 2c5ab9b 修掉但未經第 3 輪 review → passes 維持 false。第 2 輪發現（皆已修）：Spec —— P00-045 的 targetRefs 範例「同 namespace 的 Gateway」會被誤讀成 Istio Gateway（來源頁是 Gateway API 的 gateway.networking.k8s.io Gateway）→ 寫明；Standards（判斷題）—— 圖 ⑦⑧ 動詞不一致（選 Pod vs 比對 Pod）→ 統一成「比對 Pod」；英文引文後接全形冒號 → 改「也就是說」。下一輪：以 BASE b01f8cf 重跑 code-review 即可，不必重做故事。"
     },
     {
       "id": "US-004",

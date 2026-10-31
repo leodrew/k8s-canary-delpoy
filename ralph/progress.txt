@@ -327,3 +327,36 @@ Started: (not yet run)
   - 兩輪上限之後才修的發現，下一個 iteration 只要以同一個 BASE 再 review 一次即可，不必重做故事。
   - 修 P03-008（US-018）時讀一下這裡的 (5)：注入規則已經在 Part 0 寫齊。
 ---
+
+## 2026-10-31 - US-003（passes 仍為 false：第 2 輪 review 有發現，已修但未經第 3 輪 review，見 prd.json notes）
+- 實作（BASE b01f8cf；commits 3240719 feat、2c4dd3a fix、2c5ab9b fix）：k8s-ecosystem-guide.md Part 0「物件之間怎麼互相找到」
+  - P00-024：圖 ⑧ 與 selector 表 Service 列「Endpoints」→「EndpointSlice」；圖下新增 ⑧ 說明：Endpoints API 從 v1.33 起 deprecated、
+    官方建議 client 改用 EndpointSlice，查詢指令 `kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc`。
+  - P00-025：圖 ⑨ 改成「== 程式實際 listen 的 port」；圖下新增 ⑨ 說明：containerPort 主要是宣告用（英文原句引用 Pod API 文件）、
+    named port 時才必須定義同名 port、targetPort 省略時預設等於 port。
+  - P00-034（無法驗證）：症狀表 ⑥／⑨ 拆成兩列，照帳本寫成 503 `NC`／503 `UF`／`URX`，各標「經驗值」，表下加一句說明經驗值的意思。
+  - P00-045：selector 表 AuthorizationPolicy 列改成：省略 selector（且 AuthorizationPolicy 沒寫 targetRefs）＝整個 namespace；
+    root namespace（meshConfig.rootNamespace，預設 istio-system）且省略＝整個 mesh；另可用 targetRefs，例如同 namespace 的 Gateway API Gateway。
+- 連動修改（為了同一小節前後一致，帳本行號以外）：
+  - selector 表 DestinationRule 列「Endpoints 裡的 Pod」→「EndpointSlice 裡的 Pod」（P00-024 換詞的一致性）。
+  - 「selector 共通的危險」段「Endpoints 變空」→「EndpointSlice 變空」（同上）。
+  - 症狀表下「response flag 的意思見 Part 8.2」：P00-034 新增的 NC／UF／URX 需要讀者能查到意思，8.2 有定義。
+  - ⑨ 說明裡「程式只要在 0.0.0.0 上 listen…照樣連得到」與 named port 那句：P00-025 建議改法的展開，來源是同一頁 Pod API 的同一段（"Any port which is listening on the default "0.0.0.0" address…"）與 Service 頁的 named port 段落。
+  - P00-045 沒寫「指定 Service」：來源頁說 targetRefs 的 Service 只支援 waypoint（ambient），本文只講 sidecar 模式。
+- 帳本外的觀察（沒改）：Part 0 第 140 行附近（P00-014 那句）「Service / Endpoints」與 Part 16（約 7833、7877、7917 行）仍寫 Endpoints，屬其他帳本列／故事。
+- Files: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：4 個 URL 全部 WebFetch（長頁用 offset 100000），所有來源引文逐字找到；沒有寫錯。minor：targetRefs 支援的 kind 不只 Gateway；帳本外的推論句（「寫了但沒 listen 照樣連不上」）。
+  - Standards：無硬性違規；判斷題 —— 「官方原文是「…被存取」」是翻譯卻放在「」裡；「省略時預設＝port」與「v1.33 deprecated」各重複兩處；圖 ⑧ 標籤欄位沒對齊；AuthorizationPolicy 表格格子太擠、提到 ambient。
+  - 修正（2c4dd3a）：引文改英文原句；刪重複；圖 ⑧⑨ 對齊；推論句刪掉；表格格子簡化成「另可用 targetRefs 取代 selector，例如…」。
+- Review round 2：
+  - Spec：引文全部找到、四列都修到；(c) minor —— 「同 namespace 的 Gateway」會被誤讀成 Istio Gateway（來源是 gateway.networking.k8s.io）。
+  - Standards：無硬性違規；判斷題 —— ⑦「比對 Pod 的 label」vs ⑧「選 Pod」動詞不一致；英文引號後接全形冒號；格子仍偏擠。
+  - 修正（2c5ab9b）：寫明 Gateway API `Gateway`（`gateway.networking.k8s.io`，不是上面那個 Istio Gateway）；⑧ 改回「比對 Pod」；冒號改「也就是說」。
+    已達兩輪上限，未再 review → passes 維持 false，寫進 notes。
+- **Learnings for future iterations:**
+  - kubernetes.io 的 Service 頁與 Pod API 頁都超過 100k 字，WebFetch 預設只讀前 100000 字；Endpoints deprecated、EndpointSlice 建議、containerPort 那句都在 offset 100000 之後。
+  - guide 裡「Gateway」有兩種：Istio 的 networking.istio.io Gateway 與 Gateway API 的 gateway.networking.k8s.io Gateway；Istio 官方頁說 targetRefs 時指的是後者，引用時要寫明。
+  - ASCII 圖的標籤欄對齊用 node 量寬度（CJK 算 2）再調空白；改字之後不量會歪。
+  - 官方原文用英文逐字引用，不要把翻譯放進「」當原文 —— reviewer 會抓。
+---
