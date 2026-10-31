@@ -917,12 +917,12 @@ spec:
 | Key | 說明 |
 |---|---|
 | `podSelector: {}` | 選中 namespace 內全部 Pod |
-| `policyTypes` | `[Ingress]` / `[Egress]` / 兩者。**沒列到的方向完全不受此 policy 管** |
+| `policyTypes` | `[Ingress]` / `[Egress]` / 兩者。有寫 `policyTypes` 時，**沒列到的方向完全不受此 policy 管**；省略時預設一定含 `Ingress`，只有在有 `egress` 規則時才加上 `Egress`——所以只寫 `egress` 規則、沒寫 `policyTypes` 的 policy，一樣會讓被選中 Pod 的 ingress 進入隔離狀態（官方：「by default `Ingress` will always be set and `Egress` will be set if the NetworkPolicy has any egress rules」） |
 | `from` / `to` 的 `podSelector` | 同 namespace 的 Pod |
 | `namespaceSelector` | 依 namespace label 選 |
 | `namespaceSelector` + `podSelector` **同一項** | AND（某 ns 的某些 pod） |
 | `namespaceSelector` / `podSelector` **不同項** | OR |
-| `ipBlock.cidr` + `except` | IP 網段（用來放行 mesh 外部） |
+| `ipBlock.cidr` + `except` | IP 網段（用來放行**叢集外部**；官方：「These should be cluster-external IPs, since Pod IPs are ephemeral and unpredictable.」。叢集內但不在 mesh 裡的 Pod 一樣用 selector，不要寫 `ipBlock`） |
 
 #### 踩雷
 
@@ -934,14 +934,15 @@ spec:
       - namespaceSelector: {...}
         podSelector: {...}          # <- 沒有 "-"，同一個 element
 
-  # OR：ea-pmc 的所有 Pod，或者 任何 ns 裡 label 是 app=xxx 的 Pod
+  # OR：ea-pmc 的所有 Pod，或者 policy 所在 namespace（ea-epmm）裡 label 是 app=xxx 的 Pod
+  #     （單獨寫 podSelector 只選 policy 所在 namespace 的 Pod，不是任何 ns）
   - from:
       - namespaceSelector: {...}
       - podSelector: {...}          # <- 有 "-"，不同 element
 ```
 
 - **多條 NetworkPolicy 是「聯集」**：只要有任何一條放行就通。沒有「拒絕」規則，只有「沒被任何一條允許 = 拒絕」。
-- **CNI 必須支援**：Flannel 預設**不支援** NetworkPolicy，設了等於沒設，而且不會報錯。先確認：`kubectl get pods -n kube-system | grep -Ei "calico|cilium|weave"`。
+- **CNI 必須支援**：官方：「Creating a NetworkPolicy resource without a controller that implements it will have no effect.」flanneld 本身不實作 NetworkPolicy，設了等於沒設，而且不會報錯；但 Flannel 的 Helm chart 有 `netpol.enabled` 選項，可另外裝 Kubernetes SIGs 的 network policy controller。用 `kubectl get pods -n kube-system | grep -Ei "calico|cilium|weave"` 看名字會漏掉其他實作（例如雲端供應商的 dataplane），可靠的做法是在測試 namespace 套一條 deny-all，再實際 curl 看是否真的被擋。
 - **忘記開 DNS = 全部掛掉**，而且症狀是 `UnknownHostException` 不是連線被拒，很容易誤判成 DNS 壞了。
 - **NetworkPolicy 比對的是 Pod IP，不是 ServiceAccount**。Pod 重建 IP 會變，所以一定要用 selector 而不是寫死 IP。
 
