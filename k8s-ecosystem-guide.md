@@ -170,7 +170,7 @@ DestinationRule  (ea-pmc/pmc-epmmformquerygui-dr)
   │ ⑦ subsets[stable].labels  version: stable  ──▶ 比對 Pod 的 label              【label】
   ▼
 Service  (ea-pmc/pmc-epmmformquerygui-svc)
-  │ ⑧ spec.selector  app: pmc-epmmformquerygui  ──▶ 選 Pod，產生 EndpointSlice   【label】
+  │ ⑧ spec.selector  app: pmc-epmmformquerygui  ──▶ 比對 Pod，產生 EndpointSlice 【label】
   │ ⑨ ports[].targetPort: 8080  == 程式實際 listen 的 port                       【數字】
   ▼
 Pod  labels: app=pmc-epmmformquerygui, version=stable
@@ -182,7 +182,7 @@ Deployment  (track-a/release/20-deployment-stable.yaml)
 ⑧ 和 ⑨ 各有一個常被講錯的細節：
 
 - **⑧ 產生的是 EndpointSlice，不是 Endpoints。** 舊的 Endpoints API 從 Kubernetes v1.33 起 deprecated，官方建議所有 client 改用 EndpointSlice。EndpointSlice 靠 `kubernetes.io/service-name` 這個 label 綁回 Service，所以要看 Service 實際選到哪些 Pod：`kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc`
-- **⑨ 要對上的是程式實際 listen 的 port，不是 `containerPort`。** `containerPort` 主要是宣告用 —— 官方 API 文件寫的是 "Not specifying a port here DOES NOT prevent that port from being exposed."：程式只要在 `0.0.0.0` 上 listen，不寫 `containerPort` 照樣連得到。只有 `targetPort` 寫成 named port（例如 `targetPort: http`）時，才必須在 container 的 `ports` 裡定義同名的 port。`targetPort` 省略時預設等於 `port`。
+- **⑨ 要對上的是程式實際 listen 的 port，不是 `containerPort`。** `containerPort` 主要是宣告用 —— 官方 API 文件寫的是 "Not specifying a port here DOES NOT prevent that port from being exposed." 也就是說，程式只要在 `0.0.0.0` 上 listen，不寫 `containerPort` 照樣連得到。只有 `targetPort` 寫成 named port（例如 `targetPort: http`）時，才必須在 container 的 `ports` 裡定義同名的 port。`targetPort` 省略時預設等於 `port`。
 
 ④⑦⑧ 合起來，就是 Envoy 手上那份「通訊錄」的產生方式：
 
@@ -241,7 +241,7 @@ selector:
 | `Deployment.spec.selector` | 自己管的 Pod | ✔ | **建立後不能改**；必須是 template labels 的子集 |
 | `DestinationRule.subsets[].labels` | `spec.host` 那個 Service 的 EndpointSlice 裡的 Pod | ✗ 只能等值 | 只在該 Service 選到的 Pod 範圍內再篩 |
 | `Gateway.spec.selector` | ingressgateway 的 Pod | ✗ | 決定哪一組 Envoy 載入這個 Gateway |
-| `AuthorizationPolicy` / `PeerAuthentication` / `RequestAuthentication` 的 `spec.selector.matchLabels` | 要套用的 workload Pod | ✗ | **省略 selector（AuthorizationPolicy 還要沒寫 `targetRefs`）= 整個 namespace**；放在 **root namespace**（`meshConfig.rootNamespace`，預設 `istio-system`）且省略 = 整個 mesh。AuthorizationPolicy 另可用 `targetRefs` 取代 selector，例如指定同 namespace 的 Gateway |
+| `AuthorizationPolicy` / `PeerAuthentication` / `RequestAuthentication` 的 `spec.selector.matchLabels` | 要套用的 workload Pod | ✗ | **省略 selector（AuthorizationPolicy 還要沒寫 `targetRefs`）= 整個 namespace**；放在 **root namespace**（`meshConfig.rootNamespace`，預設 `istio-system`）且省略 = 整個 mesh。AuthorizationPolicy 另可用 `targetRefs` 取代 selector，例如指定同 namespace 的 Gateway API `Gateway`（`gateway.networking.k8s.io`，不是上面那個 Istio Gateway） |
 | `Sidecar.spec.workloadSelector.labels` | 要套用的 Pod | ✗ | 省略 = 這個 namespace 的預設值（Part 2.3） |
 | `NetworkPolicy.spec.podSelector` | 要保護的 Pod | ✔ | `{}` = 這個 namespace 全部 Pod |
 | `NetworkPolicy` 的 `from/to.namespaceSelector` | 來源 / 目的 namespace | ✔ | 常用 `kubernetes.io/metadata.name: istio-system` |
