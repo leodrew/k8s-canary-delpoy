@@ -34,7 +34,7 @@
 
 ### 這是在解決什麼問題
 
-只用 K8s 核心的 Service 時，就只有「Service → Pod」這一層抽象，它解決的是**服務發現**（我怎麼找到後端）與**基本負載平衡**。（K8s 另有 Ingress，以及 Gateway API 這個 add-on —— 它支援依權重分流；但下面的身分、加密、可觀測性仍然要靠 mesh。）光靠 Service 管不了：
+只用 K8s 核心的 Service 時，就只有「Service → Pod」這一層抽象，它解決的是**服務發現**（我怎麼找到後端）與**基本負載平衡**。（K8s 另有 Ingress，以及 Gateway API 這個 add-on —— 它支援依權重分流；但身分、mTLS、L7 授權（以及下面的可觀測性）仍然要靠 mesh。）光靠 Service 管不了：
 
 - 我想讓 10% 流量走新版本（只用 Service 時，流量比例只能靠 replica 數量去湊 —— 官方的 canary 範例就是 stable 3 份、canary 1 份湊出 3:1）
 - 我想只讓某個服務呼叫我，其他人一律擋掉（K8s Service 沒有身分概念）
@@ -43,7 +43,7 @@
 
 Istio 把這些抽出來，變成 sidecar（Envoy proxy）+ 一組 CRD。所以你會看到「兩套系統疊在一起」——**K8s 管的是「東西在哪、跑幾份」，Istio 管的是「流量怎麼走、誰能打誰」**。
 
-> **本文只講 sidecar 模式。** Istio 另有 ambient 模式：資料面是每個節點一個 ztunnel（Rust 寫的，不是 Envoy），加上選用的 waypoint proxy（Envoy），Pod 裡沒有 sidecar。兩種模式的 Pod 可以共存在同一個 mesh 裡。下文說「資料面＝所有 Envoy」「每個 Pod 有 `istio-proxy`」，都是指 sidecar 模式。
+> **本文只講 sidecar 模式。** Istio 另有 ambient 模式：資料面是每個節點一個 ztunnel（Rust 寫的，不是 Envoy），加上選用的 waypoint proxy（Envoy），Pod 裡沒有 sidecar。兩種模式的 Pod 可以共存在同一個 mesh 裡。下文說的「資料面所有 Envoy」、每個 Pod 裡的 `istio-proxy`，都是指 sidecar 模式。
 
 ### Istio 本身由什麼組成：Istio / istiod / istio-system / Envoy
 
@@ -81,7 +81,7 @@ app istio-proxy
 
 **sidecar 是自動加的，所以你的 Deployment YAML 裡看不到它。** namespace 帶著 `istio-injection=enabled`（或 `istio.io/rev=<版本>`）這個 label 時，Pod 建立的那一刻 API server 會呼叫 istiod 的 mutating webhook，由它把 `istio-proxy` 容器加進 Pod spec。
 
-所以 namespace 沒有 `istio-injection=enabled`／`istio.io/rev`、Pod 也沒標 `sidecar.istio.io/inject: "true"` 時，通常就不會注入，Pod 是 `1/1`。（Pod 自己可以帶 `sidecar.istio.io/inject: "true"` 這個 label 要求注入；反過來，namespace 或 Pod 任一邊明確設成 `disabled`／`"false"`，Pod 就不會被注入。同一個 namespace 同時帶 `istio-injection` 和 `istio.io/rev` 時，`istio-injection` 優先。）後果要分兩邊看：
+所以 namespace 沒有 `istio-injection=enabled`／`istio.io/rev`、Pod 也沒標 `sidecar.istio.io/inject: "true"` 時，通常就不會注入，Pod 是 `1/1`。（反過來，namespace 或 Pod 任一邊明確設成 `disabled`／`"false"`，Pod 就不會被注入。同一個 namespace 同時帶 `istio-injection` 和 `istio.io/rev` 時，`istio-injection` 優先。）後果要分兩邊看：
 
 - **它自己的 inbound 政策失效** —— 打到它身上的 AuthorizationPolicy、PeerAuthentication 沒有 Envoy 可以執行，等於沒寫
 - **但別人呼叫它時，client 端的設定仍然套用** —— mesh 裡其他帶 sidecar 的 client 打它時，VirtualService / DestinationRule 是在 client 那一側的 Envoy 執行的，照樣生效
