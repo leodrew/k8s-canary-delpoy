@@ -1299,6 +1299,240 @@ sync_config_hash_idempotent() {
 check "sync-script-exists" test -f scripts/sync-config-hash.sh
 check "sync-config-hash-idempotent" sync_config_hash_idempotent
 
+# =============================================================================
+# 檢查 10：guide 裡每一個 ```yaml 區塊都要能被解析
+# =============================================================================
+# 這個檢查在防什麼：
+#   k8s-ecosystem-guide.md 是教材，讀者會把裡面的 YAML 整段複製出去用。ralph/
+#   guide-verification 這個 run 會逐 Part 改寫它，每一輪都可能動到 yaml 區塊 ——
+#   少一格縮排、多一個重複的 key、`- ` 對錯層級，markdown 渲染出來看起來完全正常，
+#   要等讀者 kubectl apply 才會發現。這一項讓「把 guide 的 YAML 改壞」在 commit
+#   之前就 FAIL。
+#
+#   用的是跟檢查 [1] 同一套本地 js-yaml（require("js-yaml")）的 loadAll，所以
+#   多文件（--- 分隔）的區塊照樣能過。只看語法、不看語意：能解析不代表欄位寫對，
+#   欄位對不對是 code-review 對照帳本在把關。
+#
+# 刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段：
+#   在 fence 的【前一行】加
+#       <!-- validate:skip-yaml 原因 -->
+#   就略過那一個區塊。原因是必填的 —— 空的原因 FAIL。理由跟這個 repo 其他地方
+#   一樣：一個沒寫原因的豁免，下一個人看不出它還該不該存在，最後就是越積越多、
+#   檢查名存實亡。標記跟 fence 之間不能有空行；標記後面接的不是 yaml fence 也 FAIL
+#   （那通常是區塊被搬走了、標記留在原地，或者被貼到 bash 區塊前面）。
+#
+#   同一個區塊並列兩種寫法（A／B、錯／對）造成 duplicated key 的，不要用 skip ——
+#   拆成兩個區塊，讓兩邊都被驗證。skip 的區塊等於沒有閘門。
+#
+# 為什麼整份 guide 只算一項 check、而不是每個區塊一行 PASS：
+#   guide 有一百多個 yaml 區塊，一個一行會把其他檢查的輸出淹掉。失敗時每個壞掉
+#   的區塊各印一行（區塊起始行號＋錯誤原因＋錯誤在檔案裡的行號），不會漏報。
+#   另外「一個區塊都沒找到」也算 FAIL —— 那代表 fence 的比對規則跟文件對不上了，
+#   這時候這一項會變成永遠綠燈，比沒有這一項更糟。
+GUIDE="k8s-ecosystem-guide.md"
+
+echo
+echo "== [10] guide 的 yaml 區塊都能解析（刻意寫錯的要有 skip-yaml 標記與原因）=="
+
+GUIDE_YAML_SCRIPT='
+const fs = require("fs");
+const y = require("js-yaml");
+const file = process.argv[1];
+const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+
+const OPEN = /^(\s*)```\s*(\S*)\s*$/;
+const CLOSE = /^\s*```\s*$/;
+const MARKER = /^\s*<!--\s*validate:skip-yaml(?![\w-])(.*?)-->\s*$/;
+const isYamlLang = s => /^(yaml|yml)$/i.test(s);
+
+const errors = [];
+let parsed = 0;
+let skipped = 0;
+
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i];
+  const open = line.match(OPEN);
+
+  if (open) {
+    let j = i + 1;
+    while (j < lines.length && !CLOSE.test(lines[j])) j++;
+    if (j >= lines.length) {
+      errors.push("第 " + (i + 1) + " 行的 ```" + open[2] + " 區塊沒有結尾的 ``` —— 後面整份文件都會被當成程式碼");
+      break;
+    }
+    if (isYamlLang(open[2])) {
+      const marker = i > 0 ? lines[i - 1].match(MARKER) : null;
+      if (marker) {
+        // 原因是空的那種已經在掃到標記那一行時報過了，這裡只負責略過。
+        skipped++;
+      } else {
+        // fence 本身有縮排（例如在清單項目底下）時，內容也帶著同樣的縮排，先剝掉。
+        const indent = open[1];
+        const body = lines.slice(i + 1, j)
+          .map(l => (l.startsWith(indent) ? l.slice(indent.length) : l))
+          .join("\n");
+        try {
+          y.loadAll(body);
+          parsed++;
+        } catch (e) {
+          const at = e.mark ? "（錯誤在檔案第 " + (i + 2 + e.mark.line) + " 行）" : "";
+          errors.push("第 " + (i + 1) + " 行的 ```" + open[2] + " 區塊解析失敗：" + (e.reason || e.message) + at);
+        }
+      }
+    }
+    i = j;
+    continue;
+  }
+
+  if (line.includes("validate:skip-yaml")) {
+    const m = line.match(MARKER);
+    if (!m) {
+      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記格式不對，要寫成一整行 <!-- validate:skip-yaml 原因 -->");
+      continue;
+    }
+    if (m[1].trim() === "") {
+      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記沒有寫原因。略過一個區塊的檢查必須說明為什麼它不能被解析，");
+      errors.push("    否則下一個人無從判斷這個豁免還該不該存在。");
+    }
+    const next = lines[i + 1];
+    const nextOpen = next === undefined ? null : next.match(OPEN);
+    if (!nextOpen || !isYamlLang(nextOpen[2])) {
+      errors.push("第 " + (i + 1) + " 行：skip-yaml 標記的下一行不是 ```yaml / ```yml fence。");
+      errors.push("    標記只作用在緊接著的那一個區塊（中間不能有空行）；區塊被搬走了就把標記一起刪掉。");
+    }
+  }
+}
+
+if (parsed + skipped === 0) {
+  errors.push(file + "：一個 ```yaml 區塊都沒找到。這代表 fence 的比對規則跟文件對不上了，");
+  errors.push("    這一項在這種狀態下會永遠綠燈 —— 先修比對規則。");
+}
+
+if (errors.length) {
+  for (const e of errors) console.error(e);
+  console.error("（共 " + parsed + " 個區塊解析成功、" + skipped + " 個有 skip-yaml 標記而略過）");
+  process.exit(1);
+}
+'
+
+check "guide-yaml $GUIDE" node -e "$GUIDE_YAML_SCRIPT" "$GUIDE"
+
+# =============================================================================
+# 檢查 11：修完的 Part 必須留著「參考來源」，且至少一個是官方網域
+# =============================================================================
+# 這個檢查在防什麼：
+#   guide 的每一個 Part 修完時（ralph/guide-verification），結尾會加一個
+#   `### 參考來源` 小節，列出這個 Part 的說法是對照哪些官方文件查證過的。那一段
+#   是「這個 Part 被查證過」唯一留在文件裡的證據 —— 被刪掉、或被換成部落格連結，
+#   文件看起來還是一樣完整，沒有任何症狀。這一項把已經修完的 Part 登記起來，
+#   之後任何一輪改 guide 時誤刪了來源段落，就會在 commit 之前 FAIL。
+#
+# VERIFIED_PARTS 怎麼用：
+#   - 某個 Part 的最後一個故事完成、加上 `### 參考來源` 之後，把 "Part N" 加進
+#     下面的陣列（同一個 commit）。還沒修完的 Part 不要加 —— 它還沒有來源段落，
+#     加了只會 FAIL。
+#   - 判定範圍：guide 裡 `## Part N` 那個標題，到下一個 `#`／`## ` 標題為止；
+#     `### 參考來源` 小節到下一個 `###` 或更高層的標題為止。code fence 裡的
+#     `## ...`（bash 註解）不算標題。"Part 1" 不會對到 "Part 10"。
+#   - 「官方網域」的白名單寫在下面的 OFFICIAL_DOMAINS / GITHUB_ORGS。網域比對是
+#     「完全相同或是它的子網域」，所以 evil-kubernetes.io 不會過。github.com 與
+#     raw.githubusercontent.com 只認 kubernetes / istio / argoproj / envoyproxy
+#     四個組織 —— 任何人都能在 github.com 上開 repo，網域本身不代表官方。
+#   - 白名單只要求「至少一個」：參考來源裡同時列二手資料（部落格、issue 討論）是允許的，
+#     但不能整段都是二手資料。
+VERIFIED_PARTS=()
+
+echo
+echo "== [11] 已修完的 Part 有參考來源（VERIFIED_PARTS）=="
+
+GUIDE_SOURCES_SCRIPT='
+const fs = require("fs");
+const [file, part] = process.argv.slice(1);
+const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+
+const OFFICIAL_DOMAINS = [
+  "kubernetes.io", "istio.io", "envoyproxy.io",
+  "argo-rollouts.readthedocs.io", "argoproj.github.io",
+  "keda.sh", "docs.flagger.app", "prometheus.io", "helm.sh",
+  "keycloak.org", "metallb.io", "learn.microsoft.com", "rfc-editor.org",
+];
+const GITHUB_HOSTS = ["github.com", "raw.githubusercontent.com"];
+const GITHUB_ORGS = ["kubernetes", "istio", "argoproj", "envoyproxy"];
+
+if (!/^Part \d+$/.test(part)) {
+  console.error("VERIFIED_PARTS 的項目要寫成 \"Part N\"，收到的是 " + JSON.stringify(part));
+  process.exit(1);
+}
+
+// 只收 code fence 外面的標題：bash 區塊裡的 "## ..." 是註解，不是章節。
+const heads = [];
+let inFence = false;
+lines.forEach((l, i) => {
+  if (/^\s*```/.test(l)) { inFence = !inFence; return; }
+  if (inFence) return;
+  const h = l.match(/^(#{1,6})\s+(.*?)\s*$/);
+  if (h) heads.push({ i, level: h[1].length, text: h[2] });
+});
+
+const partRe = new RegExp("^" + part + "(?!\\d)");
+const starts = heads.filter(h => h.level === 2 && partRe.test(h.text));
+if (starts.length !== 1) {
+  console.error(file + "：找到 " + starts.length + " 個 \"## " + part + "\" 標題（應該剛好一個）");
+  starts.forEach(h => console.error("    第 " + (h.i + 1) + " 行：" + h.text));
+  process.exit(1);
+}
+const start = starts[0];
+const endHead = heads.find(h => h.i > start.i && h.level <= 2);
+const end = endHead ? endHead.i : lines.length;
+
+const srcHeads = heads.filter(h => h.i > start.i && h.i < end && h.level === 3 && h.text === "參考來源");
+if (srcHeads.length === 0) {
+  console.error(part + "（第 " + (start.i + 1) + "–" + end + " 行）裡沒有 \"### 參考來源\" 小節。");
+  console.error("    這個 Part 已登記在 VERIFIED_PARTS，代表它查證修正過；來源段落是那次查證留在");
+  console.error("    文件裡的唯一證據，不可以刪。若是標題被改了名，請改回 \"### 參考來源\"。");
+  process.exit(1);
+}
+
+const urls = [];
+for (const s of srcHeads) {
+  const next = heads.find(h => h.i > s.i && h.level <= 3);
+  const stop = Math.min(next ? next.i : lines.length, end);
+  for (const l of lines.slice(s.i + 1, stop)) {
+    for (const m of l.matchAll(/https?:\/\/[^\s<>()\[\]"`]+/g)) urls.push(m[0]);
+  }
+}
+
+function official(raw) {
+  let u;
+  try { u = new URL(raw); } catch (e) { return false; }
+  const host = u.hostname.toLowerCase();
+  if (OFFICIAL_DOMAINS.some(d => host === d || host.endsWith("." + d))) return true;
+  if (GITHUB_HOSTS.includes(host)) {
+    const org = (u.pathname.split("/")[1] || "").toLowerCase();
+    return GITHUB_ORGS.includes(org);
+  }
+  return false;
+}
+
+if (!urls.some(official)) {
+  console.error(part + " 的 \"### 參考來源\"（第 " + (srcHeads[0].i + 1) + " 行）裡沒有任何官方網域的連結。");
+  console.error("    找到的連結：" + (urls.length ? "" : "（沒有）"));
+  urls.forEach(u => console.error("      " + u));
+  console.error("    官方網域白名單：" + OFFICIAL_DOMAINS.join("、"));
+  console.error("    以及 github.com／raw.githubusercontent.com 底下的 " + GITHUB_ORGS.join("／") + " 組織。");
+  process.exit(1);
+}
+'
+
+if [ "${#VERIFIED_PARTS[@]}" -eq 0 ]; then
+  echo "（VERIFIED_PARTS 目前是空的：還沒有任何 Part 修完，這一項沒有東西可檢查）"
+fi
+# ${arr[@]+"${arr[@]}"}：空陣列在 set -u 下也不會報 unbound variable（bash 4.4 以前會），
+# 而且 "Part 0" 這種含空白的項目仍然是一個字。
+for part in ${VERIFIED_PARTS[@]+"${VERIFIED_PARTS[@]}"}; do
+  check "guide-sources $part" node -e "$GUIDE_SOURCES_SCRIPT" "$GUIDE" "$part"
+done
+
 # --- 總結 --------------------------------------------------------------------
 echo
 if [ "$FAIL_COUNT" -eq 0 ]; then

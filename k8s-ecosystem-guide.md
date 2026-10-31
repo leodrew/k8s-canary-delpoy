@@ -206,7 +206,9 @@ selector:
   matchLabels:
     app: pmc-epmmformquerygui
     version: stable
+```
 
+```yaml
 # B. 運算式比對：In / NotIn / Exists / DoesNotExist
 selector:
   matchExpressions:
@@ -997,7 +999,9 @@ istioctl x authz check deploy/epmm-api -n ea-epmm
 principals: ["cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"]
 #                                       ^^^^^^^^^^^^^^^^^^^^^
 #            這是 Deployment 名 / app label，但 SA 其實叫 default
+```
 
+```yaml
 # 目前實際的身分是這個
 principals: ["cluster.local/ns/ea-pmc/sa/default"]
 ```
@@ -1232,7 +1236,7 @@ spec:
       automountServiceAccountToken: false        # <- 順便：不需要呼叫 K8s API 就關掉
       containers:
         - name: app
-          ...
+          # ...（其餘欄位不變）
 ```
 
 > `automountServiceAccountToken: false` 是免費的安全強化——它只影響「呼叫 K8s API 的 token」，**不影響 Istio mTLS 身分**（Istio 用的是 SDS 下發的憑證）。除非你的 app 真的要打 K8s API，否則都應該關掉。
@@ -3692,6 +3696,7 @@ spec:
 
 **怎麼改**：
 
+<!-- validate:skip-yaml 從 Deployment 截出的片段：lifecycle 在 containers[] 底下、terminationGracePeriodSeconds 在 Pod spec 底下，保留原縮排才看得出兩者層級不同，單獨拿出來不是合法 YAML -->
 ```yaml
           lifecycle:
             preStop:
@@ -6684,7 +6689,9 @@ stable 那條路由也設 `x-app-track: "stable"`，這樣兩種狀態都有明�
 ```yaml
 # ❌ 太寬鬆：xcanary=always 或 mycanary=always2 都會誤中
               regex: ".*canary=always.*"
+```
 
+```yaml
 # ✅ 用完整的分隔符比對
               regex: "^(.*;\\s*)?canary=always(\\s*;.*)?$"
 ```
@@ -7410,7 +7417,9 @@ canary-manual/
   configMap.name: pmc-epmmformquery-config-1.2.3
   config-version: "1.2.3"
   replicas: 2
+```
 
+```yaml
 # release/21-deployment-canary.yaml
   image: your-registry/pmc-epmmformquerygui:1.2.3
   configMap.name: pmc-epmmformquery-config-1.2.3

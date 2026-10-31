@@ -142,6 +142,24 @@ bash scripts/validate.sh      # 或 npm run validate
 - **`check "<名稱>" <指令> [參數...]`** —— 指令以參數陣列直接執行，**不經過 eval**，
   所以可以原樣傳一整段帶引號的 `node -e` 斷言進去。需要 pipeline 或 shell 語法時
   再明確包一層 `bash -c`。
+- **`<!-- validate:skip-yaml 原因 -->`（檢查 [10]）** —— [10] 用同一套 js-yaml 的
+  `loadAll` 解析 `k8s-ecosystem-guide.md` 裡每一個 ```` ```yaml ````／```` ```yml ```` 區塊
+  （整份 guide 算一項 check，失敗時每個壞區塊各印一行起始行號與原因）。讀者會把 guide 的
+  YAML 整段複製去 apply，縮排錯了 markdown 照樣渲染得很正常，所以要在 commit 前擋。
+  刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
+  不能有空行）放這個標記就略過。**原因必填**，空的 FAIL；標記後面接的不是 yaml fence
+  也 FAIL（區塊被搬走、標記留在原地的典型樣子）。**同一區塊並列兩種寫法（A／B、錯／對）
+  造成 duplicated key 時不要用 skip，拆成兩個區塊** —— skip 的區塊等於沒有閘門；只有
+  `...` 之類的省略號時，改成 `# ...` 註解讓它能解析，也比 skip 好。
+- **`VERIFIED_PARTS`（檢查 [11]）** —— guide 已修完的 Part 清單，寫成 `"Part N"`。
+  清單裡每個 Part 的 `## Part N` 區段（到下一個 `## ` 為止，code fence 裡的 `## ` 不算；
+  `Part 1` 不會對到 `Part 10`）都必須有 `### 參考來源`，且其中至少一個連結落在官方網域
+  白名單（腳本裡的 `OFFICIAL_DOMAINS`；github.com／raw.githubusercontent.com 只認
+  kubernetes／istio／argoproj／envoyproxy 組織，網域比對是「相同或子網域」）。
+  來源段落是「這個 Part 被查證過」留在文件裡的唯一證據，被刪掉或換成部落格連結都不會有
+  任何症狀。**某個 Part 的最後一個故事加上參考來源時，在同一個 commit 把它加進陣列**；
+  還沒修完的 Part 不要加（它沒有來源段落，只會 FAIL）。漏加的後果是那個 Part 的來源
+  沒有任何保護 —— 陣列空著時 [11] 只印一行說明、不跑任何 check，不會有 FAIL 提醒你。
 
 新檢查加在腳本的 `# 之後的檢查加在這裡` 標記區段、總結區塊之前，開一個
 `== [n] 說明 ==` 區段並寫清楚「這個檢查在防什麼」。
