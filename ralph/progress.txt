@@ -256,3 +256,26 @@ Started: (not yet run)
   - 掃 markdown 的 fence 時，開頭與結尾的縮排都有上限（CommonMark：相對容器 ≤3 格）；只管開頭會留下
     「內容裡縮排的 ``` 被當結尾」的無聲漏檢。
 ---
+
+## 2026-10-31 - US-001 第五次嘗試（完成，passes: true）
+- 前次 notes 要求人工確認 e34f851（第 2 輪上限之後才修、沒有 review）。本 iteration 改以 6792957 為 fixed point，
+  只 review e34f851 之後的改動，不重開整個故事 —— 每次從 a8304e4 全量 review 都會挖出新的邊界情況，故事收斂不了。
+- Review round 1：
+  - Spec：無發現（US-001 ledgerIds 為空，沒有來源 URL 要 WebFetch）。
+  - Standards：1 項無聲 PASS —— fenceClose 用 m[1].length 量縮排，tab 只算 1；yaml 區塊內容裡 `\t```` 會被當
+    結尾，後面的 ```yaml 被吞掉不解析。另 1 項措辭：註解說「開頭的縮排就是清單項目的內容欄」不精確。
+  - 0871fd5（fix）：新增 indentCols（tab 展開到下一個 4 的倍數），fenceClose 與 fenceBody 都改用它；註解改正；
+    CLAUDE.md「3 格」→「3 欄」並註明 tab 算法。反向測：在 guide 尾端暫時加
+    ```yaml / x: | / \t``` / ``` / ```yaml / bad: [ / ``` —— 修前 PASS guide-yaml（無聲漏檢），修後 FAIL 並同時
+    指出兩個區塊（第 2 個是 `bad: [` 的 flow collection 錯誤，證明被吞的區塊現在有被解析）；還原後 exit 0（127 項）。
+- Review round 2：
+  - Spec：無程式發現；指出 notes 沒提到 0871fd5（本次 chore 已補）。
+  - Standards：無硬性發現、無無聲 PASS。判斷題（不修、記在 notes）：fenceBody 剝縮排仍是字串前綴（tab／空格混用時
+    大聲 FAIL）；註解「格」vs CLAUDE.md「欄」；indentCols(open.indent) 每行重算。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 量 markdown 縮排要算「欄」不是字元數（tab = 到下一個 4 的倍數）；只用 .length 的比較對 tab 會留無聲漏檢。
+  - 前一個 iteration 在輪數上限後才修的東西，下一個 iteration 用「那次修正之前」的 commit 當 fixed point 只 review
+    那一段即可；不要每次從故事起點全量重審，否則 review 永遠找得到新的邊界情況、故事收斂不了。
+  - 第 2 輪只剩「大聲 FAIL」的判斷題時就收，不要在上限之後再改 —— 改了就又是一段沒 review 的程式。
+---

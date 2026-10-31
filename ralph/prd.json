@@ -20,8 +20,8 @@
         "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "第四次嘗試（612fc39、6792957、e34f851）：前次 notes 的 (1)–(4) 都已修掉，第 2 輪 Standards 逐項實測確認（行內程式碼 ```` ```yaml ```` 不再假 FAIL、```` 收尾可認、[10]／[11] 共用 fenceBlocks、全部壞掉時不再印「找不到區塊」）。6792957：縮排比 fence 淺的非空白行讓區塊斷掉（擋 4 格縮排的 ``` 吞掉後面真區塊）。第 2 輪 review（BASE a8304e4）：Spec 無發現；Standards 找到 1 項無聲 PASS —— CLOSE 接受任意縮排的結尾 fence，yaml 區塊內容裡縮排更深的 ```（`|` 字串夾 markdown）會讓區塊提早結束、把下一個 ```yaml 吞掉。已在 e34f851 修正（結尾縮排 ≤ 開頭＋3，CommonMark）並反向測過（該情境現在 FAIL 在正確行號），但這是第 2 輪之後的修正、沒有再 review，依規則 passes 維持 false —— 人工確認 e34f851 後即可設 passes: true。判斷題（未修）：6792957 的「縮排比 fence 淺就斷」對兩種合法但罕見的 markdown 會大聲 FAIL（頂層 fence 縮排 1–3 格而內容頂格；刻意用 4 格縮排展示 ``` 字面）；guide 目前沒有這兩種寫法。另：本次嘗試的第 1 輪 review 紀錄沒有留下（前一個 iteration 在 commit 6792957 之前中斷，修正以未 commit 的狀態留在工作目錄，本 iteration 驗證、反向測試後 commit）。"
+      "passes": true,
+      "notes": "第五次嘗試完成（0871fd5）。本 iteration 以 6792957 為 fixed point 只 review 前次沒 review 的 e34f851：第 1 輪 Standards 找到 tab 縮排的 ``` 仍會提早結束區塊（無聲 PASS）→ 0871fd5 改用 indentCols 算欄並反向測過；第 2 輪兩軸都沒有硬性發現。留下的判斷題（未修，皆為大聲 FAIL、guide 目前 0 個 tab）：fenceBody 剝縮排仍以字串前綴比對，fence 與內容用不同空白（tab vs 空格）時會解析失敗；fenceClose 註解寫「3 格」而 CLAUDE.md 寫「3 欄」；indentCols(open.indent) 每行重算。另：6792957 的「縮排比 fence 淺就斷」對兩種罕見合法 markdown 會大聲 FAIL（同前）。"
     },
     {
       "id": "US-002",
