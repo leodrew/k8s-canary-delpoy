@@ -1045,7 +1045,7 @@ spec:
 | | **Istio AuthorizationPolicy** | **K8s RBAC** |
 |---|---|---|
 | 錯誤訊息 | `RBAC: access denied` | `User "system:serviceaccount:ea-pmc:default" cannot get resource "pods" in API group "" in the namespace "ea-epmm"` |
-| HTTP 狀態 | **403**，body 就是那七個字 | 403，body 是一整段 JSON |
+| HTTP 狀態 | **403**，body 只有 `RBAC: access denied` 這一行純文字 | 403，body 是一整段 JSON |
 | 誰擋的 | 目標 Pod 的 **istio-proxy sidecar**（或 ingressgateway） | **kube-apiserver** |
 | 管什麼 | 服務之間的**業務流量** | 誰能對 **K8s API** 做什麼（`kubectl get pods` 之類） |
 | 相關資源 | `AuthorizationPolicy` / `PeerAuthentication` | `Role` / `ClusterRole` / `RoleBinding` |
