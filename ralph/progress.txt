@@ -141,10 +141,59 @@ Started: (not yet run)
   而「改完 manifest 跑一次 validate.sh」正是這裡的標準工作流程 —— 那會變成一個開發途中
   永遠是紅的檢查，下場跟永遠綠燈的檢查一樣是被無視。還原要無條件做：閘門不改工作目錄。
 
+- **掃 markdown（guide）的檢查共用 validate.sh 的 `GUIDE_FENCE_JS`（OPEN/CLOSE）。** 不要自己再寫一套
+  fence 判定：兩套規則一分歧，同一行在 [10] 眼中在區塊裡、在 [11] 眼中在區塊外。guide 的 fence 可能帶縮排、
+  帶 info string，也可能長在 blockquote 裡（`> ```yaml`，US-001 留下的未處理項）。
+
 - **改了 ConfigMap 的內容就要跑 `bash scripts/sync-config-hash.sh`，並跟 ConfigMap 放
   同一個 commit。** 名稱固定之後，改設定不會改到 pod template → apply 不重啟 →
   Spring 只在啟動時讀一次設定檔 → 設定沒有生效，而且不會報錯。忘了跑會被檢查 [9] 擋下。
   雜湊算的是**解析後**的 `data['application.yml']` 字串（跟叢集端 `kubectl ... | sha256sum`
   一致），不是原始檔位元組 —— 否則改一行註解就會讓全部 pod 滾動重啟。
 
+---
+
+## 2026-10-31 - US-001（passes 仍為 false：第 2 輪 review 留下 1 項，見 prd.json notes）
+- 實作：scripts/validate.sh 新增
+  - [10] guide-yaml：用 require("js-yaml") 的 loadAll 解析 k8s-ecosystem-guide.md 每個 ```yaml／```yml
+    區塊（整份 guide 一項 check，失敗時每個壞區塊各印起始行號＋原因＋錯誤所在行）。
+    `<!-- validate:skip-yaml 原因 -->` 放在 fence 緊鄰前一行就略過；原因空白 FAIL、標記後面不是
+    yaml fence FAIL、fence 沒關 FAIL、一個 yaml 區塊都沒找到也 FAIL（防永遠綠燈）。
+  - [11] guide-sources：VERIFIED_PARTS=()（初始為空）每個 "Part N" 的 `## Part N` 區段裡要有
+    `### 參考來源`，且至少一個官方網域白名單連結（github 只認 kubernetes/istio/argoproj/envoyproxy 組織；
+    網域比對「相同或子網域」）。
+  - 兩者共用 GUIDE_FENCE_JS（OPEN/CLOSE fence 判定），接在兩段 node 腳本前面。
+- guide 原本解析失敗的 6 個區塊：203（selector A/B）、995（principals 錯/對）、6684（regex 錯/對）、
+  7407（stable/canary 兩檔）拆成兩塊；1227 的 `...` 改成 `# ...（其餘欄位不變）` 註解讓它能解析；
+  3695 的 preStop 片段（從 Deployment 截出、縮排不能獨立成立）加 skip 標記並寫原因。
+- CLAUDE.md「擴充 scripts/validate.sh 的既有工具」補上 skip-yaml 標記與 VERIFIED_PARTS 兩條。
+- Files: scripts/validate.sh, k8s-ecosystem-guide.md, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- 反向測試（每項都先確認改動真的寫進檔案，測完 cmp 確認還原）：
+  (a) 把 207 行 `    app:` 縮排改成兩格 → FAIL「第 203 行的 ```yaml 區塊解析失敗：bad indentation…（錯誤在檔案第 208 行）」
+  (b) 在 203 行前加 `<!-- validate:skip-yaml -->` → FAIL「skip-yaml 標記沒有寫原因」；
+      標記與 fence 中間隔一行空行 → FAIL「標記的下一行不是 yaml fence」；
+      刪掉 preStop 片段的 skip 標記 → FAIL（第 3699 行區塊解析失敗）
+  (c) VERIFIED_PARTS=("Part 0") → FAIL「Part 0（第 33–283 行）裡沒有 "### 參考來源" 小節」
+  另測 [11]：只有 medium.com＋evil-kubernetes.io → FAIL；github.com/someuser、raw…/foo → FAIL；
+  kubernetes.io → PASS；github.com/istio/… → PASS；來源只放在 Part 10、登記 Part 1 → FAIL（不會誤對到 Part 10）；
+  裸寫 `https://kubernetes.io。` → PASS（review 修正後）；```yaml title="x" 的壞區塊 → FAIL（review 修正後）。
+  全部還原，validate.sh exit 0（127 項）。
+- Review round 1（BASE a8304e4）：
+  - Standards：無硬性違規。2 個 bug —— fence regex 不接受 info string（```yaml title=x 讓整份文件區塊裡／外顛倒、
+    壞 YAML 無聲漏檢）、裸 URL 後接全形標點（。，）會被吃進 hostname 而誤判；judgement call —— [10]/[11] 各寫一套
+    fence 判定且已分歧（Duplicated Code）；Part 區段邊界的說明在腳本註解與 CLAUDE.md 不一致。
+  - Spec：全部驗收條件達成；1227 改 `# ...` 符合「skip 只給縮排不能獨立的片段」的意圖。
+  - 修正（fix: US-001 - address review）：抽出共用 GUIDE_FENCE_JS、OPEN 允許 info string、URL 排除全形標點、對齊說明。
+- Review round 2：
+  - Spec：無發現。
+  - Standards：1 項未處理 —— [10] 偵測不到 blockquote 裡的 fence（`> ```yaml`），guide 第 4571 行附近
+    Argo Rollouts「前置條件」VS 片段因此不受保護。另一項低優先：`https://kubernetes.io.`（ASCII 句點）假 FAIL。
+  - 已達兩輪上限，依 ralph/CLAUDE.md 寫進 prd.json notes，passes 維持 false，交人工判斷。
+- **Learnings for future iterations:**
+  - guide 有 fence 長在 blockquote（`> ```yaml`）與清單縮排底下的情況；掃 markdown 時「fence 長什麼樣」要先
+    盤點一次（grep '```' 看前綴），不要假設都在行首。
+  - 掃 markdown 的多個檢查要共用同一組 fence 判定，否則同一行在不同檢查眼中一個在區塊裡、一個在區塊外。
+  - 中文段落裡的裸 URL 後面常接全形標點，URL 字元類別要排除它們。
+  - 拆「錯／對」並列的區塊時，每個區塊的註解要跟著留在對的那一塊（`# 錯的寫法` 在上、`# ✅` 在下），只在中間
+    插 ``` ＋空行＋```yaml，內容一字不動。
 ---

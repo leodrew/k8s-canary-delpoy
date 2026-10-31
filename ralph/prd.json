@@ -21,7 +21,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": ""
+      "notes": "兩輪 code-review 後仍有 1 項未處理（Standards 軸第 2 輪，passes 維持 false 待人工確認）：檢查 [10] 偵測不到 blockquote 裡的 fence（`> ```yaml`）。guide 目前剛好一個：k8s-ecosystem-guide.md 第 4571 行附近 Argo Rollouts「前置條件」的 VirtualService 片段 —— 讀者會照抄的那種，把它的縮排改壞 [10] 仍 PASS。建議：GUIDE_FENCE_JS 的 OPEN/CLOSE 允許可選的 `(?:>s?)*` 前綴，取出區塊內容時跟縮排一樣剝掉（[11] 的標題掃描用同一組規則，一起受惠）；或刻意不支援時讓 blockquote 裡的 fence 直接 FAIL。修完記得反向測：把 4573 行縮排改壞 → [10] 必須 FAIL。另一項低優先：[11] 裸寫的 `https://kubernetes.io.`（ASCII 句點結尾）hostname 會變 `kubernetes.io.` 而誤判 FAIL（只會假 FAIL、不會假 PASS）。其餘驗收條件、兩輪 Spec 軸皆無發現。"
     },
     {
       "id": "US-002",
