@@ -333,3 +333,10 @@ Started: (not yet run)
 - Review round 1: Spec 無發現（兩段引文都在官方頁找得到）；Standards 3 點（格子與段落重複、與 2.3 重要澄清重複、交叉參照缺 outboundTrafficPolicy、推論未標註）→ 全修，段落改指回 2.3。未再跑第 2 輪（修改僅措辭、validate.sh 通過）。
 - Learnings: 同一主張已在前面小節出現時，新段落指回去，不要重寫。
 ---
+## 2026-11-01 - US-016
+- 修正 Part 3 對照表（k8s-ecosystem-guide.md 約第 1048 行）：「body 就是那七個字」→「body 只有 `RBAC: access denied` 這一行純文字」（P03-001）
+- 沒有連動修改其他句子
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Spec：無發現（Envoy rbac_filter.cc 的 sendLocalReply 引文確實存在、新措辭與建議改法逐字相符）。Standards：無發現（觀察：第 1063 行的 "RBAC: access denied" 屬別列範圍，未動）
+- Learnings: 無新增通則
+---
