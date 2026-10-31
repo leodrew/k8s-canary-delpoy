@@ -376,3 +376,32 @@ Started: (not yet run)
 - **Learnings for future iterations:**
   - Standards reviewer 不看帳本，會把同一個詞在其他帳本列範圍內的出現也當成本故事的硬性違規；判定前先查帳本的行號欄，屬於別列就記觀察、不改。
 ---
+
+## 2026-10-31 - US-004（完成，passes: true）
+- 實作（BASE b8ee31a；commits ba10504 feat、0120bf6 fix）：k8s-ecosystem-guide.md Part 0「一句話職責表」「認證 vs 授權 vs 防火牆」
+  - P00-058：DR 職責改「路由決定之後」＋「client 端對上游連線的 TLS 設定（如 ISTIO_MUTUAL）」；「沒有它會怎樣」改「同一個 Service 底下無法分版本」，
+    表下補充：不同 Service 用 VS weight 照樣能分流；server 端強制 mTLS 由 PeerAuthentication 決定。
+  - P00-059：「嚴格模式下打不出去」→「REGISTRY_ONLY 模式下打不出去」，表下補充預設 ALLOW_ANY 放行但走 passthrough、拿不到 VS/DR 功能，並註明與 mTLS STRICT 無關。
+  - P00-061：「沒有身分，授權policy 全部失效」→「預設 PERMISSIVE，明文也收」，表下補充 auto mTLS、明文繞過身分的風險、依賴 mTLS 的四組欄位，path/method 不受影響。
+  - P00-070（無法驗證）：① 改成帳本保守寫法 —— 通常是 timeout、RST 與否看 CNI、NetworkPolicy API 沒有阻擋紀錄、用 Calico／Cilium 工具查。
+  - Part 0 結尾加 `### 參考來源`（P00 已修各列的 12 個官方 URL，去重）；validate.sh `VERIFIED_PARTS=("Part 0")`。反向測：把標題改成「### 來源」→ [11] FAIL，還原後 PASS。
+- 連動修改（為了前後一致，寫明）：
+  - 新增「表中三列的補充」清單：P00-058／059／061 的建議改法塞不進表格格子，格子改成「（見表下說明）」指過去。
+  - ① 刪掉「看不到任何 Istio log」：它在 P00-070 的原文摘錄裡，但帳本建議改法沒保留這句（且 client 端 sidecar 其實會有 log），照帳本改法整句替換。
+  - ① 的「通常是 timeout」加粗：與 ②–④ 的粗體重點一致。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：4 個 URL 全部 WebFetch，引文全部找到（DR 的 "SSL/TLS related settings…" 與 NetworkPolicy 的 log 那句都在 100k 字之後）；0 項缺漏／範圍外；
+    minor：表下把 DR tls 窄化成「只管用不用 mTLS」，來源是整個 TLS 設定（含 SIMPLE/DISABLE）。
+  - Standards：無硬性違規；判斷題 —— 表格格子與表下段落重複、DR／ServiceEntry 格子太擠、「——」前後空白不一致、① 沒有粗體。
+  - 修正（0120bf6）：格子縮短成指向表下；表下改成三點清單；DR tls 改回「上游連線的 TLS 設定」；破折號空白；① 加粗。
+- Review round 2：
+  - Spec：4 個 URL 再次全部 WebFetch、引文逐字找到；(a)(b)(c) 皆 0。
+  - Standards：無硬性違規；判斷題（未修）—— DR 的 tls 說明格子與清單各一次；「真正的風險不是「沒有身分」」引用的是已刪掉的舊格子字樣；
+    參考來源引言提到內部檔案 tasks/guide-verification-ledger.md；① 比 ②–④ 長。
+- 帳本外的觀察（沒改）：Part 2 §2.5 圖（約 914 行）① 仍寫「timeout / connection refused」，屬 P02-215；P02-001、P04-008 修的時候應指回 Part 0 表下的 PeerAuthentication 說明，不要再列一次欄位清單。
+- **Learnings for future iterations:**
+  - 帳本建議改法太長、塞不進表格格子時，格子寫一句結論＋「（見表下說明）」，細節放表下清單；不要格子和段落各寫一份（第 1 輪 Standards 會抓重複）。
+  - `### 參考來源` 用裸 URL（`- 標題：https://...`）[11] 就認得；「Part 0 各列」照 PRD 解讀為「已修（✓ 且非正確）各列」的 URL 欄，Spec reviewer 接受。
+  - 在 guide 裡用「」引用舊說法來反駁時，被引用的字樣如果同一次改動刪掉了，reviewer 會說引用落空；改用不加引號的敘述。
+---

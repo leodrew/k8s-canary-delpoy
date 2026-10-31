@@ -86,8 +86,8 @@
         "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "BASE b8ee31a。第 2 輪 review（涵蓋 ba10504、0120bf6）：Spec 4 個 URL 全部 WebFetch、引文逐字找到，0 項發現；Standards 沒有硬性違規 → passes: true。留下的判斷題（未修）：DR 的 tls 說明在表格格子與表下補充各寫一次；表下「真正的風險不是「沒有身分」」引用的是已刪掉的舊格子字樣；參考來源引言提到內部檔案 tasks/guide-verification-ledger.md；① 項比 ②–④ 長。"
     },
     {
       "id": "US-005",
