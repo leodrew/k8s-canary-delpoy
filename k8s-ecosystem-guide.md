@@ -987,9 +987,11 @@ spec:
 | 只讓 B 的 `GET /api/*` 被呼叫，`DELETE` 不行 | **AuthorizationPolicy** `to.operation` | 只有它懂 L7 |
 | 服務間流量要全加密 | **PeerAuthentication** `STRICT` | 其他三個都不做加密 |
 | 防止被入侵的 Pod 橫向掃描整個網段 | **NetworkPolicy** default-deny | Istio policy 管不到 UDP／ICMP、被排除在攔截之外的 port，也管不到被入侵 Pod 自己的出向流量 |
-| 限制某個服務只能連特定外部網址 | **NetworkPolicy egress** + **Sidecar** `REGISTRY_ONLY` | 兩層一起才擋得住 |
-| sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它唯一能解的問題 |
+| 限制某個服務只能連特定外部網址 | **ServiceEntry** + **Egress Gateway**（在 gateway 上限制主機名）+ **NetworkPolicy egress**（Pod 只允許打到 egress gateway） | NetworkPolicy 不能依主機名過濾；Sidecar `REGISTRY_ONLY` 只是盡力而為的防呆，不是安全邊界（見表下說明） |
+| sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它的主要用途；它也能設每個 workload 的 `outboundTrafficPolicy` 與 `ingress` listener（見本節開頭執行順序下方的說明） |
 | 只讓帶特定 JWT group 的使用者存取 | **AuthorizationPolicy** + **RequestAuthentication** | 前三個都不看 JWT |
+
+**外部網址限制的組合：** 官方「Security Best Practices」的說法是「When combined with a Network Policy, you can enforce all traffic, or some subset, goes through the egress gateway.」——主機名的限制放在 Egress Gateway 上，NetworkPolicy 只負責讓 Pod 的 egress 打不出 egress gateway 以外的地方。Sidecar 的 `outboundTrafficPolicy: REGISTRY_ONLY` 可以當第一道防呆（抓到漏寫的 ServiceEntry），但它只存在於被入侵的 Pod 自己的 sidecar 裡，繞得過去，所以不能單獨當限制。
 
 **`remoteIpBlocks` 的前提：** 要先設 `gatewayTopology.numTrustedProxies`（或在 gateway 加 annotation），前面的 LB 要追加 `X-Forwarded-For`；純 TCP LB 改用 PROXY protocol。沒設的話 `remote.ip` 拿不到真正的 client IP（細節見 Part 1 關鍵觀念二）。
 
@@ -998,6 +1000,37 @@ spec:
 > **NetworkPolicy 管「封包能不能到」，PeerAuthentication 管「你是誰」，AuthorizationPolicy 管「你能做什麼」，Sidecar 管「你看得到誰」。**
 >
 > 正式環境四個都要有。只有 Istio policy 而沒有 NetworkPolicy，等於前門上鎖後門大開。
+
+### 參考來源
+
+本 Part 經查證修正的說法所依據的官方文件（查證帳本 `tasks/guide-verification-ledger.md` 的 P02 各列）：
+
+- Istio — Security concepts：https://istio.io/latest/docs/concepts/security/
+- Istio — CRD 定義（crd-all.gen.yaml）：https://raw.githubusercontent.com/istio/istio/master/manifests/charts/base/files/crd-all.gen.yaml
+- Istio — PeerAuthentication reference：https://istio.io/latest/docs/reference/config/security/peer_authentication/
+- Istio — Health Checking of Istio Services：https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/
+- Istio — AuthorizationPolicy reference：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- Istio — Authorization Policy Dry Run：https://istio.io/latest/docs/tasks/security/authorization/authz-dry-run/
+- Istio — Authorization for Ingress Gateway：https://istio.io/latest/docs/tasks/security/authorization/authz-ingress/
+- Istio — Authorization Policy Conditions：https://istio.io/latest/docs/reference/config/security/conditions/
+- Envoy — HTTP header manipulation (x-forwarded-for)：https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers
+- Istio — Security Best Practices：https://istio.io/latest/docs/ops/best-practices/security/
+- Istio — Authorization Policy Normalization：https://istio.io/latest/docs/reference/config/security/normalization/
+- Istio — 1.22 change notes：https://istio.io/latest/news/releases/1.22.x/announcing-1.22/change-notes/
+- Istio — Performance and Scalability：https://istio.io/latest/docs/ops/deployment/performance-and-scalability/
+- Istio — Scoping Configuration：https://istio.io/latest/docs/ops/configuration/mesh/configuration-scoping/
+- Istio — Sidecar reference：https://istio.io/latest/docs/reference/config/networking/sidecar/
+- Istio — Configuration Analysis Messages：https://istio.io/latest/docs/reference/config/analysis/
+- Istio — Prometheus integration：https://istio.io/latest/docs/ops/integrations/prometheus/
+- Kubernetes — DNS for Services and Pods：https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
+- Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
+- Kubernetes — Well-Known Labels, Annotations and Taints：https://kubernetes.io/docs/reference/labels-annotations-taints/
+- Kubernetes — KEP-2161：https://www.kubernetes.dev/resources/keps/2161/
+- Istio — Installing Gateways：https://istio.io/latest/docs/setup/additional-setup/gateway/
+- Istio — Application Requirements：https://istio.io/latest/docs/ops/deployment/application-requirements/
+- Kubernetes — Admission Controllers（extensible）：https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
+- Flannel：https://github.com/flannel-io/flannel
+- Istio — Network Topologies：https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/
 
 ---
 
