@@ -957,12 +957,12 @@ spec:
          (CNI, L3/L4)         (Envoy, mTLS 身分)       (Envoy RBAC, L7)         (Spring Security)
               |                      |                        |                      |
         擋掉的症狀:              擋掉的症狀:               擋掉的症狀:             擋掉的症狀:
-        timeout /              連線 reset /              HTTP 403               你自己的
-        connection refused     TLS handshake fail        RBAC: access denied    403 頁面
+        通常是 timeout         連線 reset /              HTTP 403               你自己的
+        (RST 與否依 CNI)       TLS handshake fail        RBAC: access denied    403 頁面
         (無 Istio log)          (無 403)
 ```
 
-`Sidecar` 不在這條鏈上——它是**設定下發**的過濾器，決定 Envoy 有沒有那個目的地的路由設定，作用在「送得出去嗎」而不是「進得來嗎」。
+`Sidecar` 不在這條鏈上——它是**設定下發**的過濾器，決定 Envoy 有沒有那個目的地的路由設定，主要作用在「送得出去嗎」（`egress`）而不是「進得來嗎」。它也有 `ingress` 欄位可替 workload 設定 inbound listener，但本節只用到 `egress`，而且 Sidecar 不是授權機制（不會依身分允許或拒絕請求）。
 
 #### 能力對照
 
@@ -974,7 +974,7 @@ spec:
 | 比對 **JWT claim** | 不行 | 不行 | 可以 | 不行 |
 | 加密傳輸 | 不行 | 可以 | 不行 | 不行 |
 | 控制 **出向**（我能打誰） | 可以 | 不行 | 有限 | 可以（軟性） |
-| 擋得住繞過 sidecar 的直連 | 可以 | 部分 | 不行 | 不行 |
+| 擋得住繞過 sidecar 的直連 | 可以 | 部分 | 部分 | 不行 |
 | 不需要 Istio | 可以 | 不行 | 不行 | 不行 |
 | 省 sidecar 記憶體 | 不行 | 不行 | 不行 | 可以 |
 
@@ -982,11 +982,11 @@ spec:
 
 | 你的需求 | 用這個 | 為什麼不用別的 |
 |---|---|---|
-| 只讓 A 服務呼叫 B 服務 | **AuthorizationPolicy** `principals` | NetworkPolicy 只能比 IP，Pod 重建就失效 |
-| 只讓某個 IP 網段從外部進來 | **AuthorizationPolicy** `remoteIpBlocks`（放 ingressgateway 上） | `ipBlocks` 會比到 LB 的 IP |
+| 只讓 A 服務呼叫 B 服務 | **AuthorizationPolicy** `principals` | NetworkPolicy 只認 label 和 IP，不認密碼學身分（`principals` 認的是 mTLS 憑證裡的 ServiceAccount 身分），也看不到 L7 |
+| 只讓某個 IP 網段從外部進來 | **AuthorizationPolicy** `remoteIpBlocks`（放 ingressgateway 上） | `ipBlocks` 會比到 LB 的 IP；`remoteIpBlocks` 要先設 `gatewayTopology.numTrustedProxies`（或 gateway annotation），前面的 LB 要追加 `X-Forwarded-For`；純 TCP LB 改用 PROXY protocol，否則拿不到真正的 client IP |
 | 只讓 B 的 `GET /api/*` 被呼叫，`DELETE` 不行 | **AuthorizationPolicy** `to.operation` | 只有它懂 L7 |
 | 服務間流量要全加密 | **PeerAuthentication** `STRICT` | 其他三個都不做加密 |
-| 防止被入侵的 Pod 橫向掃描整個網段 | **NetworkPolicy** default-deny | Istio policy 擋不住繞過 sidecar 的直連 |
+| 防止被入侵的 Pod 橫向掃描整個網段 | **NetworkPolicy** default-deny | Istio policy 管不到 UDP／ICMP、被排除在攔截之外的 port，也管不到被入侵 Pod 自己的出向流量 |
 | 限制某個服務只能連特定外部網址 | **NetworkPolicy egress** + **Sidecar** `REGISTRY_ONLY` | 兩層一起才擋得住 |
 | sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它唯一能解的問題 |
 | 只讓帶特定 JWT group 的使用者存取 | **AuthorizationPolicy** + **RequestAuthentication** | 前三個都不看 JWT |
