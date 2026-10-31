@@ -454,7 +454,7 @@ meshConfig:
 
 mTLS 解決的是：Istio 的 CA（istiod）幫每個 workload 簽發一張憑證，憑證的 SAN 欄位寫著 `spiffe://cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui`。連線時雙方交換憑證，**Envoy 就能拿到一個密碼學上可信的身分**，而不是靠 IP 猜。
 
-**這是 AuthorizationPolicy 的前置條件。** 沒有 mTLS，`principals` / `namespaces` 這些欄位永遠比對不到東西（見 Part 3 成因 #3）。
+**身分欄位依賴 mTLS。** AuthorizationPolicy 的 `principals` / `namespaces` 這些欄位要有 mTLS 才比對得到東西（哪些欄位依賴 mTLS，見 Part 0「表中三列的補充」的 PeerAuthentication 一條；Part 3 成因 #3 也會用到）。前置條件是「mTLS」，不是「PeerAuthentication 物件」：兩端都有 sidecar 時，沒有 PeerAuthentication 也會自動升級成 mTLS（Istio：「For peer authentication, Istio automatically upgrades all traffic between two PEPs to mutual TLS.」）。真正的陷阱在 `PERMISSIVE`：明文請求沒有 principal，ALLOW 規則擋得掉明文，但 DENY 裡的 `principals` 規則會被明文繞過。所以官方強烈建議搭配 `STRICT`（Istio：「it is strongly recommended to always use these fields with **strict** mutual TLS mode.」）。
 
 #### 最小可用 YAML
 
@@ -478,7 +478,7 @@ metadata:
   name: pmc-query-mtls
   namespace: ea-pmc
 spec:
-  selector:                          # portLevelMtls 必須搭配 selector 才有效
+  selector:                          # portLevelMtls 必須搭配非空的 selector.matchLabels；少了它，Istio ≥1.23 在 apply 時就被 CRD 驗證拒絕（更舊版本才是靜默忽略）
     matchLabels:
       app: pmc-epmmformquerygui
   mtls:
@@ -497,7 +497,7 @@ spec:
 | | `DISABLE` | 完全不用 mTLS |
 | | `UNSET` | 繼承上層設定 |
 | `selector.matchLabels` | label | 不填 = 整個 namespace；填了 = 只針對符合的 workload |
-| `portLevelMtls.<port>` | port → mode | 針對單一容器 port 覆寫，**需要 selector** |
+| `portLevelMtls.<port>` | port → mode | 針對單一容器 port 覆寫，**需要非空的 `selector.matchLabels`**（沒有的話 Istio ≥1.23 會在 apply 時被 CRD 驗證直接拒絕；更舊版本才是靜默忽略） |
 
 #### 優先序
 
@@ -505,13 +505,13 @@ spec:
 workload-level（有 selector）  >  namespace-level（無 selector）  >  mesh-level（在 istio-system）
 ```
 
-放在 **root namespace（預設 `istio-system`）且名為 `default`** 的 PeerAuthentication 會套用到**整個 mesh**。這是最容易誤傷的一招——你以為只改一個 namespace，結果全 mesh 都被 STRICT 了。
+放在 **root namespace（預設 `istio-system`）且沒有 `selector`（或 selector 為空）** 的 PeerAuthentication 會套用到**整個 mesh**（Istio：「Mesh-wide policy: A policy specified for the root namespace without or with an empty `selector` field.」）。名稱跟範圍無關，叫 `default` 只是慣例；換個名字照樣全 mesh 中招。這是最容易誤傷的一招——你以為只改一個 namespace，結果全 mesh 都被 STRICT 了。
 
 #### 踩雷
 
 - **直接跳到 STRICT = 全面斷線。** 正確流程是：先 `PERMISSIVE` → 觀察 Grafana/Kiali 確認所有流量都已經是 mTLS（`istio_requests_total` 的 `connection_security_policy="mutual_tls"`）→ 再切 `STRICT`。
 - **沒有 sidecar 的 Pod 打不進來。** 例如 `kubectl exec` 進一個沒注入的 debug pod 去 curl，STRICT 下必定失敗，這不是 bug。
-- **kubelet 的 health probe**：Istio 預設會把 HTTP probe 改寫成走 sidecar 的 15021 port（`sidecar.istio.io/rewriteAppHTTPProbe`，預設開啟），所以一般不會壞。但如果你手動關掉這個改寫、或用了 TCP probe 打在 mTLS port 上，就會出問題。
+- **kubelet 的 health probe**：Istio 預設會改寫 HTTP、TCP、gRPC 三種 probe（Istio：「Istio uses probe rewrite to implement HTTP, TCP, and gRPC probes by default.」），所以 STRICT 下一般不會壞。HTTP probe 改寫後改打 pilot-agent 的 **15020** port（路徑 `/app-health/<container>/livez` 或 `readyz`）；15021 是 sidecar 自己的 `/healthz/ready`，不是改寫目標。要關掉改寫，是在 **pod template 的 annotation** 寫 `sidecar.istio.io/rewriteAppHTTPProbers: "false"`（結尾是 Probers；`rewriteAppHTTPProbe` 是全域 Helm 值，不是 annotation）。關掉之後：HTTP probe 在 STRICT 下會失敗（kubelet 沒有 mesh 憑證）；TCP probe 則因所有 port 都由 sidecar 接聽而**永遠成功**，變成假綠燈，偵測不到 app 掛掉。
 - **`portLevelMtls` 填錯 port**：填 Service 的 `port` 而不是 `targetPort`，設定會靜默不生效。
 
 ---
