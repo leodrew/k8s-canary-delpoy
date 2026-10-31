@@ -341,8 +341,10 @@ selector:
      │  ┌─ Gateway CRD 決定：這個 port 收不收？host 對不對？TLS 憑證用哪張？
      │  └─ VirtualService CRD 決定：這個 path 要送去哪個服務？切幾成？
      ▼
-  ⑤ 查 DestinationRule → 選 subset → 選負載平衡演算法 → 拿到目標 Pod IP 清單
-     │  ⚠ 注意：這裡是「直接拿 Pod IP」，不經過 Service 的 kube-proxy VIP
+  ⑤ 套用 DestinationRule → 以 subset labels 篩選 endpoint → 選負載平衡演算法 → 從 Pod IP 清單挑一個
+     │  ⚠ 注意：這份 Pod IP 清單是 istiod 從 service registry（K8s Service／EndpointSlice）推給 Envoy 的；
+     │    DestinationRule 不提供 IP，subset 的 `labels` 只是篩選這份清單，另外決定 LB 演算法和連線設定。
+     │    Envoy 直接連 Pod IP，不經過 Service 的 kube-proxy VIP
      ▼
   ⑥ 目標 Pod 的 istio-proxy sidecar（inbound）
      │  ┌─ PeerAuthentication：驗 mTLS，確認來源身分
@@ -358,12 +360,18 @@ selector:
 |---|---|---|---|
 | ② VIP | 網路組 / F5 設定 | 完全連不上、TLS 憑證錯誤 | `curl -v` 看憑證 CN、`dig` 看 DNS |
 | ③ Service | `istio-ingressgateway` Service 的 port 定義 | `Connection refused` | `kubectl get svc -n istio-system istio-ingressgateway` |
-| ④a **Gateway** | `servers.port` + `servers.hosts` + `tls` | **404 但沒有任何 access log** ← host 沒對上 | `istioctl proxy-config listener <gw-pod> -n istio-system` |
-| ④b **VirtualService** | `hosts` + `gateways` + `match` | **404 且 access log 有紀錄、`response_flags` 為 `NR`** ← 沒有 route 匹配 | `istioctl proxy-config route <gw-pod> -n istio-system` |
-| ⑤ DestinationRule | `subsets.labels` | **503 `response_flags: UH/UF`** ← subset 選不到 Pod | `istioctl proxy-config endpoint <gw-pod> -n istio-system` |
+| ④a **Gateway** | `servers.port` + `servers.hosts` + `tls` | **HTTP host 不符 → 404＋`NR`**（跟 VS 沒匹配長得一樣）；HTTPS SNI 不符 → TLS 握手就失敗、不會有 404（見表下說明） | `istioctl proxy-config listener <gw-pod> -n istio-system` |
+| ④b **VirtualService** | `hosts` + `gateways` + `match` | **404＋`response_flags: NR`** ← 沒有 route 匹配（前提：access log 已開啟，見表下說明） | `istioctl proxy-config route <gw-pod> -n istio-system` |
+| ⑤ DestinationRule | `subsets.labels` | **503 `UH`** ← subset labels 選不到任何 Pod；VS 引用了 DR 沒定義的 subset → 503，通常是 `NC`（`UF` 是連線失敗，見表下說明） | `istioctl proxy-config endpoint <gw-pod> -n istio-system` |
 | ⑥ Sidecar 授權 | AuthorizationPolicy | **403 `RBAC: access denied`** | Part 3 |
 | ⑥ Sidecar mTLS | PeerAuthentication | **連線 reset、`response_flags: UF`** | `istioctl proxy-config secret <pod>` |
 | ⑦ App | 你的 Spring Security | 你自己的登入頁 / access-denied 頁 | `kubectl logs` |
+
+表中 ④a／④b／⑤ 的補充：
+
+* **④a 與 ④b 不能靠「有沒有 access log」分辨。** Host 對不上 Gateway 時，回 404 的是 Envoy 自己（route 表裡沒有符合的 virtual host），flag 一樣是 `NR`；兩者要用 `istioctl proxy-config route <gw-pod> -n istio-system` 看 virtual host 清單才分得出來。完全沒有 log 時，先查 access log 有沒有開、該 port 有沒有 listener。
+* **access log 預設不開**（只有 `demo` profile 會開）。要先用 Telemetry API 或 `meshConfig.accessLogFile=/dev/stdout` 打開，否則 ④b 的 `NR` 根本看不到。
+* **⑤ 的 `UF` 不是「subset 選不到 Pod」。** Envoy 的定義是 UH：「No healthy upstream hosts in upstream cluster」＋503；UF：「Upstream connection failure」＋503（常見於 mTLS 衝突）；NC：「Upstream cluster not found」。
 
 ### 關鍵觀念一：mesh 裡的 Service「幾乎只剩 DNS」
 
