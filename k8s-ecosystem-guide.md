@@ -1162,11 +1162,15 @@ kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui \
 # 兩處合起來應該要看到 istio-proxy
 
 # 檢查 3：實際流量是不是 mTLS
+# 用 pilot-agent request 而不是 curl：官方範例都這樣用，預設映像和 distroless variant 都能跑
+# （distroless variant 沒有 curl，也沒有 shell）
+# 注意 ssl.handshake 是 listener 層級的累計計數，判斷不了「某個來源」有沒有走 mTLS；
+# 要判斷個別來源，看請求進來時的 XFCC header（見下面「精準除錯」一節）
 kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
-  curl -s localhost:15000/stats | grep ssl.handshake
+  pilot-agent request GET stats | grep ssl.handshake
 ```
 
-如果來源 Pod 根本沒被注入 sidecar（namespace 沒有 `istio-injection=enabled` label），就一定沒有身分。
+如果來源 Pod 根本沒被注入 sidecar，就一定沒有身分。什麼條件下會注入、什麼條件下不會，見 Part 0 的注入規則。
 
 #### 成因 4：`to.operation` 的條件沒對上
 
@@ -1175,11 +1179,11 @@ kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
 | 錯誤 | 症狀 | 修法 |
 |---|---|---|
 | `ports: [8080]` 寫成數字 | **apply 時就會被拒絕** | 改成 `ports: ["8080"]` |
-| `ports` 填 Service port，但 Envoy 看的是 **容器 port** | 靜默 403 | 用 `targetPort` 的值 |
+| `ports` 填 Service port；它比對的是連線實際的目的 port | 靜默 403 | 用 Pod 的 containerPort（Service 的 `targetPort`） |
 | `paths: ["/api"]` 但實際請求是 `/api/v1/forms` | 403 | 改成 `/api/*`（前綴） |
 | `paths` 忘了算 context path | 403 | 你的 app 是 `/gui_epmmFormQuery/rs/gui/*`，不是 `/rs/gui/*` |
 
-> **對你的環境特別提醒**：`app.context-prefix: /gui_epmmFormQuery` 代表所有實際路徑都帶這個前綴。AuthorizationPolicy 的 `paths` 看的是**原始 HTTP request path**，所以一定要寫全 `/gui_epmmFormQuery/...`。
+> **對你的環境特別提醒**：`app.context-prefix: /gui_epmmFormQuery` 代表所有實際路徑都帶這個前綴。AuthorizationPolicy 的 `paths` 比對的是**正規化後的 path**（預設是 BASE 正規化，依 RFC 3986，並把 `\` 轉成 `/`），不是 client 送來的原樣字串；不論哪種，一定要寫全 `/gui_epmmFormQuery/...`。
 
 #### 成因 5：policy 放在 root namespace，全 mesh 生效
 
@@ -1189,7 +1193,10 @@ kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
 
 ```bash
 # 一定要檢查這個
-kubectl get authorizationpolicy -n istio-system -o yaml | grep -A5 selector
+kubectl get authorizationpolicy -n istio-system \
+  -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.selector,TARGETREFS:.spec.targetRefs
+# SELECTOR 和 TARGETREFS 兩欄都是 <none> 的 policy，就是作用到全 mesh 的那一條
+# （不要用 grep selector：它只列出「有」selector 的，危險的「沒有」反而看不到）
 ```
 
 放在 `istio-system` 的 policy **必須有 `selector`**，否則就是全 mesh 生效。
