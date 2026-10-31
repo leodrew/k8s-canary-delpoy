@@ -1346,11 +1346,15 @@ GUIDE="k8s-ecosystem-guide.md"
 GUIDE_FENCE_JS='
 const OPEN = /^(\s*)```\s*([^`\s]*)[^`]*$/;
 const CLOSE = /^\s*```\s*$/;
-function splitQuote(l) {
+// 最多剝 max 層 `>`（預設全剝）。
+function splitQuote(l, max = Infinity) {
   let depth = 0, m;
-  while ((m = l.match(/^ {0,3}> ?/))) { depth++; l = l.slice(m[0].length); }
+  while (depth < max && (m = l.match(/^ {0,3}> ?/))) { depth++; l = l.slice(m[0].length); }
   return { depth, rest: l };
 }
+// 這兩套判定只認 ```，不認 ~~~ 與四個以上的反引號（CommonMark 都算 fence）。guide 目前
+// 沒有那兩種；真的出現時要讓它 FAIL，不能讓那種區塊無聲地不被檢查 —— [10] 用這個擋。
+const UNSUPPORTED_FENCE = /^\s*(~~~|````)/;
 // 回傳 { depth, indent, lang } 或 null。
 function fenceOpen(l) {
   const q = splitQuote(l);
@@ -1365,8 +1369,7 @@ function fenceClose(l, open) {
 function fenceBody(l, open) {
   const q = splitQuote(l);
   if (q.depth < open.depth) return null;
-  let rest = l;
-  for (let k = 0; k < open.depth; k++) rest = rest.replace(/^ {0,3}> ?/, "");
+  const rest = splitQuote(l, open.depth).rest;
   return rest.startsWith(open.indent) ? rest.slice(open.indent.length) : rest;
 }
 '
@@ -1405,7 +1408,7 @@ for (let i = 0; i < lines.length; i++) {
       continue;
     }
     if (isYamlLang(open.lang)) {
-      const marker = i > 0 ? lines[i - 1].match(MARKER) : null;
+      const marker = i > 0 ? splitQuote(lines[i - 1]).rest.match(MARKER) : null;
       if (marker) {
         // 原因是空的那種已經在掃到標記那一行時報過了，這裡只負責略過。
         skipped++;
@@ -1426,8 +1429,15 @@ for (let i = 0; i < lines.length; i++) {
     continue;
   }
 
+  if (UNSUPPORTED_FENCE.test(splitQuote(line).rest)) {
+    errors.push("第 " + (i + 1) + " 行：~~~ 或四個以上反引號的 fence 這個檢查認不得，裡面的 YAML 不會被驗證。");
+    errors.push("    改用 ```（三個反引號）；真的需要時先擴充 GUIDE_FENCE_JS。");
+    continue;
+  }
+
   if (line.includes("validate:skip-yaml")) {
-    const m = line.match(MARKER);
+    // blockquote 裡的區塊，標記也寫在 blockquote 裡（> <!-- ... -->），先剝掉 > 再比對。
+    const m = splitQuote(line).rest.match(MARKER);
     if (!m) {
       errors.push("第 " + (i + 1) + " 行：skip-yaml 標記格式不對，要寫成一整行 <!-- validate:skip-yaml 原因 -->");
       continue;
@@ -1509,15 +1519,16 @@ if (!/^Part \d+$/.test(part)) {
 // 只收 code fence 外面的標題：bash 區塊裡的 "## ..." 是註解，不是章節。
 // fenceOpen / fenceClose / fenceBody 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一組。
 const heads = [];
+const fenced = new Set(); // fence 行與區塊內容行：[11] 收連結時也要跳過它們
 let fence = null;
 lines.forEach((l, i) => {
   if (fence) {
-    if (fenceClose(l, fence)) { fence = null; return; }
-    if (fenceBody(l, fence) !== null) return;
+    if (fenceClose(l, fence)) { fenced.add(i); fence = null; return; }
+    if (fenceBody(l, fence) !== null) { fenced.add(i); return; }
     fence = null; // blockquote 在 ``` 之前結束，區塊跟著結束；這一行照一般行處理
   }
   const o = fenceOpen(l);
-  if (o) { fence = o; return; }
+  if (o) { fenced.add(i); fence = o; return; }
   const h = l.match(/^(#{1,6})\s+(.*?)\s*$/);
   if (h) heads.push({ i, level: h[1].length, text: h[2] });
 });
@@ -1545,7 +1556,12 @@ const urls = [];
 for (const s of srcHeads) {
   const next = heads.find(h => h.i > s.i && h.level <= 3);
   const stop = Math.min(next ? next.i : lines.length, end);
-  for (const l of lines.slice(s.i + 1, stop)) {
+  // 只收讀者看得到的連結：code fence 裡的、和 <!-- --> 註解裡的都不算 —— 否則把官方連結
+  // 註解掉、或只留在範例指令裡，這一項照樣 PASS（跟「grep 被註解行騙過」是同一種假 PASS）。
+  const visible = [];
+  for (let k = s.i + 1; k < stop; k++) if (!fenced.has(k)) visible.push(lines[k]);
+  const text = visible.join("\n").replace(/<!--[\s\S]*?-->/g, "");
+  for (const l of text.split("\n")) {
     // 排除全形標點：中文段落裡裸寫的 https://kubernetes.io。會把「。」吃進 hostname，
     // 官方連結反而被判成不在白名單。
     // 結尾的 ASCII 句讀（英文句子裡的 https://kubernetes.io. ）同理剝掉：URL 本身不會以這些字元結尾。

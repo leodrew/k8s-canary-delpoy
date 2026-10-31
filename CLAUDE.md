@@ -149,7 +149,8 @@ bash scripts/validate.sh      # 或 npm run validate
   fence 判定（`GUIDE_FENCE_JS`，[10]／[11] 共用）認得帶縮排、帶 info string、以及長在
   blockquote 裡（`> ```yaml`）的 fence，內容會先剝掉同樣的縮排與 `>` 前綴再解析；
   blockquote 在結尾 ``` 之前就斷掉（某一行漏了 `>`）也算 FAIL。要支援新的 fence 長相
-  時改那一處，不要在個別檢查裡另寫一套判定。刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
+  時改那一處，不要在個別檢查裡另寫一套判定。`~~~` 與四個反引號的 fence 認不得，出現就 FAIL
+  （不讓那種區塊無聲地不被檢查）。blockquote 裡的區塊，標記也寫在 blockquote 裡（`> <!-- ... -->`）。刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
   不能有空行）放這個標記就略過。**原因必填**，空的 FAIL；標記後面接的不是 yaml fence
   也 FAIL（區塊被搬走、標記留在原地的典型樣子）。**同一區塊並列兩種寫法（A／B、錯／對）
   造成 duplicated key 時不要用 skip，拆成兩個區塊** —— skip 的區塊等於沒有閘門；只有
@@ -159,6 +160,7 @@ bash scripts/validate.sh      # 或 npm run validate
   `Part 1` 不會對到 `Part 10`）都必須有 `### 參考來源`，且其中至少一個連結落在官方網域
   白名單（腳本裡的 `OFFICIAL_DOMAINS`；github.com／raw.githubusercontent.com 只認
   kubernetes／istio／argoproj／envoyproxy 組織，網域比對是「相同或子網域」）。
+  只算讀者看得到的連結：code fence 裡和 `<!-- -->` 註解裡的不算 —— 把官方連結註解掉照樣 PASS 就是假 PASS。
   來源段落是「這個 Part 被查證過」留在文件裡的唯一證據，被刪掉或換成部落格連結都不會有
   任何症狀。**某個 Part 的最後一個故事加上參考來源時，在同一個 commit 把它加進陣列**；
   還沒修完的 Part 不要加（它沒有來源段落，只會 FAIL）。漏加的後果是那個 Part 的來源
