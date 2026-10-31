@@ -33,6 +33,12 @@
 | ⑤ | Part 12 | 53 | 27 | 7 | 1 | 17 | 1 | 0 | 0 |
 | ⑤ | Part 14 | 62 | 27 | 16 | 8 | 8 | 0 | 1 | 2 |
 | ⑤ | Part 15 | 68 | 17 | 21 | 11 | 10 | 1 | 2 | 6 |
+| ⑥ | Part 8 | 19 | 10 | 4 | 1 | 4 | 0 | 0 | 0 |
+| ⑥ | Part 9 | 24 | 9 | 3 | 6 | 4 | 2 | 0 | 0 |
+| ⑥ | Part 10 | 30 | 16 | 3 | 2 | 6 | 2 | 1 | 0 |
+| ⑥ | Part 11 | 25 | 10 | 0 | 1 | 9 | 3 | 2 | 0 |
+| ⑥ | Part 13 | 30 | 20 | 2 | 1 | 4 | 3 | 0 | 0 |
+| ⑥ | Part 16 | 42 | 26 | 1 | 1 | 9 | 4 | 1 | 0 |
 
 ---
 
@@ -1024,7 +1030,261 @@
 
 ---
 
-## 超出 guide 範圍的發現（批次 ⑤）
+## Part 8：除錯速查表
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P08-001 | 3426 | STALE / NOT SENT = 設定沒下發成功，八成是 istiod 有問題 | 錯誤 | https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/ | "NOT SENT means that Istiod hasn't sent anything to Envoy. This usually is because Istiod has nothing to send." ／ "STALE means that Istiod has sent an update to Envoy but has not received an acknowledgement." | 只有 STALE 代表 Envoy 沒有 ACK，可能有問題。NOT SENT 通常是正常狀態（官方範例裡 ingressgateway 的 RDS 就是 NOT SENT），要拆開寫。 | ✓ |
+| P08-002 | 3444 | `--level default:warning   # 復原` | 錯誤 | https://istio.io/latest/docs/reference/commands/istioctl/ ／ https://raw.githubusercontent.com/istio/istio/master/istioctl/pkg/proxyconfig/proxyconfig.go | "Reset levels to default value (warning)." ／ istioctl 原始碼：`return fmt.Errorf("unrecognized logger name: %v", loggerLevel[0])`。Envoy 的 ALL_LOGGER_IDS 裡沒有名為 default 的 logger | 改成 `istioctl proxy-config log deploy/epmm-api -n ea-epmm -r`，或 `--level warning`（不加 logger 名稱就套用到全部 logger）。 | ✓ |
+| P08-003 | 3450–3457 | 直接 `kubectl logs ... -c istio-proxy` 看 access log；格式以 "upstream_host" 收尾 | 不精確 | https://istio.io/latest/docs/tasks/observability/logs/access-log/ | "Istio offers a few ways to enable access logs." ／ "The egress gateway and access logging will be enabled if you install the `demo` configuration profile." ／ 預設格式在 "%UPSTREAM_HOST%" 之後還有 "%UPSTREAM_CLUSTER_RAW% %UPSTREAM_LOCAL_ADDRESS%" 等欄位 | 補一句前提：access log 預設關閉，要用 Telemetry API 或 `meshConfig.accessLogFile=/dev/stdout` 打開。格式範例在 upstream_host 後面補「...」。 | ✓ |
+| P08-004 | 3473 | 表格把「`RBAC` 相關」列成一種 response flag | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | Envoy 的 RESPONSE_FLAGS 清單沒有任何 RBAC flag。最接近的是 "UnauthorizedExternalService / UAEX: The request was denied by the external authorization service." | 註明 RBAC 拒絕時 flag 是 `-`，判讀要看 403 加上 RESPONSE_CODE_DETAILS 的 `rbac_access_denied_matched_policy[...]`。 | ✓ |
+| P08-005 | 3479 | 404 且 gateway 完全沒 log → Gateway 的 hosts 沒對上（連 listener 都沒進來） | 錯誤 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter ／ https://istio.io/latest/docs/reference/config/networking/gateway/ | NR: "No route configured for a given request in addition to 404 response code" ／ "or no matching filter chain for a downstream connection." | HTTP host 不符時，gateway 有 log，顯示 404 加 NR。HTTPS SNI 不符時是 TLS 握手失敗，不會回 404。「完全沒 log」通常代表 access log 沒開，或流量根本沒到 gateway（DNS、LB、防火牆）。 | ✓ |
+| P08-006 | 3484（同 3689） | 偶發 502 且集中在部署期間 → 缺 preStop | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | "UpstreamConnectionTermination / UC: Upstream connection termination in addition to 503 response code." ／ UF、UR、LR 也都是 "in addition to 503 response code" | 在 Envoy 底下多半看到的是 503 加 UC／UF／URX；502 比較常是外層 F5／nginx 回的。建議寫「502／503」並附上 flag。 | ✓ |
+| P08-007 | 3491 | `istioctl proxy-status ／ grep -v SYNCED  # 有輸出 = 有 pod 設定不同步` | 錯誤 | https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/ | 官方範例列："istio-ingressgateway-66c994c45c-cmb7x.istio-system SYNCED SYNCED SYNCED NOT SENT ..." | 一列裡只要任一欄是 SYNCED，整列就被過濾掉，所以 CDS 是 SYNCED、RDS 是 STALE 的 pod 會被隱藏。標題列又一定會印出來，「有輸出 = 不同步」不成立。改成 `istioctl proxy-status ／ awk 'NR==1 ／／ /STALE/'`。 | ✓ |
+| P08-008 | 3500 | `kubectl get endpoints -n ea-pmc pmc-epmmformquerygui-svc` | 過時 | https://kubernetes.io/docs/concepts/services-networking/service/ | "Deprecated since Kubernetes v1.33" ／ "it is recommended that all clients use the EndpointSlice API rather than Endpoints." | `kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc` | ✓ |
+| P08-009 | 3502–3505 | 從 gateway 內部用 curl 打 `http://pmc-...svc.ea-pmc:8080`，用來排除外部網路因素 | 不精確 | https://istio.io/latest/docs/reference/config/security/peer_authentication/ | STRICT: "Connection is an mTLS tunnel (TLS with client cert must be presented)." | gateway pod 沒有 iptables 攔截，curl 送出的是明文。ea-pmc 若是 STRICT，這一步一定失敗，但不代表服務壞了。要註明這個前提，或改從有 sidecar 的 pod 測試。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P08-201 | 3424、3494 | `istioctl analyze -A` 掃描所有 namespace（"--all-namespaces -A Analyze all namespaces"） | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P08-202 | 3425 | proxy-status 顯示 istiod 到各 Envoy 的 xDS 同步狀態 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P08-203 | 3429、3497 | `istioctl x describe pod` 存在（experimental，`x` 是別名），會列出 Service、DR、VS、mTLS | https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-describe/ |
+| P08-204 | 3432–3436 | proxy-config 的 listener／route／cluster／endpoint／secret 都接受 `[<type>/]<name>`，所以 `deploy/xxx` 可以用 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P08-205 | 3439 | `istioctl x authz check deploy/...` 存在，可以接 deployment；頂層的 `authz` 會提示改用 experimental | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P08-206 | 3442–3443 | `--level logger:level` 用逗號分隔；rbac、router、connection 都是 Envoy 的 logger；官方也用 `--level "rbac:debug"` | https://istio.io/latest/docs/ops/common-problems/security-issues/ |
+| P08-207 | 3463–3472 | NR、NC、UH、UF、UO、URX、UT、UAEX、DC 的意義 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P08-208 | 3480 | 404 加 NR 時，查 VS 的 match 或 gateways | 同上 |
+| P08-209 | 3481 | 503 加 UH／NC 時，是 subset 或 selector 問題 | 同上 |
+| P08-210 | 3485 | gateways 少了 mesh，內部呼叫不會套用 VS | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+
+---
+
+## Part 9：你目前環境的具體發現（已對照 track-a 現況）
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P09-001 | 3518 | 以下是對照 spring_full_v4.md §24 的實際 manifest 找到的問題 | 環境特定 | — | — | 加一段說明：發現 1、2（sessionAffinity）、3、4、6，以及發現 5 的 strategy 部分，`canary-manual/track-a/` 已經修掉。這一章描述的是修正前的狀態。 | ✓ |
+| P09-002 | 3522 | Pod spec 沒有 `serviceAccountName`，所有 Pod 都使用 default SA | 過時 | canary-manual/track-a/release/20-deployment-stable.yaml（L67）；21-deployment-canary.yaml（L59）；base/00-serviceaccount.yaml | `serviceAccountName: pmc-epmmformquerygui` ／ `automountServiceAccountToken: false` | 標為「track-a 已修」。 | ✓ |
+| P09-003 | 3546 | 需要 rollout restart 才會拿到新身分 | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "A Deployment's rollout is triggered if and only if the Deployment's Pod template (that is, .spec.template) is changed" | 改了 `spec.template.spec.serviceAccountName` 再 apply，就會自動滾動更新，不需要另外 restart。 | ✓ |
+| P09-004 | 3552 | Service 設了 `sessionAffinity: ClientIP` + 3 小時 timeout | 過時 | canary-manual/track-a/base/01-service.yaml（L31）；base/02-destinationrule.yaml（L21） | `# 【不要加 sessionAffinity: ClientIP】` ／ `consistentHash:` | 標為「track-a 已修」。另外 3566 的 DR `pmc-query-affinity` 和 repo 的 `pmc-epmmformquerygui-dr` 是同一個 host，兩份同時套用會衝突，不要另外再建一份。 | ✓ |
+| P09-005 | 3556 | gateway 的 Envoy 用自己的負載平衡演算法（預設 round-robin） | 錯誤 | https://istio.io/latest/docs/concepts/traffic-management/ | "By default, the Envoy proxies distribute traffic across each service's load balancing pool using a least requests model" | 改成「預設 least request」。 | ✓ |
+| P09-006 | 3573–3575 | `httpCookie: name: JSESSIONID, ttl: 10800s` | 錯誤 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | ttl: "Lifetime of the cookie. If specified, a cookie with the TTL will be generated if the cookie is not present." | 設了 ttl，Envoy 就會自己產生一個名為 JSESSIONID 的 cookie，跟 Spring 的 session cookie 打架；Spring 換 session id 時 hash 也會跟著變。改用專用名稱，例如 `name: istio-affinity`。repo 的 base/02-destinationrule.yaml（L23–24）還是同樣寫法，還沒修。 | ✓ |
+| P09-007 | 3586–3590 | VS 只有 `gateways: [istio-system/my-gateway]`，沒有 mesh | 過時 | canary-manual/track-a/base/03-virtualservice.yaml（L26–29） | `- pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local     # mesh 內部呼叫的 host` ／ `- mesh                                                  # 必要，見上方說明` | 標為「track-a 已修」。 | ✓ |
+| P09-008 | 3622–3626 | Service port 沒有 name、沒有 appProtocol | 過時 | canary-manual/track-a/base/01-service.yaml（L25–29） | `- name: http                  # 必要：Istio 協定判定` ／ `appProtocol: http           # 必要：比 port 命名更明確` | 標為「track-a 已修」。 | ✓ |
+| P09-009 | 3632、3709 | L7 功能沒有明確保證；port 命名是其他 L7 功能的前提 | 不精確 | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ | "Istio can automatically detect HTTP and HTTP/2 traffic." ／ "Server First protocols, such as MySQL, are incompatible with automatic protocol selection." | 改成：自動偵測對 HTTP 有效，明確宣告是為了消除不確定性。只有 server-first 協定才必須明確宣告，不是所有 L7 功能的前提。 | ✓ |
+| P09-010 | 3650 | `replicas: 2` 寫死，沒有 PodDisruptionBudget，也沒有 HPA | 環境特定 | — | — | repo 現況一致：track-a 沒有 PDB 也沒有 HPA。`base/04-poddisruptionbudget.yaml` 只出現在 CANARY-COMPLETE.md 3.9 的目標狀態，檔案還不存在。 | ✓ |
+| P09-011 | 3656 | maxUnavailable 預設 25%，2 個 replica 時允許 1 個不可用，滾動更新期間容量減半 | 錯誤 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | maxUnavailable: "The absolute number is calculated from percentage by rounding down. ... The default value is 25%." ／ maxSurge: "calculated from the percentage by rounding up" | 2 × 25% = 0.5，無條件捨去後 maxUnavailable 是 0，maxSurge 是 1。預設本來就不會減半，這段推論要刪掉。repo 也已經明確寫了 0（見 P09-013）。 | ✓ |
+| P09-012 | 3667–3670 | PDB `selector: matchLabels: app: pmc-epmmformquerygui`，`minAvailable: 1` | 不精確 | canary-manual/CANARY-COMPLETE.md 3.9 | `version: stable        # 只保護 stable —— canary 只有 1 個 pod，` | 只用 app 選，canary pod 也會被算進去：canary 在線時，兩個 stable 可能同時被驅逐，但正式流量 100% 走 stable。selector 要加上 `version: stable`。 | ✓ |
+| P09-013 | 3676–3680 | 建議補 `maxUnavailable: 0`、`maxSurge: 1`、`minReadySeconds: 15` | 過時 | canary-manual/track-a/release/20-deployment-stable.yaml（L22–28） | `maxUnavailable: 0          # 更新期間不減少可用數` ／ `minReadySeconds: 15` | 標為「track-a 已修」。canary 那份（21-）也已經加了。 | ✓ |
+| P09-014 | 3687 | 沒有 `lifecycle.preStop`，grace period 用預設 30 | 過時 | canary-manual/track-a/release/20-deployment-stable.yaml（L69、L216–220） | `command: ["/bin/sh", "-c", "sleep 10"]` ／ `terminationGracePeriodSeconds: 60` | 標為「track-a 已修」。K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`。 | ✓ |
+| P09-015 | 3689 | 流量繼續打到正在關閉的 Pod → **502** | 不精確 | 同 P08-006 | 同 P08-006 | 在 mesh 內通常是 503 加 UC／UF。 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P09-201 | 3524 | Istio 的 workload 身分來自 SA，共用 default SA 就代表身分相同 | https://istio.io/latest/docs/concepts/security/ |
+| P09-202 | 3554 | sessionAffinity 是 kube-proxy 的功能，sidecar 直接送到 pod IP，會繞過它 | https://kubernetes.io/docs/reference/networking/virtual-ips/ |
+| P09-203 | 3592–3597 | 沒有 mesh 的 VS 只管 gateway 進來的流量（"The reserved word `mesh` is used to imply all the sidecars in the mesh."） | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P09-204 | 3612 | 加了 mesh 之後 match 不完整，內部呼叫會 404 加 NR | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P09-205 | 3641 | appProtocol 優先於 port 名稱（"If both are defined, appProtocol takes precedence over the port name."） | https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/ |
+| P09-206 | 3654 | 沒有 PDB 時，drain 可能同時驅逐全部 Pod | https://kubernetes.io/docs/concepts/workloads/pods/disruptions/ |
+| P09-207 | 3687 | terminationGracePeriodSeconds 預設 30 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+| P09-208 | 3689 | 移除 endpoint 和送 SIGTERM 是並行發生的 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+| P09-209 | 3700 | grace period 要涵蓋 preStop 的時間加上請求時間 | https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/ |
+
+---
+
+## Part 10：istio-ingressgateway 與一般 Service 的差別（含雙 VIP 架構）
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P10-001 | 3734 | `LoadBalancer ... 80:31380/TCP,443:31390/TCP` | 不精確 | https://istio.io/latest/docs/reference/config/analysis/ist0162/ | 預設 ingress gateway Service "only open on target ports 15021, 8080 and 8443"（port 是 15021／80／443） | 31380／31390 是舊版 chart 固定的 nodePort，現在預設是隨機分配，而且多一個 15021 狀態埠。要嘛標成示意，要嘛改成現代輸出。 | ✓ |
+| P10-002 | 3800–3816 | 10.x 可路由、100.64.x 不可路由，兩個 VIP 的分層 | 環境特定 | — | — | 要跟網路組確認。 | ✓ |
+| P10-003 | 3803 | 很多 K8s 發行版也拿 100.64.0.0/10 當 Pod / Service CIDR | 無法驗證 | https://www.rfc-editor.org/rfc/rfc6598 | 第 4 節：非 CGN 用途的使用者 "are likely to experience problems" | 刪掉「很多發行版」的概括，或點名具體發行版並附出處。可以補 RFC 的警告。 | ✓ |
+| P10-004 | 3831、3853、3985 | `metallb.universe.tf/address-pool` | 過時 | https://metallb.io/release-notes/ | "The annotation prefix "metallb.universe.tf" is deprecated by now. Please use the new prefix "metallb.io"." ／ "E.g. "metallb.io/address-pool" instead of "metallb.universe.tf/address-pool"." | 改成 `metallb.io/address-pool`，註明 MetalLB 0.14.9 起適用。 | ✓ |
+| P10-005 | 3836 | `loadBalancerSourceRanges` 是 LB 層的第一道白名單 | 不精確 | https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/ | "If specified and supported by the platform, ... This field will be ignored if the cloud-provider does not support the feature." | 註明是否生效取決於 LB 實作（F5 CIS／MetalLB），不支援時會被靜默忽略。 | ✓ |
+| P10-006 | 3827、3874 | 第二組 gateway 也裝在 istio-system | 不精確 | https://istio.io/latest/docs/setup/additional-setup/gateway/ | "As a security best practice, it is recommended to deploy the gateway in a different namespace from the control plane." | 建議放到獨立的 namespace，例如官方 Helm 範例的 istio-ingress。憑證跟著搬（見 4083）。 | ✓ |
+| P10-007 | 3883 | `sidecar.istio.io/inject: "false"  # gateway 本身不注入 sidecar` | 錯誤 | https://istio.io/latest/docs/setup/additional-setup/gateway/ | `sidecar.istio.io/inject: "true"` 加註解 "Enable gateway injection." ／ `image: auto # The image will automatically update each time the pod starts.` | 必須是 `"true"`。設成 false 不會注入，`image: auto` 不會被替換成真的 image，Pod 就拉不到 image。這個 label 跟 3897 的註解互相矛盾。 | ✓ |
+| P10-008 | 3887–3893 | 內部（non-routable）那組 gateway 寫 `nodeSelector: network: routable` 和 routable 的 toleration | 錯誤 | — | 文件內前後矛盾：3846 標題是「對內（non-routable，100.x）」 | 改成 non-routable 的 node label。label 名稱屬於環境特定，要跟 Part 13 對齊。 | ✓ |
+| P10-009 | 3969 | 要換入口，只要改 VirtualService 的 `gateways` 那一行 | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | "A VirtualService must be bound to the gateway and must have one or more hosts that match the hosts specified in a server." | VS 的 `hosts` 也要符合新 Gateway 的 hosts（例如 internal-api.example.com），否則會是 404 NR。 | ✓ |
+| P10-010 | 4045 | DENY `paths: ["/actuator/*"]`，管理端點不對外 | 錯誤 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | "Any string field in the rule supports Exact, Prefix, Suffix and Presence match" ／ "`{*}` matches a single glob that cannot extend beyond a path segment." ／ "`{**}` matches zero or more globs." | 本專案的 actuator 在 `/gui_epmmFormQuery/actuator/...`，前綴比對打不中，這條 DENY 等於沒作用。改成 `"/{*}/actuator/{**}"`（必要時加上 `"/actuator/{**}"`）。path template 的最低 Istio 版本未驗證。 | ✓ |
+| P10-011 | 4048 | routable 那組前面有 F5（1 層），numTrustedProxies 設 1 | 環境特定 | https://istio.io/latest/docs/reference/config/security/authorization-policy/ | remoteIpBlocks: "A list of IP blocks, populated from `X-Forwarded-For` header or proxy protocol." | F5 若是 L4 virtual server，不會加 XFF，要改用 PROXY protocol。要確認 F5 的模式。 | ✓ |
+| P10-012 | 4071–4072 | `istioctl proxy-config listener ... --port 443` | 不精確 | https://istio.io/latest/docs/reference/config/analysis/ist0162/ | 預設 ingress gateway Service "only open on target ports 15021, 8080 and 8443" | 標準安裝的 gateway listener 綁在 targetPort（0.0.0.0_8443），用 `--port 443` 可能什麼都篩不出來。改用 `--port 8443`，或不加篩選再 grep host。 | ✓ |
+| P10-013 | 4076–4078 | 從 routable VIP 打內部 host，「應該要 404，不是 200」 | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | NR: "or no matching filter chain for a downstream connection." | HTTPS 的 SNI 對不到時是 TLS 握手失敗（curl exit 35，`-w` 印出 000），不是 404。改成「000 或 404 都算正常，只有 200 才有問題」。 | ✓ |
+| P10-014 | 4092 | `kubectl get endpoints -n istio-system istio-ingressgateway-internal` | 過時 | 同 P08-008 | 同 P08-008 | `kubectl get endpointslices -n istio-system -l kubernetes.io/service-name=istio-ingressgateway-internal` | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P10-201 | 3727 | ingressgateway 就是 Deployment 加 Service | https://istio.io/latest/docs/setup/additional-setup/gateway/ |
+| P10-202 | 3741–3742 | gateway pod 跑 Envoy，規則來自 Gateway 和 VS | 同上 |
+| P10-203 | 3752 | LB Service 是 L4；Istio gateway 能處理 L7 和 TCP／TLS | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P10-204 | 3756 | 百分比分流靠 VS 的 weight | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P10-205 | 3801 | 100.64.0.0/10 是 RFC 6598 的 Shared Address Space，原本給 CGN 用 | https://www.rfc-editor.org/rfc/rfc6598 |
+| P10-206 | 3805 | 「不可路由」是政策決定的；RFC 只規定 "MUST NOT be forwarded across Service Provider boundaries" | https://www.rfc-editor.org/rfc/rfc6598 |
+| P10-207 | 3882、3900–3925 | Gateway 用 pod label 選 gateway，預設跨 namespace（"a gateway resource in the namespace "foo" can select pods in the namespace "bar" based on labels"） | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P10-208 | 3885、3897 | `inject.istio.io/templates: gateway` 搭配 `image: auto`（前提是注入真的有開，見 P10-007） | https://istio.io/latest/docs/setup/additional-setup/gateway/ |
+| P10-209 | 3945–3946 | `<ns>/<name>` 加 mesh 的寫法 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P10-210 | 3976 | loadBalancerIP 從 v1.24 起 deprecated，建議改用實作專屬的 annotation | https://kubernetes.io/docs/concepts/services-networking/service/ |
+| P10-211 | 3990 | F5 CIS 的 `cis.f5.com/ipamLabel` 用在 type LoadBalancer | https://clouddocs.f5.com/containers/latest/userguide/loadbalancer/ |
+| P10-212 | 4027 | remoteIpBlocks 需要設 numTrustedProxies | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+| P10-213 | 4054–4062 | 兩組 pod 帶同一個 label，Gateway 會同時下發到兩組 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P10-214 | 4083 | 憑證要放在 gateway 所在的 namespace（"The `Certificate` should be created in the same namespace as the `istio-ingressgateway` deployment."） | https://istio.io/latest/docs/ops/integrations/certmanager/ |
+| P10-215 | 4087 | Service selector、Deployment matchLabels、Pod labels、Gateway selector 四處要對齊 | https://istio.io/latest/docs/setup/additional-setup/gateway/ |
+| P10-216 | 3734 | LB Service 預設會配 NodePort（`allocateLoadBalancerNodePorts` 預設 true），範圍 30000-32767 | https://kubernetes.io/docs/concepts/services-networking/service/ |
+
+---
+
+## Part 11：FZ1 與 FZ2 雙 cluster 的入口設計
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P11-001 | 4114 | 這是 CD 預設會做的事——A record 只指向 FZ1 的 VIP | 環境特定 | — | — | 加註「依貴司 CD 工具行為，需向 CD 團隊確認」 | ✓ |
+| P11-002 | 4149, 4156, 4355, 4365 | 模式 A：session 沒問題（流量不會在兩座 cluster 間跳）／in-memory session 沒問題 | 不精確 | canary-manual/CANARY-COMPLETE.md §3.6、§3.7、§9.1 | §3.6：`replicas: 2`；§3.7：「in-flight 的 OAuth2 `state`、`HttpSession`、authorized-client token 全部在 pod 記憶體裡」；§9.1：「使用者偶發被登出 ／ ① ／ canary 開了 >1 replica，或親和 cookie 沒生效」 | 改成「沒有跨 cluster 的 session 問題」。同時補一句：FZ1 內 stable 有 2 個 replica，加上 canary pod，跨 pod 跳轉一樣會被登出。黏著靠 DR `consistentHash`（epmm-affinity cookie），只是軟性黏著，pod 重啟或滾動更新仍會掉 session | ✓ |
+| P11-003 | 4193 | FZ1 整座掛掉，GSLB 幾十秒內把流量切到 FZ2 | 不精確 | — | 同一份文件 4426：「TTL 設 3600 秒，FZ1 掛掉後最久要等一小時」；4348：「秒~分鐘級，看 TTL 與檢查間隔」 | 改成「切換時間 ≈ 健康檢查判定時間 ＋ DNS TTL ＋ 用戶端快取」，跟 11.6、11.10 的說法統一 | ✓ |
+| P11-004 | 4183, 4313–4315 | 打 `/gui_epmmFormQuery/actuator/health`…期望：200 | 不精確 | canary-manual/CANARY-COMPLETE.md §3.6 | 「`SecurityConfig` 的 permitAll 清單裡只有沒有前綴的 `/actuator/health`…前綴路徑落在 `anyRequest().authenticated()` → 回 302」 | 加註：後端補上 permitAll（PRD 階段 1）之前，這條路徑回 302，不是 200。期望 200 會讓兩邊都被判定不健康；若 GSLB 把 3xx 也算成功，就成了假綠燈。在那之前不要拿它當 GSLB 的深度檢查 | ✓ |
+| P11-005 | 4206–4248 | `name: app-routing`…（VS 沒有 subset、沒有 pilot-run）「這兩份必須逐字相同」 | 不精確 | canary-manual/CANARY-COMPLETE.md §3.4 | repo 的 `app-routing` 有 `pilot-run`（cookie → `subset: canary`）、`primary`（`subset: stable`）、`default` 三條規則 | 註明這是簡化範例。照抄套用會蓋掉同名的 track-a VS：canary 路由消失，而且沒有 subset 時正式流量也會分到 canary pod。兩邊一致應以 track-a 的 `03-virtualservice.yaml` 為準 | ✓ |
+| P11-006 | 4262, 4278 | `metallb.universe.tf/address-pool: fz1-routable` | 過時 | https://metallb.io/release-notes/ | "The annotation prefix "metallb.universe.tf" is deprecated by now. Please use the new prefix "metallb.io". E.g. "metallb.io/address-pool" instead of "metallb.universe.tf/address-pool"."（0.14.9） | MetalLB ≥ 0.14.9 改用 `metallb.io/address-pool`。另外註明：叢集是否用 MetalLB、位址池名稱，都屬環境特定 | ✓ |
+| P11-007 | 4267, 4283 | `ports: - { name: https, port: 443, targetPort: 8443 }` | 不精確 | https://github.com/istio/istio/blob/master/manifests/charts/gateway/values.yaml | `- name: https` `port: 443` `protocol: TCP` `targetPort: 443`（舊的 istio-ingress chart 與 istioctl 才是 `targetPort: 8443`） | 註明 targetPort 依安裝方式而異：istioctl 是 8443，Helm `gateway` chart 是 443。也提醒這份 Service 少了 status-port 15021 和 http2，直接 apply 可能蓋掉安裝工具產生的 ports；位址池應透過安裝工具的 values 設定 | ✓ |
+| P11-008 | 4314, 4318 | 必須帶 Host header，否則 Gateway 的 hosts 比對不到會 404 | 不精確 | https://istio.io/latest/docs/ops/common-problems/network-issues/ | "An HTTPS Gateway that specifies the hosts field will perform an SNI match on incoming requests." ／ "…no SNI will be set, causing the request to fail." | 對 `https://<VIP>` 做檢查時，沒帶 SNI 會先在 TLS 握手失敗，根本走不到 Host 比對。要同時設 SNI＝myapp.example.com 和 Host header（curl 可用 `--resolve`）。Host 不符回 404 這點只在 TLS 握手成功之後才成立 | ✓ |
+| P11-009 | 4326 | FZ2 不認得他 → 被踢回 Keycloak 登入頁 | 不精確 | canary-manual/CANARY-COMPLETE.md §9.1、§3.7 | §9.1：「剛登入完又被要求登入 ／ ② ／ 跨軌切換會重新認證一次；那一刻 Keycloak SSO session 剛好過期 ／ 重登即可」；§3.7：「使用者隨機拿到 `authorization_request_not_found` 並被踢回 Keycloak」 | 改成：Keycloak SSO session 還在時，是不用輸入帳密的重新認證；這時正在送出的表單或 POST 會遺失。登入流程進行到一半就跳邊，會出現 `authorization_request_not_found`。只有 SSO session 也過期時，才真的看到登入頁 | ✓ |
+| P11-010 | 4328 | 瀏覽器開了多個分頁、各自解析 → 有機會分散到兩邊 | 無法驗證 | — | — | 主流瀏覽器的 DNS 快取由所有分頁共用。建議刪除，或改成「不同瀏覽器或不同裝置」 | ✓ |
+| P11-011 | 4332–4336 | 三種處理方式（GSLB source-IP affinity／Redis 複寫／外部化） | 不精確 | https://techdocs.f5.com/kb/en-us/products/big-ip_ltm/manuals/product/big-ip-local-traffic-manager-implementations-14-0-0/12.html | "Cookie persistence directs session requests to the same server based on HTTP cookies…" | 11.3 的圖寫了 F5。如果前面是 L7 的 F5 LTM（終結 TLS、兩個 VIP 都是 pool member），可以用 cookie persistence 黏住 cluster，這比 source-IP 可靠。建議補上這第四種方式，並註明它需要在 F5 終結 TLS | ✓ |
+| P11-012 | 4370 | 目前的狀態（in-memory session、沒有 PDB/HPA、設定還是手動 apply） | 環境特定 | — | — | 與 CANARY-COMPLETE §3.9「目前沒有 PDB」一致。PDB 加上後要回頭更新這句 | ✓ |
+| P11-013 | 4374–4384 | 要跟 CD 團隊問清楚的四件事（routable 10.x／non-routable 100.x 等） | 環境特定 | — | — | 不需改，維持「問人」的寫法 | ✓ |
+| P11-014 | 4407–4411 | `for R in gateway virtualservice …; kubectl get $R -A` | 不精確 | https://www.alibabacloud.com/help/en/asm/support/why-are-no-gateways-or-non-istio-gateways-returned-when-i-run-the-kubectl-command-to-query-gateways（廠商文件，istio.io 上找不到對應文字） | "Both APIs define a resource named `Gateway`, and kubectl cannot distinguish between them." | 改成 `gateways.networking.istio.io`（或短名 `gw`）。否則叢集裝了 Gateway API CRD 時，比對的可能是 gateway.networking.k8s.io 的 Gateway，兩邊都空也會印「一致」 | ✓ |
+| P11-015 | 4426–4428 | 自動切換速度上限就是 DNS TTL…最久要等一小時；有些企業 DNS 或作業系統會忽略過短的 TTL | 無法驗證 | — | — | 方向合理，但要補上「健康檢查判定時間」和用戶端自己的快取（例如 JVM、瀏覽器）。「最久一小時」低估了 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P11-201 | 4137, 4146 | 從 FZ1 轉發到 FZ2：兩邊 CA 各自獨立，身分在 gateway 斷掉，`principals` 失效，要改用 JWT | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P11-202 | 4184, 4220, 4291 | 每座 cluster 的 istio-system 各放一份 TLS secret，以 `credentialName` 引用 | https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/ |
+| P11-203 | 4208, 4224 | `networking.istio.io/v1`（Istio ≥ 1.22 才有） | https://istio.io/latest/news/releases/1.22.x/announcing-1.22/ |
+| P11-204 | 4214–4222 | Gateway `selector`／`servers.port`／`tls.mode: SIMPLE`／`credentialName`／`hosts` 欄位合法 | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P11-205 | 4233–4235 | 寫了 gateways 就要顯式加 `mesh`，才會套用到 sidecar | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P11-206 | 4238–4245 | `uri.prefix`／`exact` match、`timeout: 15s` 寫法合法 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P11-207 | 4291–4293 | `create secret tls --dry-run=client -o yaml \ kubectl apply -f -` 可冪等建立 secret | https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret_tls/ |
+| P11-208 | 4299–4300 | jsonpath `{.data.tls\.crt}` 跳脫點號，接 `openssl x509 -noout -enddate` | https://kubernetes.io/docs/reference/kubectl/jsonpath/ |
+| P11-209 | 4393 | 用 `curl --resolve` 直接測 FZ2 VIP（同時帶對 SNI 與 Host） | https://istio.io/latest/docs/ops/common-problems/network-issues/ |
+| P11-210 | 4377 | 交叉引用的 Part 10.6 踩雷 1 確實存在（4052 行，Gateway selector 綁到兩組） | （本文件內部） |
+
+---
+
+## Part 13：node 排程與 routable 網段
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P13-001 | 5580–5585 | 10.x routable／100.64.x non-routable，可路由 node 是稀缺資源 | 環境特定 | — | — | 不需改，已標示 placeholder | ✓ |
+| P13-002 | 5626, 5767–5775 | ingressgateway 一定要 routable，Pod 必須在那個網段的 node 上；排到 non-routable：Service 拿得到 VIP，但流量進不來 | 不精確 | https://kubernetes.io/docs/reference/networking/virtual-ips/ | "Set the field to `Cluster` to route external traffic to all ready endpoints and `Local` to only route to ready node-local endpoints. If the traffic policy is `Local` and there are no node-local endpoints, the kube-proxy does not forward any traffic for the relevant Service." | 這不是 K8s 的通則。`externalTrafficPolicy: Cluster` 時，VIP 落到任何一台 node 都會轉發到其他 node 上的 Pod。只有 `Local`，或貴司 LB／CNI 的限制（環境特定）時才成立。請改成條件句，並列出要檢查 `externalTrafficPolicy` | ✓ |
+| P13-003 | 5629 | `pmc-epmmformquerygui` 這類 GUI：不用 routable，流量從 ingressgateway 進來 | 不精確 | canary-manual/CANARY-COMPLETE.md §3.1、§4.3 | 「`spring...provider.keycloak.issuer-uri`…OAuth2 client 建不起來 → 啟動失敗」；「Unable to resolve Configuration with the provided Issuer」 | 這支 app 是 BFF，啟動時和登入時都會主動連 Keycloak（discovery、token、JWKS），屬於 5628「主動連外部系統」那一類。請改成「看 Keycloak 位置與出向 SNAT，要問網路組」 | ✓ |
+| P13-004 | 5639–5662 | `kind: Deployment`…`spec: template: …`（沒有 selector） | 不精確 | https://kubernetes.io/docs/concepts/workloads/controllers/deployment/ | "`.spec.selector` is a required field that specifies a label selector" | 註明這是片段，直接 apply 會被 apps/v1 拒絕。ingressgateway 的 Deployment 由安裝工具管理，nodeSelector／tolerations 應寫在 IstioOperator 或 Helm values，直接改 Deployment 可能被安裝工具蓋回去 | ✓ |
+| P13-005 | 5704–5711 | `effect: "NoExecute"` `tolerationSeconds: 300`：被打上 taint 後還能撐 300 秒才被驅逐 | 不精確 | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ | "Pods that tolerate the taint without specifying `tolerationSeconds` in their toleration specification remain bound forever" ／ "Pods that tolerate the taint with a specified `tolerationSeconds` remain bound for the specified amount of time. After that time elapses, the node lifecycle controller evicts the Pods from the node." | 對 `network=routable` 這種永久的專用 taint 加 tolerationSeconds，等於 gateway Pod 每 300 秒被驅逐一次。專用 node 的 toleration 不要加 tolerationSeconds；它只適合 not-ready 這類暫時性 taint | ✓ |
+| P13-006 | 5796–5801 | `3 node(s) had untolerated taint {network: routable},` | 過時 | https://github.com/kubernetes/kubernetes/blob/release-1.34/pkg/scheduler/framework/plugins/tainttoleration/taint_toleration.go | v1.34+：`"node(s) had untolerated taint(s)"`；v1.33 以前：`"node(s) had untolerated taint {%s: %s}"` | 註明 K8s ≥ 1.34 的事件不再印出 taint 的 key/value，要再跑 `kubectl describe node` 看 Taints | ✓ |
+| P13-007 | 5823–5833 | 當 replica 數超過 routable node 數量時，多出來的 Pod 會排不上去（因為 `DoNotSchedule` 不允許同一台放兩個以上造成傾斜） | 錯誤 | https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/ | "`maxSkew` defines the maximum permitted difference between the number of matching pods in the target topology and the _global minimum_" | 3 台 node 放第 4 個 Pod，結果是 2/1/1，skew＝1 ≤ maxSkew，可以排上去。DoNotSchedule 加 maxSkew 1 擋的是不均勻，不是「一台最多一個」。會排不上去的是 hostname 上的 required podAntiAffinity。另外範例缺 `labelSelector`："Pods that match this label selector are counted"，沒有它就不會計入任何 Pod，這個約束不起作用 | ✓ |
+| P13-008 | 5823 | routable node 通常只有 2~3 台 | 環境特定 | — | — | 不需改 | ✓ |
+| P13-009 | 5845 | `kubectl get hpa` 會顯示 `CURRENT` 一直達不到 `DESIRED` | 錯誤 | https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/ | "NAME REFERENCE TARGET MINPODS MAXPODS REPLICAS AGE"；Deployment status.replicas："Total number of non-terminating pods targeted by this deployment (their labels match the selector)." | `get hpa` 沒有 CURRENT／DESIRED 欄位，REPLICAS 也會把 Pending 算進去（會顯示 10）。應改看 `kubectl get deploy` 的 READY（4/10），或 `kubectl describe hpa` 的「Deployment pods: X current / Y desired」 | ✓ |
+| P13-010 | 5735–5741 | 常見的 key 名稱：network / node-role / zone / topology / nodepool / net-type | 環境特定 | — | — | 不需改 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P13-201 | 5589 | `routable` 不是 K8s 的標準 label | https://kubernetes.io/docs/reference/labels-annotations-taints/ |
+| P13-202 | 5595–5598 | label 加 affinity 是吸引，taint 是排斥（"Taints are the opposite -- they allow a node to repel a set of pods."） | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| P13-203 | 5615, 5618 | 有 nodeSelector 沒 toleration：目標 node 全被 taint 擋住，Pod 一直 Pending | 同上 |
+| P13-204 | 5616, 5620 | 單有 toleration 不會吸引 Pod（"Tolerations allow scheduling but don't guarantee scheduling"）。Dedicated Nodes 要 taint 加 label 加 affinity 一起用 | 同上 |
+| P13-205 | 5655 | Equal 要比對 value；Exists 只要 key 存在（operator 預設是 Equal） | 同上 |
+| P13-206 | 5657 | effect 要跟 taint 一致（例外：effect 留空時符合所有 effect） | 同上 |
+| P13-207 | 5666, 5672 | nodeSelector 只能做完全相等；required 是硬性條件，「This functions like nodeSelector, but with a more expressive syntax」；`In` 運算子 | https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/ |
+| P13-208 | 5682 | `weight: 100` 在合法範圍 1–100 內 | 同上 |
+| P13-209 | 5685 | `topology.kubernetes.io/zone` 是 well-known label | https://kubernetes.io/docs/reference/labels-annotations-taints/ |
+| P13-210 | 5698–5702 | NoSchedule 不驅逐已在跑的；PreferNoSchedule 是軟性；NoExecute 驅逐不容忍的 Pod | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| P13-211 | 5718–5724 | `kubectl label node`／`kubectl taint node k=v:Effect`／尾端加 `-` 移除 | https://kubernetes.io/docs/reference/kubectl/generated/kubectl_taint/ |
+| P13-212 | 5733, 5738, 5742 | `get nodes -o wide`（INTERNAL-IP 欄）、`--show-labels`、describe 裡的 Taints | https://kubernetes.io/docs/reference/kubectl/ |
+| P13-213 | 5745, 5752 | custom-columns 和 jsonpath 支援 `[?(@.type=="InternalIP")]` 這種過濾 | https://kubernetes.io/docs/reference/kubectl/jsonpath/ |
+| P13-214 | 5801 | `untolerated taint` 代表缺 toleration；`didn't match Pod's node affinity/selector` 代表 label 不符 | https://github.com/kubernetes/kubernetes/blob/master/pkg/scheduler/framework/plugins/nodeaffinity/node_affinity.go |
+| P13-215 | 5806–5811 | `key: network, operator: Exists` 會容忍所有 value 的 network taint（同一個 effect 下） | https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| P13-216 | 5816 | 只寫 `operator: Exists`（不寫 key 和 effect）會容忍所有 taint：空 key 符合所有 key 與 value，空 effect 符合所有 effect | 同上 |
+| P13-217 | 5819 | DaemonSet 只會自動加 `node.kubernetes.io/*` 的 toleration，自訂 taint 要自己寫（監控 agent 常用 Exists） | 同上 |
+| P13-218 | 5838 | `ScheduleAnyway` 是軟性的，排不下就照樣排 | https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/ |
+| P13-219 | 5853 | nodeSelector 和 nodeAffinity 同時寫是 AND（"both must be satisfied"） | https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/ |
+| P13-220 | 5843 | Pending 的 Pod 不會讓 HPA 自己縮回去，要用 maxReplicas 控制上限 | https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/ |
+
+---
+
+## Part 16：active zone DNS 下 request 落在哪
+
+### 需要處理的說法
+
+| ID | 行號 | 原文摘錄 | 判定 | 官方 URL | 來源引文 | 建議改法 | 使用者確認 |
+|---|---|---|---|---|---|---|---|
+| P16-001 | 7776–7780 | 公司的 DNS 是 active/standby：同一個 host 永遠只回 active zone 那座 cluster 的 VIP；FZ1 什麼都沒部 | 環境特定 | — | — | 不必改。所依賴的通用機制（DNS 決定落點）見 P16-201 | ✓ |
+| P16-002 | 7809、7839、7871、7893 | 「4d AP 的 Service + Endpoints」；「K8s 依 selector 自動產生的 Endpoints」；`kubectl -n ea-pmc get endpoints pmc-epmmformquerygui-svc`；「istiod 去 watch … Service / Endpoints」 | 過時 | https://kubernetes.io/blog/2025/04/24/endpoints-deprecation/ | "As of Kubernetes 1.33, the Endpoints API is now officially deprecated, and the API server will return warnings to users who read or write Endpoints resources rather than using EndpointSlices." ／ "Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice" | 改寫成 EndpointSlice；指令改為 `kubectl -n ea-pmc get endpointslice -l kubernetes.io/service-name=pmc-epmmformquerygui-svc`。如果要保留 `get endpoints`，註明 1.33 以後會出現棄用警告 | ✓ |
+| P16-003 | 7876–7886 | 範例輸出的欄位：`SERVICE FQDN  PORT  SUBSET  DIRECTION  TYPE` ／ `ENDPOINT  STATUS` | 不精確 | https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/ | cluster 的標題列："SERVICE FQDN PORT SUBSET DIRECTION TYPE DESTINATION RULE"；endpoints 的標題列："ENDPOINT STATUS OUTLIER CHECK CLUSTER" | 範例輸出補上 `DESTINATION RULE` 欄（subset 那兩行會顯示 `pmc-epmmformquerygui-dr.ea-pmc`），以及 `OUTLIER CHECK`、`CLUSTER` 兩欄。或者註明這是節錄 | ✓ |
+| P16-004 | 7889、7926、7953 | 「gateway access log 的 `upstream_host` 欄位…」；表頭「access log `response_flags`」；「4. FZ1 gateway 的 access log：看到 404 + NR」 | 不精確 | https://istio.io/latest/docs/tasks/observability/logs/access-log/ | "The egress gateway and access logging will be enabled if you install the `demo` configuration profile." ／ "Use of the Telemetry API is recommended." | 加一句前提：Istio 預設不開 access log。要用 Telemetry API 或 `meshConfig.accessLogFile: /dev/stdout` 開啟，否則 16.4 整張表和 16.5 第 4 步都看不到東西 | ✓ |
+| P16-005 | 7901–7903 | FZ1：「Gateway ✔（CD 建的共用 *）」「VS ✗ Service ✗ DR ✗ Pod ✗」 | 環境特定 | — | — | 不必改。通用機制見 P16-208 | ✓ |
+| P16-006 | 7928 | Gateway 不收這個 host（HTTPS，SNI 對不到任何 server）→ TLS handshake 失敗 / 連線被 reset → 「通常沒有 log」 | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | NR: "No route configured for a given request in addition to 404 response code or no matching filter chain for a downstream connection." | 「通常沒有 log」改成：開了 access log 時，gateway 通常會留一行沒有 method、沒有 path 的紀錄，flag 是 `NR`、details 是 `filter_chain_not_found`。症狀描述（handshake 失敗）不變 | ✓ |
+| P16-007 | 7945–7958 | `kubectl --context=fz1` / `--context=fz2`、`<FZ2_VIP>`、`grep myapp.example.com` | 環境特定 | — | — | context 名稱和 VIP 是環境值，加註「依你的 kubeconfig 調整」。指令語法本身正確（見 P16-205、P16-211） | ✓ |
+| P16-008 | 7954–7955 | `kubectl --context=fz1 -n istio-system logs deploy/istio-ingressgateway --tail=200` | 不精確 | https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/ | "# Return snapshot logs from all pods in the deployment nginx" `kubectl logs deployment/nginx --all-pods=true` ／ `--all-pods`: "Get logs from all pod(s). Sets prefix to true." | `logs deploy/x` 不加 `--all-pods` 時只讀其中一個 pod。ingressgateway 多半有多個 replica，可能剛好漏掉那筆 404。改用 `--all-pods=true`，或 `-l app=istio-ingressgateway --prefix`（舊版 kubectl 沒有 `--all-pods`） | ✓ |
+| P16-009 | 8010 | ServiceEntry `exportTo: ["."]`（namespace ea-pmc），由 istio-system 的 ingressgateway 透過 VS 使用 | 錯誤 | https://istio.io/latest/docs/reference/config/networking/service-entry/ | "Exporting a service allows it to be used by sidecars, gateways and virtual services defined in other namespaces." ／ "The value "." is reserved and defines an export to the same namespace that the service is declared in." | `"."` 只開放給 ea-pmc，istio-system 的 ingressgateway 看不到這個 ServiceEntry，VS 的 destination 會指向 gateway 沒有的 cluster（預期是 503 NC）。改成 `exportTo: [".", "istio-system"]`，或拿掉 exportTo（預設是 `*`） | ✓ |
+| P16-010 | 8012–8025 | 「sni 要填 myapp.example.com…填成 relay 的名字會在 FZ2 那邊 handshake 失敗」；DR 只寫 `mode: SIMPLE` + `sni` | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | sni: "If unspecified, SNI will be automatically set based on downstream HTTP host/authority header for SIMPLE and MUTUAL TLS modes." ／ caCertificates: "If omitted, the proxy will verify the server’s certificate using the OS CA certificates." | (1) sni 不填也行：Host 原樣帶過去，auto SNI 自然就是 myapp.example.com。寫上是明確化，不是必要。(2)「填 relay 名字一定 handshake 失敗」要看 FZ2 Gateway：如果是 `*` wildcard，SNI 還是對得到 server。(3) 要補一點：沒給 CA 時用 OS 根憑證驗 FZ2 的憑證。FZ2 憑證若是公司內部 CA 簽的，要用 `credentialName` 或 `caCertificates`，否則上游 TLS 驗證失敗（預期是 503） | ✓ |
+| P16-011 | 8068 | `mTLS，SNI = outbound_.8080_._.pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local` | 不精確 | https://istio.io/latest/docs/reference/config/networking/gateway/ | AUTO_PASSTHROUGH: "The destination details such as the service/subset/port are encoded in the SNI value." | repo 的 VS 走 `subset: stable`（03-virtualservice.yaml），SNI 的 subset 段就不是空的 `_`。社群資料顯示的形式是 `outbound_.8080_.stable_.pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local`；istio.io 沒有寫出這個字串格式，只說 subset 會編進去。可以改寫成這個形式，或註明「subset 為空時才是 `_`」 | ✓ |
+| P16-012 | 8080 | 「每座 cluster 標 `topology.istio.io/network`」 | 不精確 | https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/ | "kubectl --context="${CTX_CLUSTER1}" label namespace istio-system topology.istio.io/network=network1" ／ values："meshID: mesh1"、"clusterName: cluster1"、"network: network1" | 寫清楚 label 是標在每座 cluster 的 `istio-system` namespace 上。安裝時另外要設 `global.meshID`、`global.multiCluster.clusterName`、`global.network`，還要套 `expose-services.yaml`（east-west gateway 對外開 `*.local`） | ✓ |
+| P16-013 | 8081 | 前提（缺一不可）第 5 點：「兩邊 istiod 版本要一起升級」 | 無法驗證 | https://istio.io/latest/docs/releases/supported-releases/ | "The Istio control plane can be one version ahead of the data plane. However, the data plane cannot be ahead of control plane." | 官方 multi-primary 安裝與 deployment-models 文件的前提裡都沒有這一條，也沒寫跨 cluster 的 control plane 版本差規則。建議移出「缺一不可」，改成「建議同步升級、遵守版本差政策，以平台組實測為準」 | ✓ |
+| P16-014 | 8096 | 「DR 加 `localityLbSetting` ＋ `outlierDetection`… 沒有 `outlierDetection` 就不會 failover」 | 不精確 | https://istio.io/latest/docs/reference/config/networking/destination-rule/ | "Istio's default mesh configuration enables locality load balancing (`localityLbSetting.enabled: true`)." ／ "configuring `OutlierDetection` in a `DestinationRule` will automatically activate locality-aware failover behavior" | 後半句正確。但 `localityLbSetting` 不是必填，mesh 預設已開，只要 outlierDetection 就會啟動 failover。另外 repo 的 02-destinationrule.yaml 已經有 outlierDetection，接上 multi-cluster 後 locality failover 會自動生效，要寫出來。關閉方式是設 `localityLbSetting.enabled: false` | ✓ |
+| P16-015 | 8102–8117 | 16.7 表格與建議：誰能做（AP 團隊／平台組）、FZ1 ingressgateway 掛了「要等 DNS 切 zone」 | 環境特定 | — | — | 分工和切 zone 流程是公司環境的事。表中的機制欄位（身分斷在 FZ2 gateway、relay 在切 zone 後失效）與 P16-219、P16-226 一致 | ✓ |
+| P16-016 | 8135 | 「沒帶 `Host: myapp.example.com`（或 `--resolve`）時 Gateway 的 hosts 比對不到，會回 404」 | 不精確 | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter | NR: "No route configured for a given request in addition to 404 response code or no matching filter chain for a downstream connection." | 這句和 16.4 第一列（7928：HTTPS 時 Gateway 不收 host → TLS 失敗）矛盾。curl 打 VIP IP 時不會送 SNI。Gateway hosts 是具體名字時，結果是 TLS 失敗（NR filter_chain_not_found），不是 404。只有 HTTP，或 wildcard `*` Gateway 收下之後 VS host 對不到時，才是 404 NR。建議分成兩種情況寫 | ✓ |
+
+### 查證為正確的說法
+
+| ID | 行號 | 說法 | 官方 URL |
+|---|---|---|---|
+| P16-201 | 7782、7913 | 去哪座 cluster 由 DNS 決定。沒有 multi-cluster 時，兩座 istiod 互不相通，FZ2 的 VS 不會出現在 FZ1 | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P16-202 | 7791、7811、7822、7857–7858、7889 | gateway 的 Envoy 依 EDS 拿到 Pod IP，直接連，不經 ClusterIP／kube-proxy；`upstream_host` 印的是 Pod IP | https://istio.io/latest/docs/concepts/traffic-management/ |
+| P16-203 | 7852 | Envoy cluster 名稱格式是 outbound、port、subset、FQDN 四段；port 8080 與 01-service.yaml 的 `port: 8080` 相符 | https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/ |
+| P16-204 | 7853、7873 | subset cluster 的成員 = Service 的 endpoints ∩ DR subset labels；一個 Service 會展開成「無 subset」加上每個 subset 各一個 cluster | https://istio.io/latest/docs/reference/config/networking/destination-rule/ |
+| P16-205 | 7874–7883、7958 | `istioctl proxy-config cluster/endpoint/route` 可以接 `<type>/<name>`；`--fqdn`（cluster）、`--cluster`（endpoint）旗標存在；`--context` 是 istioctl 頂層旗標 | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P16-206 | 7893 | istiod 讀 K8s API，把設定翻成 xDS 推給 Envoy | https://istio.io/latest/docs/ops/deployment/architecture/ |
+| P16-207 | 7918–7919、7929 | wildcard Gateway 收下 host，但沒有任何 VS 宣告這個 host → 404 NR | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P16-208 | 7930 | 有 VS，但沒有 Service 或 subset 未定義 → 503 NC（"Upstream cluster not found."） | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P16-209 | 7931 | 沒有 Pod，或 label 對不上 → 503 UH（"No healthy upstream hosts in upstream cluster in addition to 503 response code."） | https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter |
+| P16-210 | 7934、8123 | 只補 VS，404 會變成 503 | 同上 |
+| P16-211 | 7950、7962 | `curl -vk --resolve host:443:<VIP> https://host/...` 的語法；用來繞過 DNS、測 standby | https://curl.se/docs/manpage.html |
+| P16-212 | 7996–8009、8020–8025 | 由 gateway 路由到 ServiceEntry 的 443（protocol HTTPS）並以 DR `tls.mode: SIMPLE` 發起 TLS，是官方 egress gateway TLS origination 的同款寫法 | https://istio.io/latest/docs/tasks/traffic-management/egress/egress-gateway-tls-origination/ |
+| P16-213 | 7992–7995、8127 | `resolution: DNS` 會向 proxy 所在環境的 DNS 查詢（"Attempt to resolve the IP address by querying the ambient DNS"），所以會解回 active zone；用 STATIC 寫死對方 VIP 可以避開。迴圈的具體症狀屬推論 | https://istio.io/latest/docs/reference/config/networking/service-entry/ |
+| P16-214 | 8003 | STATIC 加 gateway 端路由時，relay host 不需要真的 DNS record | https://istio.io/latest/docs/reference/config/networking/service-entry/ |
+| P16-215 | 8028–8030 | Host header 預設原樣帶到上游；`rewrite.authority` 會改掉它，導致 FZ2 的 VS 對不上 | https://istio.io/latest/docs/reference/config/networking/virtual-service/ |
+| P16-216 | 8038 | VS `gateways` 用 `<namespace>/<name>` 引用其他 namespace 的 Gateway；VS 必須 export 到 gateway 的 namespace（預設 `*` 符合） | https://istio.io/latest/docs/reference/config/networking/gateway/ |
+| P16-217 | 8052 | 同一 host 綁同一 gateway 的多份 VS 會被合併，"the cross-resource order is UNDEFINED" | https://istio.io/latest/docs/ops/best-practices/traffic-management/ |
+| P16-218 | 8056、8060–8061、8088–8089 | multi-primary：remote secret 讓 istiod 讀對方 API server 做服務探索；同名 namespace 視為同一個（"namespaces in each cluster sharing the same name are considered the same namespace by default"）；VS/DR 等設定只從自己 cluster 的 API server 讀，所以 FZ1 要有自己的 VS/DR | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P16-219 | 8063、8067、8070、8072、8079 | 跨 network 的 endpoint 經由對方 east-west gateway 的 15443；AUTO_PASSTHROUGH 依 SNI 轉發、不終止 mTLS，不需要 VS；east-west gateway 與 ingressgateway 是分開的兩組 | https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/ |
+| P16-220 | 8077 | 需要共用信任根，透過 `cacerts` 外掛 CA | https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/ |
+| P16-221 | 8078 | `istioctl create-remote-secret` 仍存在（"Create a secret with credentials to allow Istio to access remote Kubernetes apiservers"），且 istiod 要連得到對方 API server | https://istio.io/latest/docs/reference/commands/istioctl/ |
+| P16-222 | 8090 | FZ1 建 Service 是為了 kube-dns（"you must deploy a Kubernetes Service to each cluster that consumes that service"）；或者用 DNS proxying | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P16-223 | 8095 | multi-cluster 下身分端到端保留；兩座共用 trust domain 時，SPIFFE ID 分不出是哪一座的 ingressgateway | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P16-224 | 8096（後半） | failover 依賴 outlierDetection（"Envoy relies on outlier detection to identify unhealthy endpoints and trigger failover to the next locality."） | https://istio.io/latest/docs/tasks/traffic-management/locality-load-balancing/ |
+| P16-225 | 8109 | 預設會跨 cluster 分散到各 endpoint（"By default, Istio will load balance requests evenly between endpoints in each cluster."），所以 in-memory session 有被登出的風險 | https://istio.io/latest/docs/ops/deployment/deployment-models/ |
+| P16-226 | 8048 | VIP 接力時，來源身分斷在 FZ2 的 ingressgateway（與已查證的 Part 5 結論一致） | https://istio.io/latest/docs/reference/config/security/authorization-policy/ |
+
+---
+
+## 超出 guide 範圍的發現（批次 ⑤⑥）
 
 這兩項不是 guide 的錯，是查證途中順帶發現的 repo 本身的問題。不進修正 guide 的故事，處理方式由使用者決定：
 
@@ -1032,3 +1292,13 @@
 |---|---|---|---|---|---|
 | X-001 | `canary-manual/track-a/base/02-destinationrule.yaml`、`03-virtualservice.yaml` | 還沒落地 CANARY-COMPLETE.md 3.3／3.4 的【修正】：親和 cookie 仍叫 `JSESSIONID`、`retryOn` 含 `5xx`、主路由留著 `weight: 0` 的 canary destination、pilot 規則沒有 uri 條件。所以 P14-013／025／027／028 判「過時（相對目標狀態）」而非「錯誤」 | canary-manual/CANARY-COMPLETE.md §3.3、§3.4 | 只記錄，另開 PRD 修 manifest（照 CLAUDE.md「改 manifest 就要加檢查」）；已寫進 CLAUDE.md「已知過時」清單 | ✓ |
 | X-002 | repo 根目錄 `CLAUDE.md`「兩者同時存在時兩個 controller 會搶 pod」 | Argo 官方："The Rollout won't try to manage existing Deployment Pods."，並建議遷移時讓 Rollout 與 Deployment 並存。兩軌互斥的規則仍成立，但真正原因是共用 `app` label（會被對方的 Service 選進 endpoint）與同一條 VirtualService | https://argo-rollouts.readthedocs.io/en/stable/migrating/ | loop 最後的 retro 故事改寫這句的理由（互斥規則不變） | ✓ |
+| X-003 | `canary-manual/track-a/base/`（缺 `04-poddisruptionbudget.yaml`） | CANARY-COMPLETE.md 3.9 的 PDB 還沒建立；目標狀態的 selector 要帶 `version: stable`（只用 `app` 選會把 canary pod 算進去，canary 在線時兩個 stable 可能同時被驅逐）。批次 ⑥ P09-010／P09-012 發現 | canary-manual/CANARY-COMPLETE.md §3.9 | 同 X-001：只記錄，另開 PRD；已併入 CLAUDE.md「已知過時」那一條 | ✓ |
+
+## guide 文末「需向他人確認」清單的新增候選（批次 ⑥）
+
+除了各 Part 判定為「環境特定」的列之外，查證 Part 16 時建議再加這兩項（格式照 guide 文末那張表：項目／問誰／在哪一節）：
+
+| ID | 項目 | 問誰 | 在哪一節 | 使用者確認 |
+|---|---|---|---|---|
+| Q-001 | FZ2 ingressgateway 的憑證由哪個 CA 簽發（決定路線一的 DR 要不要 `credentialName`／`caCertificates`） | 平台組 | Part 16.6 路線一 | ✓ |
+| Q-002 | 環境有沒有開 access log（Telemetry API 或 `meshConfig.accessLogFile`）—— Part 1、8、16 的除錯步驟都假設有 | 平台組 | Part 8.2、16.4、16.5 | ✓ |

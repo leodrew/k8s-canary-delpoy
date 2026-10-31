@@ -56,7 +56,8 @@ bash scripts/validate.sh      # 或 npm run validate
   - **`track-a/base/` 還沒落地 CANARY-COMPLETE.md 3.3／3.4 的四項【修正】**：DR 的
     親和 cookie 仍叫 `JSESSIONID`（應改 `epmm-affinity`）、VS 的 `retryOn` 仍含 `5xx`、
     主路由仍留著 `weight: 0` 的 canary destination、pilot 規則沒有
-    `uri: prefix: /gui_epmmFormQuery`。guide 查證（批次 ⑤，P14-013／025／027／028）
+    `uri: prefix: /gui_epmmFormQuery`。另外 3.9 的 `base/04-poddisruptionbudget.yaml`
+    還不存在（目標 selector 要帶 `version: stable`）。guide 查證（帳本 X-001／X-003）
     時發現，刻意不放進那次 loop —— 要另開 PRD，照「改 manifest 就要加檢查」的規則做。
 
 ## Ralph 工作流（`ralph/`）
