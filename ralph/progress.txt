@@ -310,3 +310,12 @@ Started: (not yet run)
 - 觀察（不改）：Part 4 約 1331／1369 仍有舊說法，屬 P04-013，後續故事處理；P02-206 第一句引文省略了開頭 "Instead, "。
 - Learnings: 無新增通則。
 ---
+## 2026-11-01 - US-013
+- 修正 Part 2 §2.4 NetworkPolicy（2/2）：P02-211 policyTypes 預設值（省略時一定含 Ingress，有 egress 規則才加 Egress）、
+  P02-212 ipBlock「mesh 外部」→「叢集外部」、P02-213 OR 範例改為 policy 所在 namespace（ea-epmm）、
+  P02-214 CNI 段落改為 flanneld 本身不實作＋Helm netpol.enabled＋deny-all 實測。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（觀察：policyTypes／ipBlock 表格格子與 CNI 條目偏長，未改）；
+  Spec 無發現，所有 guide 引文逐字出現在官方頁（P02-213 帳本引文因 WebFetch 摘要未逐字比到，guide 沒引它）。
+- Learnings: 無新增通用慣例。P02-215 提醒仍待做。
+---
