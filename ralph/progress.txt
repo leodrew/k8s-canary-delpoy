@@ -319,3 +319,10 @@ Started: (not yet run)
   Spec 無發現，所有 guide 引文逐字出現在官方頁（P02-213 帳本引文因 WebFetch 摘要未逐字比到，guide 沒引它）。
 - Learnings: 無新增通用慣例。P02-215 提醒仍待做。
 ---
+## 2026-11-01 - US-014
+- 修正 Part 2 §2.5（P02-215..219）：圖 ① 改「通常是 timeout (RST 與否依 CNI)」；Sidecar 句補 ingress 欄位與非授權機制；能力表 AuthzPolicy 直連改「部分」；決策表 principals／remoteIpBlocks／橫向掃描三格改寫。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md（刪除 P02-215 提醒）
+- Review round 1: Standards 2（remoteIpBlocks 格子太長 → 改「見表下說明」＋表下段落；patterns.md 殘留 P02-215 提醒 → 刪除）；Spec 0 項需修。
+  Spec 未能確認 kubernetes.io network-policies 的 podSelector 引文（頁面被截斷在 100000 字，需 offset 讀後段）；其餘引文皆逐字找到。未做第 2 輪（修正僅為搬移文字與刪提醒）。
+- 觀察：圖 ① 未加「NetworkPolicy 本身無阻擋紀錄」（P00-070 的句子在 296 行已有）；P04-013 修正時須與本故事的「部分」一致（AuthZ 格改「可以（被呼叫端 sidecar 仍執行）」與表中「部分」要對齊）。
+---
