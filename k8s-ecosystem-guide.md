@@ -987,11 +987,11 @@ spec:
 | 只讓 B 的 `GET /api/*` 被呼叫，`DELETE` 不行 | **AuthorizationPolicy** `to.operation` | 只有它懂 L7 |
 | 服務間流量要全加密 | **PeerAuthentication** `STRICT` | 其他三個都不做加密 |
 | 防止被入侵的 Pod 橫向掃描整個網段 | **NetworkPolicy** default-deny | Istio policy 管不到 UDP／ICMP、被排除在攔截之外的 port，也管不到被入侵 Pod 自己的出向流量 |
-| 限制某個服務只能連特定外部網址 | **ServiceEntry** + **Egress Gateway**（在 gateway 上限制主機名）+ **NetworkPolicy egress**（Pod 只允許打到 egress gateway） | NetworkPolicy 不能依主機名過濾；Sidecar `REGISTRY_ONLY` 只是盡力而為的防呆，不是安全邊界（見表下說明） |
-| sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它的主要用途；它也能設每個 workload 的 `outboundTrafficPolicy` 與 `ingress` listener（見本節開頭執行順序下方的說明） |
+| 限制某個服務只能連特定外部網址 | **ServiceEntry** + **Egress Gateway**（在 gateway 上限制主機名）+ **NetworkPolicy egress**（Pod 只允許打到 egress gateway） | NetworkPolicy 不能依主機名過濾，Sidecar `REGISTRY_ONLY` 也不是安全邊界（見表下說明） |
+| sidecar 記憶體太大 / config push 太慢 | **Sidecar** `egress.hosts` | 這是它的主要用途；它也能設每個 workload 的 `outboundTrafficPolicy` 與 `ingress` listener（見 2.3 的「重要澄清」與本節執行順序下方的說明） |
 | 只讓帶特定 JWT group 的使用者存取 | **AuthorizationPolicy** + **RequestAuthentication** | 前三個都不看 JWT |
 
-**外部網址限制的組合：** 官方「Security Best Practices」的說法是「When combined with a Network Policy, you can enforce all traffic, or some subset, goes through the egress gateway.」——主機名的限制放在 Egress Gateway 上，NetworkPolicy 只負責讓 Pod 的 egress 打不出 egress gateway 以外的地方。Sidecar 的 `outboundTrafficPolicy: REGISTRY_ONLY` 可以當第一道防呆（抓到漏寫的 ServiceEntry），但它只存在於被入侵的 Pod 自己的 sidecar 裡，繞得過去，所以不能單獨當限制。
+**外部網址限制的組合：** 主機名的限制放在 Egress Gateway 上，NetworkPolicy 只負責讓 Pod 的 egress 打不出 egress gateway 以外的地方；官方「Security Best Practices」寫的是「When combined with a Network Policy, you can enforce all traffic, or some subset, goes through the egress gateway.」`REGISTRY_ONLY` 只能當防呆，為什麼不能單獨當限制見 Sidecar 一節的「重要澄清」（Sidecar 管的是 sidecar 自己的設定下發，被入侵的 Pod 可以繞過自己的 sidecar——這是由機制推得，不是官方逐字寫的結論）。
 
 **`remoteIpBlocks` 的前提：** 要先設 `gatewayTopology.numTrustedProxies`（或在 gateway 加 annotation），前面的 LB 要追加 `X-Forwarded-For`；純 TCP LB 改用 PROXY protocol。沒設的話 `remote.ip` 拿不到真正的 client IP（細節見 Part 1 關鍵觀念二）。
 
@@ -1025,11 +1025,11 @@ spec:
 - Kubernetes — DNS for Services and Pods：https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
 - Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
 - Kubernetes — Well-Known Labels, Annotations and Taints：https://kubernetes.io/docs/reference/labels-annotations-taints/
-- Kubernetes — KEP-2161：https://www.kubernetes.dev/resources/keps/2161/
+- Kubernetes — KEP-2161（namespace 預設 label）：https://www.kubernetes.dev/resources/keps/2161/
 - Istio — Installing Gateways：https://istio.io/latest/docs/setup/additional-setup/gateway/
 - Istio — Application Requirements：https://istio.io/latest/docs/ops/deployment/application-requirements/
 - Kubernetes — Admission Controllers（extensible）：https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
-- Flannel：https://github.com/flannel-io/flannel
+- Flannel — 專案首頁（netpol.enabled）：https://github.com/flannel-io/flannel
 - Istio — Network Topologies：https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/
 
 ---
