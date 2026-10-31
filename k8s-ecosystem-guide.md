@@ -34,14 +34,18 @@
 
 ### 這是在解決什麼問題
 
-K8s 原生只有「Service → Pod」這一層抽象，它解決的是**服務發現**（我怎麼找到後端）與**基本負載平衡**。但它管不了：
+只用 K8s 核心的 Service 時，就只有「Service → Pod」這一層抽象，它解決的是**服務發現**（我怎麼找到後端）與**基本負載平衡**。（K8s 另有 Ingress，以及 Gateway API 這個 add-on —— 它的 HTTPRoute 可以設權重；但下面的身分、mTLS、L7 授權仍然要靠 mesh。）光靠 Service 管不了：
 
-- 我想讓 10% 流量走新版本（K8s 只能靠 replica 數量硬湊比例）
+- 我想讓 10% 流量走新版本（只用 Service 時，流量比例只能靠 replica 數量去湊 —— 官方的 canary 範例就是 stable 3 份、canary 1 份湊出 3:1）
 - 我想只讓某個服務呼叫我，其他人一律擋掉（K8s Service 沒有身分概念）
 - 我想知道 A 打 B 的 P99 延遲（K8s 完全不知道）
 - 我想讓服務之間全部走加密（要每個 app 自己實作 TLS）
 
-Istio 把這些抽出來，變成 sidecar（Envoy proxy）+ 一組 CRD。所以你會看到「兩套系統疊在一起」——**K8s 管的是「東西在哪、跑幾份」，Istio 管的是「流量怎麼走、誰能打誰」**。
+Istio 把這些抽出來，變成 sidecar（Envoy proxy）+ 一組 CRD。
+
+> **本文只講 sidecar 模式。** Istio 另有 ambient 模式：資料面是每個節點一個 ztunnel（Rust 寫的，不是 Envoy），加上選用的 waypoint proxy（Envoy），Pod 裡沒有 sidecar。兩種模式的 Pod 可以共存在同一個 mesh 裡。下文說「資料面＝所有 Envoy」「每個 Pod 有 `istio-proxy`」，都是指 sidecar 模式。
+
+所以你會看到「兩套系統疊在一起」——**K8s 管的是「東西在哪、跑幾份」，Istio 管的是「流量怎麼走、誰能打誰」**。
 
 ### Istio 本身由什麼組成：Istio / istiod / istio-system / Envoy
 
@@ -50,7 +54,7 @@ Istio 把這些抽出來，變成 sidecar（Envoy proxy）+ 一組 CRD。所以�
 | 名詞 | 是什麼 | 一句話 |
 |---|---|---|
 | **Envoy** | 一支開源的代理程式（proxy），C++ 寫的 | **真正收封包、轉封包的那支程式** |
-| **Istio** | 一個產品，用來管理一大群 Envoy | 整套系統的名字（控制面 istiod ＋ 資料面所有 Envoy） |
+| **Istio** | 一個產品，用來管理一大群 Envoy | 整套系統的名字（sidecar 模式下：控制面 istiod ＋ 資料面所有 Envoy；ambient 模式的資料面是 ztunnel ＋ waypoint，見上方說明） |
 | **istiod** | Istio 的大腦，在 cluster 裡是一個 Deployment | 讀你寫的 Gateway / VS / DR / AuthorizationPolicy，翻成 Envoy 看得懂的設定（xDS），推給每一個 Envoy。**它自己不轉任何流量** |
 | **istio-system** | 一個 namespace —— 跟 `ea-pmc` 一樣，就是 namespace | 放 Istio 自己元件的地方（istiod、ingressgateway、gateway 用的 TLS secret） |
 
@@ -77,7 +81,12 @@ app istio-proxy
 - **`istio-ingressgateway`**：一個**只有 Envoy、沒有業務容器**的 Pod，前面掛一個 `type: LoadBalancer` 的 Service 拿 VIP。外部流量的第一站（Part 1、Part 10）
 - **`istio-proxy`**：每個 AP Pod 裡的第二個容器。進出這個 Pod 的封包都會先被 iptables 導到它（Part 1 關鍵觀念一）
 
-**sidecar 是自動加的，所以你的 Deployment YAML 裡看不到它。** namespace 帶著 `istio-injection=enabled`（或 `istio.io/rev=<版本>`）這個 label 時，Pod 建立的那一刻 API server 會呼叫 istiod 的 mutating webhook，由它把 `istio-proxy` 容器加進 Pod spec。這也是為什麼 namespace 少了那個 label，Pod 會是 `1/1`、而且所有 Istio 設定對它都無效。
+**sidecar 是自動加的，所以你的 Deployment YAML 裡看不到它。** namespace 帶著 `istio-injection=enabled`（或 `istio.io/rev=<版本>`）這個 label 時，Pod 建立的那一刻 API server 會呼叫 istiod 的 mutating webhook，由它把 `istio-proxy` 容器加進 Pod spec。（Pod 自己也可以帶 `sidecar.istio.io/inject: "true"` 這個 label 要求注入；namespace 的 `istio-injection` 與 Pod 的 label 同時存在時，`istio-injection` 優先。）
+
+所以 namespace 沒有那個 label、Pod 也沒標 `sidecar.istio.io/inject: "true"` 時，通常就不會注入，Pod 是 `1/1`。後果要分兩邊看：
+
+- **它自己的 inbound 政策失效** —— 打到它身上的 AuthorizationPolicy、PeerAuthentication 沒有 Envoy 可以執行，等於沒寫
+- **但別人呼叫它時，client 端的設定仍然套用** —— mesh 裡其他帶 sidecar 的 client 打它時，VirtualService / DestinationRule 是在 client 那一側的 Envoy 執行的，照樣生效
 
 ```bash
 kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio.io/rev
@@ -130,7 +139,7 @@ kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio
 
 **你寫的 YAML 自己不會執行任何東西。** 它只是存在 API server 裡的一份資料，要被 istiod 讀到、推到 Envoy 才算生效。兩個直接推論：
 
-- **istiod 只讀「自己這座 cluster」的 API server** —— 所以 FZ2 的 VS 對 FZ1 的 Envoy 完全不存在（Part 16.3）
+- **istiod 只從「自己這座 cluster」（config cluster）讀 Istio 設定（VS / DR / Gateway…）** —— 所以 FZ2 的 VS 對 FZ1 的 Envoy 完全不存在（Part 16.3）。有設 multicluster（給 istiod 一份 remote secret，裡面是存取其他 cluster API server 的憑證）時，它還會去讀其他 cluster 的 Service / Endpoints 做服務發現，但仍然不讀它們的 VS
 - **設定「apply 成功」≠「Envoy 拿到了」** —— 要確認 Envoy 手上的版本，用 `istioctl proxy-status`（`SYNCED` 才算到位，Part 8.1）
 
 ### 物件之間怎麼互相找到：label、名字、host 三種連結
