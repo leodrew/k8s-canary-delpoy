@@ -64,10 +64,17 @@ bash scripts/validate.sh      # 或 npm run validate
 
 這個分支的改動是由 Ralph 自動代理迴圈逐個 user story 完成的：`ralph/prd.json` 是故事
 清單（`passes` 欄位標示完成與否），`ralph/progress.txt` 是**只能附加**的進度紀錄，
-開頭的 Codebase Patterns 區段是累積下來的慣例，`ralph/CLAUDE.md` / `prompt.md` 是
+`ralph/patterns.md` 是累積下來的慣例，`ralph/CLAUDE.md` / `prompt.md` 是
 代理的指令，`ralph/ralph.ps1` 是迴圈本體。照這個流程做一個故事時，commit 分兩個：
 `feat: US-0xx - <故事標題>`（改動＋對應的 validate.sh 檢查）、然後
-`chore: US-0xx - mark story complete and log progress`（只動 `prd.json` 與 `progress.txt`）。
+`chore: US-0xx - mark story complete and log progress`（只動 `prd.json`、`progress.txt`，
+有改慣例時加 `patterns.md`）。
+
+- **省 token：代理每輪只讀 `patterns.md` ＋ 一個故事。** `prd.json`（~140 KB）與 `progress.txt`
+  （每個故事 +~4 KB）都不整份讀：故事用 `node ralph/story.js next|show|pass|note` 存取，
+  progress 用 heredoc 追加、只在重試時 grep 該故事的條目。所以要傳給之後輪次的 learning
+  只能寫進 `patterns.md`（寫進 progress.txt 等於沒人看）；`patterns.md` 每多 1 KB 之後每輪都要付，
+  要合併改寫、不要一直往下加。
 
 - **跑法：** `.\ralph\ralph.ps1 --model <m> --effort <low|medium|high|xhigh|max> <最多幾輪>`；
   預設 tool 是 claude。先加 `--dry-run` 看組出來的指令（不封存、不動任何檔案）。
@@ -76,8 +83,9 @@ bash scripts/validate.sh      # 或 npm run validate
   修不完就寫進 `prd.json` 的 `notes`、`passes` 維持 false。所以一個故事是 2–4 個 commit。
 - **換 run 時要手動封存。** `ralph.ps1` 偵測到 `branchName` 跟 `.last-branch` 不同才封存，
   但它是在你已經寫好新 `prd.json` 之後才跑 —— 封存進去的會是新的 `prd.json` 配舊的
-  `progress.txt`，還會把新 `progress.txt` 清空。換 run 前先自己把舊的兩份複製到
-  `ralph/archive/<日期>-<舊分支名>/`，再把 `.last-branch` 改成新分支。
+  `progress.txt`，還會把新 `progress.txt` 清空。換 run 前先自己把舊的 `prd.json`、
+  `progress.txt`、`patterns.md` 複製到 `ralph/archive/<日期>-<舊分支名>/`，再把 `.last-branch`
+  改成新分支。`patterns.md` 不會被重置 —— 慣例跨 run 帶過去，換 run 時順手刪掉只適用舊 run 的條目。
 - **目前的 run（`ralph/guide-verification`）** 修的是 `k8s-ecosystem-guide.md`，不是 manifest。
   事實依據是 `tasks/guide-verification-ledger.md`（查證帳本：每列有官方 URL、逐字引文、
   建議改法、使用者確認），spec 是 `tasks/prd-k8s-guide-verification.md`；每個故事的

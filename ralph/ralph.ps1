@@ -128,6 +128,9 @@ if (-not $DryRun -and -not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
 $ScriptDir      = $PSScriptRoot
 $PrdFile        = Join-Path $ScriptDir 'prd.json'
 $ProgressFile   = Join-Path $ScriptDir 'progress.txt'
+# Codebase Patterns live in their own file so each iteration reads only them, not the
+# ever-growing progress log. Archived with the run but NOT reset: patterns carry over.
+$PatternsFile   = Join-Path $ScriptDir 'patterns.md'
 $ArchiveDir     = Join-Path $ScriptDir 'archive'
 $LastBranchFile = Join-Path $ScriptDir '.last-branch'
 
@@ -175,6 +178,7 @@ if ((Test-Path -LiteralPath $PrdFile) -and (Test-Path -LiteralPath $LastBranchFi
     New-Item -ItemType Directory -Force -Path $archiveFolder | Out-Null
     if (Test-Path -LiteralPath $PrdFile)      { Copy-Item -LiteralPath $PrdFile      -Destination $archiveFolder }
     if (Test-Path -LiteralPath $ProgressFile) { Copy-Item -LiteralPath $ProgressFile -Destination $archiveFolder }
+    if (Test-Path -LiteralPath $PatternsFile) { Copy-Item -LiteralPath $PatternsFile -Destination $archiveFolder }
     Write-Host "   Archived to: $archiveFolder"
 
     # Reset progress file for new run
