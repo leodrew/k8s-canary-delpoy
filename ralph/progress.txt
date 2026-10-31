@@ -353,3 +353,9 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（3 個 nit：Part 0 指標名稱、精準除錯引用、註解混兩件事）；Spec 引文皆在頁面上找到，2 點（「不論哪種」含糊→改成「所以」；XFCC 區塊仍用 curl config_dump，屬 P03-015 範圍，未動）。已修 nit 並以 fix commit 收；未再跑第二輪（只剩措辭 nit）。
 - Learnings: node 改檔時反斜線被吞，已寫進 patterns.md。
 ---
+## 2026-11-01 - US-019
+- 修正 P03-012：成因 5 結尾一句改成「必須有 `selector` 或 `targetRefs`（兩者擇一即可），兩者都沒有才會套用到全 mesh」，並逐字引 Istio 英文原句。
+- Files changed: k8s-ecosystem-guide.md（1 行）
+- Review round 1：Standards 無違規（3 條 judgement 觀察：未註明 Gateway API、「擇一即可」稍冗、引文只支撐「都沒設=全 workload」，皆不改）；Spec 確認原句在官方頁、新措辭一致、無 scope creep。1 輪收斂。
+- Learnings: 無新慣例。Part 3 的 `### 參考來源` 與 VERIFIED_PARTS 由 US-020 處理。
+---
