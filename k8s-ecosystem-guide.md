@@ -1170,7 +1170,7 @@ kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
   pilot-agent request GET stats | grep ssl.handshake
 ```
 
-如果來源 Pod 根本沒被注入 sidecar，就一定沒有身分。什麼條件下會注入、什麼條件下不會，見 Part 0 的注入規則。
+如果來源 Pod 根本沒被注入 sidecar，就一定沒有身分。什麼條件下會注入、什麼條件下不會，見 Part 0 的 sidecar 注入段落。
 
 #### 成因 4：`to.operation` 的條件沒對上
 
@@ -1183,7 +1183,7 @@ kubectl exec -n ea-epmm deploy/epmm-api -c istio-proxy -- \
 | `paths: ["/api"]` 但實際請求是 `/api/v1/forms` | 403 | 改成 `/api/*`（前綴） |
 | `paths` 忘了算 context path | 403 | 你的 app 是 `/gui_epmmFormQuery/rs/gui/*`，不是 `/rs/gui/*` |
 
-> **對你的環境特別提醒**：`app.context-prefix: /gui_epmmFormQuery` 代表所有實際路徑都帶這個前綴。AuthorizationPolicy 的 `paths` 比對的是**正規化後的 path**（預設是 BASE 正規化，依 RFC 3986，並把 `\` 轉成 `/`），不是 client 送來的原樣字串；不論哪種，一定要寫全 `/gui_epmmFormQuery/...`。
+> **對你的環境特別提醒**：`app.context-prefix: /gui_epmmFormQuery` 代表所有實際路徑都帶這個前綴。AuthorizationPolicy 的 `paths` 比對的是**正規化後的 path**（預設是 BASE 正規化，依 RFC 3986，並把 `\` 轉成 `/`），不是 client 送來的原樣字串；所以一定要寫全 `/gui_epmmFormQuery/...`。
 
 #### 成因 5：policy 放在 root namespace，全 mesh 生效
 
