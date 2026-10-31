@@ -297,3 +297,9 @@ Started: (not yet run)
 - Review round 1: Spec 0 findings（引文全部在官方頁找到；P02-015 的 BASE 句實際在 normalization 頁，帳本來源欄略有出入）。Standards 2 項硬性（引文用 ASCII 引號而非「」；表格格子太長）＋標題與內容不符的判斷題。全修：格子改一句結論＋（見表下說明），細節移到表下清單；paths 萬用字元 bullet 改標題。第 2 輪未重審（僅措辭／版面調整）。
 - Learnings: 「Istio 1.22 起」的來源連結要在 Part 2 的參考來源段落補上（最後一個 Part 2 故事）。
 ---
+## 2026-11-01 - US-011
+- Fixed Part 2 §2.3 Sidecar (P02-201..205): removed memory/listener numbers and "每次變動推全 mesh"; REGISTRY_ONLY described as best-effort, Egress Gateway+NetworkPolicy as the enforced approach; removed "隨機挑一個", added istioctl analyze IST0111/IST0110; istio-system/* pitfall rewritten (Prometheus scrapes); short-name DNS cause corrected to K8s search domains.
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 hard; Spec: all quotes verified on all 7 URLs; 1 finding (service-count inference stronger than source) -> softened to "可能越多". Not changed (out of ledger scope): line ~721 effect "減少 config push 風暴", line ~986 "config push 太慢", line ~985 table "兩層一起才擋得住" (REGISTRY_ONLY) — noted for a later row / follow-up.
+- Learnings: none new.
+---
