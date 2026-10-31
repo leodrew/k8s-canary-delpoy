@@ -261,15 +261,17 @@ selector:
 | **CronJob** | K8s | 定時跑一次性任務 | 要自己養一台機器跑 crontab |
 | **Gateway** | Istio | 定義**入口的 L4/TLS**：開哪個 port、收哪些 host、憑證是誰 | 外面的流量進不來 |
 | **VirtualService** | Istio | 定義**路由規則**：這個 path/header 要送去哪個服務、幾成流量 | 只能靠 Service 名稱一對一直連 |
-| **DestinationRule** | Istio | 定義**到達目的地之後**的策略：subset 分組、負載平衡演算法、連線池、mTLS 模式 | 沒有 subset 就無法做版本分流 |
-| **ServiceEntry** | Istio | 把「mesh 外部的服務」註冊進來，讓 sidecar 認得它 | 嚴格模式下打不出去 |
+| **DestinationRule** | Istio | 定義**路由決定之後**、送往該服務的策略：subset 分組、負載平衡演算法、連線池、client 端對上游連線的 TLS 設定（如 `ISTIO_MUTUAL`） | 同一個 Service 底下無法分版本（subset）；兩個版本是不同 Service 時，VS 用 weight 照樣能分流 |
+| **ServiceEntry** | Istio | 把「mesh 外部的服務」註冊進來，讓 sidecar 認得它 | `outboundTrafficPolicy.mode: REGISTRY_ONLY` 時打不出去；預設 `ALLOW_ANY` 會放行，但流量走 passthrough，拿不到 VS/DR 的功能 |
 | **Sidecar** | Istio | 限制**這個 workload 的 Envoy 能看見哪些服務** | 每個 sidecar 都載入全 mesh 設定，吃記憶體 |
-| **PeerAuthentication** | Istio | 決定**服務間連線要不要 mTLS**（身分驗證） | 沒有身分，授權policy 全部失效 |
+| **PeerAuthentication** | Istio | 決定**服務間連線要不要 mTLS**（身分驗證） | 預設 `PERMISSIVE`：兩邊都有 sidecar 時自動升級成 mTLS，身分照樣有；風險是明文也收（見表下說明） |
 | **AuthorizationPolicy** | Istio | 決定**誰可以打誰的哪個 path/method**（授權） | 任何人打得到就進得去 |
 | **RequestAuthentication** | Istio | 驗 **JWT**（end-user 身分） | 沒辦法認「人」，只能認「服務」 |
 | **NetworkPolicy** | K8s + CNI | L3/L4 封包層的防火牆（Pod IP / CIDR / port） | 網路層完全互通 |
 | **HorizontalPodAutoscaler** | K8s | 依指標自動調整 replica 數 | 尖峰要人工擴容 |
 | **PodDisruptionBudget** | K8s | 保證自願中斷時至少留幾個 Pod | 節點維護可能一次砍光你所有 Pod |
+
+**表中 DestinationRule 與 PeerAuthentication 的分工：** DestinationRule 的 `tls` 只管「client 這一端送出去時用不用 mTLS」；server 端要不要**強制** mTLS（拒收明文）由 PeerAuthentication 決定。沒寫 PeerAuthentication 時 mesh 預設是 `PERMISSIVE` ——明文與 mTLS 都收，兩端都有 sidecar 的連線會自動升級成 mTLS。所以真正的風險不是「沒有身分」，而是沒有 sidecar 的 client 可以用明文繞過身分。AuthorizationPolicy 裡依賴 mTLS 的只有 `principals`／`notPrincipals`、`namespaces`／`notNamespaces` 與 `source.principal`、`source.namespace` 條件；path、method 這類規則不受影響。
 
 ### 最重要的一組區分：認證 vs 授權 vs 防火牆
 
@@ -287,12 +289,29 @@ selector:
   ④  你的 App           ← Spring Security 再做一次應用層授權
 ```
 
-- ① 擋掉的：`connection refused` / timeout，**看不到任何 Istio log**
+- ① 擋掉的：通常是 timeout（多數 CNI 直接丟封包）；會不會回 RST、讓 client 看到 `connection refused`，看 CNI 怎麼實作。NetworkPolicy API 本身沒有阻擋紀錄，要用 CNI 自己的工具（Calico／Cilium）查
 - ② 擋掉的：TLS handshake 失敗、連線被 reset，**沒有 403**
 - ③ 擋掉的：**HTTP 403 + body `RBAC: access denied`** ← Part 3 專章
 - ④ 擋掉的：你自己 app 的 401/403 頁面
 
 **記住：`RBAC: access denied` 是 ③，跟 K8s 的 RBAC（Role/RoleBinding）一點關係都沒有。** 這是最常見的誤判，詳見 Part 3。
+
+### 參考來源
+
+本 Part 經查證修正的說法所依據的官方文件（查證帳本 `tasks/guide-verification-ledger.md` 的 P00 各列）：
+
+- Kubernetes — Managing Workloads：https://kubernetes.io/docs/concepts/workloads/management/
+- Kubernetes — Gateway API：https://kubernetes.io/docs/concepts/services-networking/gateway/
+- Kubernetes — Service：https://kubernetes.io/docs/concepts/services-networking/service/
+- Kubernetes — Pod v1 API（containerPort）：https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/
+- Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
+- Istio — Ambient mode overview：https://istio.io/latest/docs/ambient/overview/
+- Istio — Installing the Sidecar（sidecar injection）：https://istio.io/latest/docs/setup/additional-setup/sidecar-injection/
+- Istio — Deployment Models：https://istio.io/latest/docs/ops/deployment/deployment-models/
+- Istio — Security concepts：https://istio.io/latest/docs/concepts/security/
+- Istio — AuthorizationPolicy reference：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- Istio — DestinationRule reference：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- Istio — Accessing External Services（egress control）：https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control/
 
 ---
 
