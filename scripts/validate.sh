@@ -1354,7 +1354,7 @@ GUIDE="k8s-ecosystem-guide.md"
 # 各自寫一份 walk 的話，fence 沒關、blockquote 斷掉這類邊界情況兩邊遲早會分歧。
 GUIDE_FENCE_JS='
 const OPEN = /^(\s*)(`{3,}|~{3,})(.*)$/;
-const CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+const CLOSE = /^(\s*)(`{3,}|~{3,})\s*$/;
 // 最多剝 max 層 `>`（預設全剝）。
 function splitQuote(l, max = Infinity) {
   let depth = 0, m;
@@ -1373,7 +1373,12 @@ function fenceOpen(l) {
 function fenceClose(l, open) {
   const q = splitQuote(l);
   const m = q.rest.match(CLOSE);
-  return q.depth === open.depth && !!m && m[1][0] === open.ch && m[1].length >= open.len;
+  // 結尾 fence 的縮排最多比開頭深 3 格（CommonMark；開頭的縮排就是清單項目的內容欄）。
+  // 不擋的話，區塊內容裡縮排更深的 ```（例如 ConfigMap `|` 字串裡夾著一段 markdown）
+  // 會被當成結尾：區塊提早結束，真正的結尾 ``` 變成一個沒有語言的新區塊，把後面的
+  // ```yaml 區塊整個吞成內容 —— 那個區塊就永遠不被解析（無聲 PASS，實測過）。
+  return q.depth === open.depth && !!m && m[1].length <= open.indent.length + 3 &&
+    m[2][0] === open.ch && m[2].length >= open.len;
 }
 // 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；區塊所在的容器已經結束時回傳 null：
 //   - blockquote 結束了（這一行的 `>` 比 fence 少）；
