@@ -400,17 +400,17 @@ selector:
 | 情境 | ingressgateway 看到的 source IP | 真實 client IP 在哪 |
 |---|---|---|
 | VIP 做 SNAT（多數 F5 預設） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
-| Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | 只有更前面的 L7 proxy（例如 F5）先寫進 `X-Forwarded-For` 才拿得到；否則**完全遺失**（見表下說明） |
+| Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | 通常**完全遺失**，除非更前面的 L7 proxy 先寫進 `X-Forwarded-For`（見表下說明） |
 | Service `externalTrafficPolicy: Local` | 保留真實 client IP 到 gateway | gateway 會把它寫進 `X-Forwarded-For` |
 
-表中 `externalTrafficPolicy: Cluster` 那一列的補充：封包送到 `Type=NodePort`／LoadBalancer Service 時預設會被 SNAT（K8s 官方：「Packets sent to Services with `Type=NodePort` are source NAT'd by default.」），node 在 L4 就把來源換成自己的 IP，kube-proxy 不會寫 `X-Forwarded-For`，Envoy 之後 append 進去的只是那個 node IP。另外，表中的欄位是 **ingressgateway** 看到的 source IP；目標 Pod 看到的永遠是 gateway Pod IP。
+表中 `externalTrafficPolicy: Cluster` 那一列的補充：封包送到 `Type=NodePort`／LoadBalancer Service 時預設會被 SNAT（K8s 官方：「Packets sent to Services with `Type=NodePort` are source NAT'd by default.」），node 在 L4 就把來源換成自己的 IP，kube-proxy 不會寫 `X-Forwarded-For`，Envoy 之後 append 進去的只是那個 node IP；真實 client IP 只有在更前面的 L7 proxy（例如 F5）先寫進 `X-Forwarded-For` 時才拿得到。表中欄位是 **ingressgateway** 看到的 source IP；經 gateway 轉進 mesh 的流量，目標 Pod 看到的則是 gateway Pod IP。
 
 **所以：在 mesh 內部做 IP 比對，`ipBlocks` 幾乎永遠是錯的**（你比到的是 ingressgateway 的 IP）。要比對真實 client 必須用 `remoteIpBlocks`，而且**必須先設定 `numTrustedProxies`**（可設在全域 MeshConfig，也可在 gateway Pod 加 `proxy.istio.io/config` annotation 個別設；改完已在跑的 ingressgateway Pod 要重啟才生效），否則 Envoy 不知道 `X-Forwarded-For` 裡哪一段可以信。
 
 ```yaml
 # IstioOperator 的 spec.meshConfig（Helm 的 values 則是頂層 meshConfig:）
 # 直接改 istio ConfigMap 時，key 是 mesh、內容從 defaultConfig: 開始，沒有 meshConfig: 這一層
-# 此設定只對 gateway 生效；個別 gateway 可用 Pod annotation proxy.istio.io/config 覆蓋
+# 此設定只對 gateway 生效（個別 gateway 的覆蓋方式見上方說明）
 meshConfig:
   defaultConfig:
     gatewayTopology:
