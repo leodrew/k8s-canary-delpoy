@@ -152,7 +152,7 @@ bash scripts/validate.sh      # 或 npm run validate
   造成 duplicated key 時不要用 skip，拆成兩個區塊** —— skip 的區塊等於沒有閘門；只有
   `...` 之類的省略號時，改成 `# ...` 註解讓它能解析，也比 skip 好。
 - **`VERIFIED_PARTS`（檢查 [11]）** —— guide 已修完的 Part 清單，寫成 `"Part N"`。
-  清單裡每個 Part 的 `## Part N` 區段（到下一個 `## ` 為止，code fence 裡的 `## ` 不算；
+  清單裡每個 Part 的 `## Part N` 區段（到下一個 `## `（或更高層的 `# `）為止，code fence 裡的 `## ` 不算；
   `Part 1` 不會對到 `Part 10`）都必須有 `### 參考來源`，且其中至少一個連結落在官方網域
   白名單（腳本裡的 `OFFICIAL_DOMAINS`；github.com／raw.githubusercontent.com 只認
   kubernetes／istio／argoproj／envoyproxy 組織，網域比對是「相同或子網域」）。

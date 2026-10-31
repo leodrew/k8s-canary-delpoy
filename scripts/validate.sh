@@ -1331,6 +1331,17 @@ check "sync-config-hash-idempotent" sync_config_hash_idempotent
 #   這時候這一項會變成永遠綠燈，比沒有這一項更糟。
 GUIDE="k8s-ecosystem-guide.md"
 
+# [10] 與 [11] 共用的 code fence 判定，接在兩段 node 腳本前面一起執行。
+# 兩邊必須用同一組規則：各寫一份的話，同一行在 [10] 眼中是「區塊裡」、在 [11]
+# 眼中是「區塊外」，兩項檢查就會對同一份文件給出互相矛盾的判斷。
+# OPEN 允許語言後面接 info string（```yaml title=x）—— 只認 ```yaml 整行的話，
+# 那種 fence 不會被當成 fence，它的結尾 ``` 反而被當成開頭，之後整份文件的
+# 「區塊裡／外」全部顛倒，壞掉的 YAML 就靜靜地沒被檢查到。
+GUIDE_FENCE_JS='
+const OPEN = /^(\s*)```\s*([^`\s]*)[^`]*$/;
+const CLOSE = /^\s*```\s*$/;
+'
+
 echo
 echo "== [10] guide 的 yaml 區塊都能解析（刻意寫錯的要有 skip-yaml 標記與原因）=="
 
@@ -1340,8 +1351,6 @@ const y = require("js-yaml");
 const file = process.argv[1];
 const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
 
-const OPEN = /^(\s*)```\s*(\S*)\s*$/;
-const CLOSE = /^\s*```\s*$/;
 const MARKER = /^\s*<!--\s*validate:skip-yaml(?![\w-])(.*?)-->\s*$/;
 const isYamlLang = s => /^(yaml|yml)$/i.test(s);
 
@@ -1415,7 +1424,7 @@ if (errors.length) {
 }
 '
 
-check "guide-yaml $GUIDE" node -e "$GUIDE_YAML_SCRIPT" "$GUIDE"
+check "guide-yaml $GUIDE" node -e "$GUIDE_FENCE_JS$GUIDE_YAML_SCRIPT" "$GUIDE"
 
 # =============================================================================
 # 檢查 11：修完的 Part 必須留著「參考來源」，且至少一個是官方網域
@@ -1431,7 +1440,7 @@ check "guide-yaml $GUIDE" node -e "$GUIDE_YAML_SCRIPT" "$GUIDE"
 #   - 某個 Part 的最後一個故事完成、加上 `### 參考來源` 之後，把 "Part N" 加進
 #     下面的陣列（同一個 commit）。還沒修完的 Part 不要加 —— 它還沒有來源段落，
 #     加了只會 FAIL。
-#   - 判定範圍：guide 裡 `## Part N` 那個標題，到下一個 `#`／`## ` 標題為止；
+#   - 判定範圍：guide 裡 `## Part N` 那個標題，到下一個 `## ` 標題（或更高層的 `# `）為止；
 #     `### 參考來源` 小節到下一個 `###` 或更高層的標題為止。code fence 裡的
 #     `## ...`（bash 註解）不算標題。"Part 1" 不會對到 "Part 10"。
 #   - 「官方網域」的白名單寫在下面的 OFFICIAL_DOMAINS / GITHUB_ORGS。網域比對是
@@ -1465,11 +1474,12 @@ if (!/^Part \d+$/.test(part)) {
 }
 
 // 只收 code fence 外面的標題：bash 區塊裡的 "## ..." 是註解，不是章節。
+// OPEN / CLOSE 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一組。
 const heads = [];
 let inFence = false;
 lines.forEach((l, i) => {
-  if (/^\s*```/.test(l)) { inFence = !inFence; return; }
-  if (inFence) return;
+  if (inFence) { if (CLOSE.test(l)) inFence = false; return; }
+  if (OPEN.test(l)) { inFence = true; return; }
   const h = l.match(/^(#{1,6})\s+(.*?)\s*$/);
   if (h) heads.push({ i, level: h[1].length, text: h[2] });
 });
@@ -1498,7 +1508,9 @@ for (const s of srcHeads) {
   const next = heads.find(h => h.i > s.i && h.level <= 3);
   const stop = Math.min(next ? next.i : lines.length, end);
   for (const l of lines.slice(s.i + 1, stop)) {
-    for (const m of l.matchAll(/https?:\/\/[^\s<>()\[\]"`]+/g)) urls.push(m[0]);
+    // 排除全形標點：中文段落裡裸寫的 https://kubernetes.io。會把「。」吃進 hostname，
+    // 官方連結反而被判成不在白名單。
+    for (const m of l.matchAll(/https?:\/\/[^\s<>()\[\]"`，。、；：！？（）「」『』【】]+/g)) urls.push(m[0]);
   }
 }
 
@@ -1530,7 +1542,7 @@ fi
 # ${arr[@]+"${arr[@]}"}：空陣列在 set -u 下也不會報 unbound variable（bash 4.4 以前會），
 # 而且 "Part 0" 這種含空白的項目仍然是一個字。
 for part in ${VERIFIED_PARTS[@]+"${VERIFIED_PARTS[@]}"}; do
-  check "guide-sources $part" node -e "$GUIDE_SOURCES_SCRIPT" "$GUIDE" "$part"
+  check "guide-sources $part" node -e "$GUIDE_FENCE_JS$GUIDE_SOURCES_SCRIPT" "$GUIDE" "$part"
 done
 
 # --- 總結 --------------------------------------------------------------------
