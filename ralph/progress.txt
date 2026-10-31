@@ -326,3 +326,10 @@ Started: (not yet run)
   Spec 未能確認 kubernetes.io network-policies 的 podSelector 引文（頁面被截斷在 100000 字，需 offset 讀後段）；其餘引文皆逐字找到。未做第 2 輪（修正僅為搬移文字與刪提醒）。
 - 觀察：圖 ① 未加「NetworkPolicy 本身無阻擋紀錄」（P00-070 的句子在 296 行已有）；P04-013 修正時須與本故事的「部分」一致（AuthZ 格改「可以（被呼叫端 sidecar 仍執行）」與表中「部分」要對齊）。
 ---
+## 2026-11-01 - US-015
+- 修正 P02-220（外部網址限制改成 ServiceEntry＋Egress Gateway＋NetworkPolicy，REGISTRY_ONLY 只是防呆）、P02-221（Sidecar「唯一」改「主要用途」，並提 outboundTrafficPolicy／ingress）。
+- 連動：2.5 決策表下新增「外部網址限制的組合」段落（細節放表下，格子只留結論）。Part 2 加 `### 參考來源`（24 個去重官方 URL），"Part 2" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Spec 無發現（兩段引文都在官方頁找得到）；Standards 3 點（格子與段落重複、與 2.3 重要澄清重複、交叉參照缺 outboundTrafficPolicy、推論未標註）→ 全修，段落改指回 2.3。未再跑第 2 輪（修改僅措辭、validate.sh 通過）。
+- Learnings: 同一主張已在前面小節出現時，新段落指回去，不要重寫。
+---
