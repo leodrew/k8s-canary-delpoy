@@ -712,7 +712,7 @@ spec:
 
 #### 這是在解決什麼問題
 
-**預設情況下，每一個 sidecar 都載入「整個 mesh 所有服務」的設定。** Istio 官方（Configuration Scoping）：「Each proxy instance will receive configuration for all namespaces as well.」而 proxy 的記憶體用量跟著它持有的設定總量成長（官方效能頁：「The memory consumption of the proxy depends on the total configuration state the proxy holds.」）。所以 mesh 裡的服務越多，每個 sidecar 吃的記憶體越多；實際數字依你的 mesh 而異，用 `istioctl proxy-config` 看設定量、`kubectl top pod --containers` 量 `istio-proxy` 的實際用量，不要套別人的數字。
+**預設情況下，每一個 sidecar 都載入「整個 mesh 所有服務」的設定。** Istio 官方（Configuration Scoping）：「Each proxy instance will receive configuration for all namespaces as well.」而 proxy 的記憶體用量跟著它持有的設定總量成長（官方效能頁：「The memory consumption of the proxy depends on the total configuration state the proxy holds.」）。所以設定量越大（例如 mesh 裡的服務越多），每個 sidecar 的記憶體可能越多；實際數字依你的 mesh 而異，用 `istioctl proxy-config` 看設定量、`kubectl top pod --containers` 量 `istio-proxy` 的實際用量，不要套別人的數字。
 
 `Sidecar` 資源就是告訴 Envoy：「你只需要認識這幾個服務就好」。它有三個效果：
 
