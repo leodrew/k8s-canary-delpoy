@@ -170,14 +170,19 @@ DestinationRule  (ea-pmc/pmc-epmmformquerygui-dr)
   │ ⑦ subsets[stable].labels  version: stable  ──▶ 比對 Pod 的 label              【label】
   ▼
 Service  (ea-pmc/pmc-epmmformquerygui-svc)
-  │ ⑧ spec.selector  app: pmc-epmmformquerygui  ──▶ 比對 Pod 的 label，產生 Endpoints   【label】
-  │ ⑨ ports[].targetPort: 8080  == container 的 containerPort                    【數字】
+  │ ⑧ spec.selector  app: pmc-epmmformquerygui  ──▶ 比對 Pod 的 label，產生 EndpointSlice   【label】
+  │ ⑨ ports[].targetPort: 8080  == 程式實際 listen 的 port（省略時預設 = port）     【數字】
   ▼
 Pod  labels: app=pmc-epmmformquerygui, version=stable
   ▲
   │ ⑩ Deployment.spec.selector.matchLabels  ⊆  template.metadata.labels         【label】
 Deployment  (track-a/release/20-deployment-stable.yaml)
 ```
+
+⑧ 和 ⑨ 各有一個常被講錯的細節：
+
+- **⑧ 產生的是 EndpointSlice，不是 Endpoints。** 舊的 Endpoints API 從 Kubernetes v1.33 起 deprecated，官方建議所有 client 改用 EndpointSlice。EndpointSlice 靠 `kubernetes.io/service-name` 這個 label 綁回 Service，所以要看 Service 實際選到哪些 Pod：`kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc`
+- **⑨ 要對上的是程式實際 listen 的 port，不是 `containerPort`。** `containerPort` 主要是宣告用 —— 官方原文是「沒列在這裡**不會**阻止那個 port 被存取」，程式只要在 `0.0.0.0` 上 listen，不寫 `containerPort` 照樣連得到；寫了但程式沒在那個 port listen，照樣連不上。只有 `targetPort` 寫成 named port（例如 `targetPort: http`）時，才必須在 container 的 `ports` 裡定義同名的 port。`targetPort` 省略時預設等於 `port`。
 
 ④⑦⑧ 合起來，就是 Envoy 手上那份「通訊錄」的產生方式：
 
@@ -200,8 +205,11 @@ Envoy cluster  outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.
 | ④ host 拼錯（registry 裡沒有這個 Service） | 503 `NC` |
 | ⑤ subset 名字在任何 DR 裡都找不到 | 503 `NC` |
 | ⑦ subset label ／ ⑧ Service selector 對不到任何 Pod | 503 `UH` |
-| ⑥ ⑨ port 對不上 | 503 或連線被拒 |
+| ⑥ VS 的 `port.number` 不是 Service 的 `port` | 對應的 Envoy cluster 不存在 → 503 `NC`（經驗值） |
+| ⑨ `targetPort` 不是程式實際 listen 的 port | Envoy 連上游失敗 → 503 `UF`／`URX`，body 是 `upstream connect error … connection refused`（經驗值） |
 | ⑩ Deployment selector 不是 template labels 的子集 | `kubectl apply` 直接被拒 |
+
+標「經驗值」的兩列沒有官方文件逐條寫出這個對應，是實際排查時的典型症狀；response flag 的意思見 Part 8.2。
 
 **踩雷：VS 的 host 寫短名。** `destination.host: pmc-epmmformquerygui-svc` 會被 Istio 用 **VS 自己所在的 namespace** 補全，而不是 Service 所在的 namespace。VS 放在別的 namespace 時，就補成一個不存在的名字 → 503 `NC`。所以這個 repo 的 VS / DR 一律寫 FQDN。
 
@@ -229,11 +237,11 @@ selector:
 
 | 物件.欄位 | 選的是什麼 | 支援 `matchExpressions`？ | 特殊行為 |
 |---|---|:---:|---|
-| `Service.spec.selector` | Pod → 產生 Endpoints | ✗ 只能等值，而且直接寫 map，沒有 `matchLabels` 這一層 | 不寫 selector 就不會自動產生 Endpoints |
+| `Service.spec.selector` | Pod → 產生 EndpointSlice | ✗ 只能等值，而且直接寫 map，沒有 `matchLabels` 這一層 | 不寫 selector 就不會自動產生 EndpointSlice（Endpoints API 從 v1.33 起 deprecated） |
 | `Deployment.spec.selector` | 自己管的 Pod | ✔ | **建立後不能改**；必須是 template labels 的子集 |
-| `DestinationRule.subsets[].labels` | `spec.host` 那個 Service 的 Endpoints 裡的 Pod | ✗ 只能等值 | 只在該 Service 選到的 Pod 範圍內再篩 |
+| `DestinationRule.subsets[].labels` | `spec.host` 那個 Service 的 EndpointSlice 裡的 Pod | ✗ 只能等值 | 只在該 Service 選到的 Pod 範圍內再篩 |
 | `Gateway.spec.selector` | ingressgateway 的 Pod | ✗ | 決定哪一組 Envoy 載入這個 Gateway |
-| `AuthorizationPolicy` / `PeerAuthentication` / `RequestAuthentication` 的 `spec.selector.matchLabels` | 要套用的 workload Pod | ✗ | **省略 = 整個 namespace**；放在 `istio-system` 且省略 = 整個 mesh |
+| `AuthorizationPolicy` / `PeerAuthentication` / `RequestAuthentication` 的 `spec.selector.matchLabels` | 要套用的 workload Pod | ✗ | **省略 selector（AuthorizationPolicy 還要沒寫 `targetRefs`）= 整個 namespace**；放在 **root namespace**（`meshConfig.rootNamespace`，預設 `istio-system`）且省略 = 整個 mesh。AuthorizationPolicy 也可以不用 selector、改用 `targetRefs` 指定 Gateway（指定 Service 只適用 ambient 的 waypoint） |
 | `Sidecar.spec.workloadSelector.labels` | 要套用的 Pod | ✗ | 省略 = 這個 namespace 的預設值（Part 2.3） |
 | `NetworkPolicy.spec.podSelector` | 要保護的 Pod | ✔ | `{}` = 這個 namespace 全部 Pod |
 | `NetworkPolicy` 的 `from/to.namespaceSelector` | 來源 / 目的 namespace | ✔ | 常用 `kubernetes.io/metadata.name: istio-system` |
@@ -241,7 +249,7 @@ selector:
 | `topologySpreadConstraints` / `podAntiAffinity` 的 `labelSelector` | 要彼此分散的 Pod | ✔ | `20-deployment-stable.yaml` 就有一段 |
 | `VirtualService.http[].match[].sourceLabels` | **呼叫方** Pod 的 label | ✗ | 只對 mesh 內部呼叫有效；從 gateway 進來的流量沒有來源 Pod label 可比 |
 
-**selector 共通的危險：對不到時不會報錯。** Service 選不到 Pod 只是 Endpoints 變空；AuthorizationPolicy 選不到 Pod 等於沒寫、規則無聲地不生效。這也是 `scripts/validate.sh` 要拿兩邊的值互相對照、而不是只檢查 key 存不存在的原因。
+**selector 共通的危險：對不到時不會報錯。** Service 選不到 Pod 只是 EndpointSlice 變空；AuthorizationPolicy 選不到 Pod 等於沒寫、規則無聲地不生效。這也是 `scripts/validate.sh` 要拿兩邊的值互相對照、而不是只檢查 key 存不存在的原因。
 
 ### 一句話職責表
 
