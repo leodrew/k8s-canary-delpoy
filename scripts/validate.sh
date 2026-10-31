@@ -1375,17 +1375,25 @@ function fenceClose(l, open) {
   const m = q.rest.match(CLOSE);
   return q.depth === open.depth && !!m && m[1][0] === open.ch && m[1].length >= open.len;
 }
-// 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；blockquote 已經結束時回傳 null。
+// 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；區塊所在的容器已經結束時回傳 null：
+//   - blockquote 結束了（這一行的 `>` 比 fence 少）；
+//   - 非空白行的縮排比 fence 本身淺（fence 長在清單項目底下，這一行已經離開那個項目）。
+// 第二條是為了擋一個無聲 PASS：縮排 4 格以上的 ``` 在 CommonMark 裡是縮排程式碼、
+// 不是 fence，但 OPEN 允許任意縮排（清單底下的 fence 需要）。若沒有這條，那一行會被
+// 當成開頭，接著吞掉後面一個頂格的 ```yaml 真區塊當內容 —— 那個區塊就永遠不被解析。
+// 有了這條，頂格的 ```yaml 會讓前一個區塊在這裡斷掉並被報出來（大聲 FAIL）。
 function fenceBody(l, open) {
   const q = splitQuote(l);
   if (q.depth < open.depth) return null;
   const rest = splitQuote(l, open.depth).rest;
+  if (rest.trim() !== "" && rest.match(/^\s*/)[0].length < open.indent.length) return null;
   return rest.startsWith(open.indent) ? rest.slice(open.indent.length) : rest;
 }
 // 整份文件走一次，回傳每個區塊：start 是開頭 fence 的行；內容是 start+1 .. end-1。
-//   status "closed"       —— end 是結尾 fence 那一行。
-//   status "quote-broken" —— end 是少了 `>` 的那一行（它不屬於區塊，照一般行處理）。
-//   status "unclosed"     —— 沒有結尾，end === lines.length（照 CommonMark 一路吃到檔尾）。
+//   status "closed"   —— end 是結尾 fence 那一行。
+//   status "broken"   —— end 是讓區塊所在容器提早結束的那一行（少了 `>`，或縮排比 fence
+//                        淺；見 fenceBody）。那一行不屬於區塊，照一般行處理。
+//   status "unclosed" —— 沒有結尾，end === lines.length（照 CommonMark 一路吃到檔尾）。
 function fenceBlocks(lines) {
   const blocks = [];
   for (let i = 0; i < lines.length; i++) {
@@ -1393,9 +1401,9 @@ function fenceBlocks(lines) {
     if (!open) continue;
     let j = i + 1;
     while (j < lines.length && !fenceClose(lines[j], open) && fenceBody(lines[j], open) !== null) j++;
-    const status = j >= lines.length ? "unclosed" : fenceClose(lines[j], open) ? "closed" : "quote-broken";
+    const status = j >= lines.length ? "unclosed" : fenceClose(lines[j], open) ? "closed" : "broken";
     blocks.push({ start: i, end: j, open, status });
-    i = status === "quote-broken" ? j - 1 : j;
+    i = status === "broken" ? j - 1 : j;
   }
   return blocks;
 }
@@ -1437,13 +1445,15 @@ for (const b of blocks) {
     errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊沒有結尾的 " + open.fence + " —— 後面整份文件都會被當成程式碼");
     continue;
   }
-  if (b.status === "quote-broken") {
-    errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊在 blockquote 裡，但第 " + (b.end + 1) + " 行少了 \">\" 前綴 ——");
-    errors.push("    blockquote 在結尾的 " + open.fence + " 之前就結束了，渲染出來的區塊是斷的。");
+  if (b.status === "broken") {
+    errors.push("第 " + (i + 1) + " 行的 " + open.fence + open.lang + " 區塊在第 " + (b.end + 1) + " 行就斷了：那一行少了 \">\" 前綴，或縮排比 fence 淺 ——");
+    errors.push("    區塊所在的 blockquote／清單項目在結尾的 " + open.fence + " 之前就結束了，渲染出來的區塊是斷的；");
+    errors.push("    或者那個 fence 縮排 4 格以上，在 markdown 裡根本不是 fence（是縮排程式碼），後面的區塊被它吞掉了。");
     continue;
   }
   if (!isYamlLang(open.lang)) continue;
-  const marker = i > 0 ? splitQuote(lines[i - 1]).rest.match(MARKER) : null;
+  // 前一行若屬於另一個區塊（例如斷掉的 blockquote 區塊的最後一行），那不是標記 —— 跟下面掃標記時的判定一致。
+  const marker = i > 0 && !fenced.has(i - 1) ? splitQuote(lines[i - 1]).rest.match(MARKER) : null;
   if (marker) {
     // 原因是空的那種在下面掃標記時報，這裡只負責略過。
     skipped++;
