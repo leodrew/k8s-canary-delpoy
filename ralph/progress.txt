@@ -143,7 +143,7 @@ Started: (not yet run)
 
 - **掃 markdown（guide）的檢查共用 validate.sh 的 `GUIDE_FENCE_JS`（OPEN/CLOSE）。** 不要自己再寫一套
   fence 判定：兩套規則一分歧，同一行在 [10] 眼中在區塊裡、在 [11] 眼中在區塊外。guide 的 fence 可能帶縮排、
-  帶 info string，也可能長在 blockquote 裡（`> ```yaml`，US-001 留下的未處理項）。
+  帶 info string，也可能長在 blockquote 裡（`> ```yaml`；用 fenceOpen／fenceClose／fenceBody，它們會剝掉 `>` 前綴與縮排）。
 
 - **改了 ConfigMap 的內容就要跑 `bash scripts/sync-config-hash.sh`，並跟 ConfigMap 放
   同一個 commit。** 名稱固定之後，改設定不會改到 pod template → apply 不重啟 →

@@ -1337,9 +1337,38 @@ GUIDE="k8s-ecosystem-guide.md"
 # OPEN 允許語言後面接 info string（```yaml title=x）—— 只認 ```yaml 整行的話，
 # 那種 fence 不會被當成 fence，它的結尾 ``` 反而被當成開頭，之後整份文件的
 # 「區塊裡／外」全部顛倒，壞掉的 YAML 就靜靜地沒被檢查到。
+# fence 也可能長在 blockquote 裡（`> ```yaml`，guide 的 Argo Rollouts「前置條件」
+# 就是一個讀者會照抄的 VirtualService 片段）。只認行首 fence 的話，那種區塊對 [10]
+# 來說根本不存在 —— 把它的縮排改壞照樣 PASS。所以這裡先剝掉 `>` 前綴（記下層數），
+# 再對剩下的部分套 OPEN / CLOSE；區塊內容也要剝掉同樣層數的 `>`。
+# 內容行少了 `>`（blockquote 在 ``` 之前就結束了）時 fenceBody 回傳 null：
+# 渲染出來那個區塊已經斷了，[10] 把它當成壞區塊報出來，[11] 把它當成區塊結束。
 GUIDE_FENCE_JS='
 const OPEN = /^(\s*)```\s*([^`\s]*)[^`]*$/;
 const CLOSE = /^\s*```\s*$/;
+function splitQuote(l) {
+  let depth = 0, m;
+  while ((m = l.match(/^ {0,3}> ?/))) { depth++; l = l.slice(m[0].length); }
+  return { depth, rest: l };
+}
+// 回傳 { depth, indent, lang } 或 null。
+function fenceOpen(l) {
+  const q = splitQuote(l);
+  const m = q.rest.match(OPEN);
+  return m ? { depth: q.depth, indent: m[1], lang: m[2] } : null;
+}
+function fenceClose(l, open) {
+  const q = splitQuote(l);
+  return q.depth === open.depth && CLOSE.test(q.rest);
+}
+// 區塊內容行剝掉 blockquote 前綴與 fence 的縮排；blockquote 已經結束時回傳 null。
+function fenceBody(l, open) {
+  const q = splitQuote(l);
+  if (q.depth < open.depth) return null;
+  let rest = l;
+  for (let k = 0; k < open.depth; k++) rest = rest.replace(/^ {0,3}> ?/, "");
+  return rest.startsWith(open.indent) ? rest.slice(open.indent.length) : rest;
+}
 '
 
 echo
@@ -1360,32 +1389,36 @@ let skipped = 0;
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
-  const open = line.match(OPEN);
+  const open = fenceOpen(line);
 
   if (open) {
     let j = i + 1;
-    while (j < lines.length && !CLOSE.test(lines[j])) j++;
+    while (j < lines.length && !fenceClose(lines[j], open) && fenceBody(lines[j], open) !== null) j++;
     if (j >= lines.length) {
-      errors.push("第 " + (i + 1) + " 行的 ```" + open[2] + " 區塊沒有結尾的 ``` —— 後面整份文件都會被當成程式碼");
+      errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊沒有結尾的 ``` —— 後面整份文件都會被當成程式碼");
       break;
     }
-    if (isYamlLang(open[2])) {
+    if (!fenceClose(lines[j], open)) {
+      errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊在 blockquote 裡，但第 " + (j + 1) + " 行少了 \">\" 前綴 ——");
+      errors.push("    blockquote 在結尾的 ``` 之前就結束了，渲染出來的區塊是斷的。");
+      i = j - 1;
+      continue;
+    }
+    if (isYamlLang(open.lang)) {
       const marker = i > 0 ? lines[i - 1].match(MARKER) : null;
       if (marker) {
         // 原因是空的那種已經在掃到標記那一行時報過了，這裡只負責略過。
         skipped++;
       } else {
-        // fence 本身有縮排（例如在清單項目底下）時，內容也帶著同樣的縮排，先剝掉。
-        const indent = open[1];
-        const body = lines.slice(i + 1, j)
-          .map(l => (l.startsWith(indent) ? l.slice(indent.length) : l))
-          .join("\n");
+        // fence 本身有縮排（例如在清單項目底下）或在 blockquote 裡時，內容也帶著同樣的
+        // 縮排／`>` 前綴，先剝掉（fenceBody，見 GUIDE_FENCE_JS）。
+        const body = lines.slice(i + 1, j).map(l => fenceBody(l, open)).join("\n");
         try {
           y.loadAll(body);
           parsed++;
         } catch (e) {
           const at = e.mark ? "（錯誤在檔案第 " + (i + 2 + e.mark.line) + " 行）" : "";
-          errors.push("第 " + (i + 1) + " 行的 ```" + open[2] + " 區塊解析失敗：" + (e.reason || e.message) + at);
+          errors.push("第 " + (i + 1) + " 行的 ```" + open.lang + " 區塊解析失敗：" + (e.reason || e.message) + at);
         }
       }
     }
@@ -1404,8 +1437,8 @@ for (let i = 0; i < lines.length; i++) {
       errors.push("    否則下一個人無從判斷這個豁免還該不該存在。");
     }
     const next = lines[i + 1];
-    const nextOpen = next === undefined ? null : next.match(OPEN);
-    if (!nextOpen || !isYamlLang(nextOpen[2])) {
+    const nextOpen = next === undefined ? null : fenceOpen(next);
+    if (!nextOpen || !isYamlLang(nextOpen.lang)) {
       errors.push("第 " + (i + 1) + " 行：skip-yaml 標記的下一行不是 ```yaml / ```yml fence。");
       errors.push("    標記只作用在緊接著的那一個區塊（中間不能有空行）；區塊被搬走了就把標記一起刪掉。");
     }
@@ -1474,12 +1507,17 @@ if (!/^Part \d+$/.test(part)) {
 }
 
 // 只收 code fence 外面的標題：bash 區塊裡的 "## ..." 是註解，不是章節。
-// OPEN / CLOSE 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一組。
+// fenceOpen / fenceClose / fenceBody 來自 GUIDE_FENCE_JS，跟檢查 [10] 同一組。
 const heads = [];
-let inFence = false;
+let fence = null;
 lines.forEach((l, i) => {
-  if (inFence) { if (CLOSE.test(l)) inFence = false; return; }
-  if (OPEN.test(l)) { inFence = true; return; }
+  if (fence) {
+    if (fenceClose(l, fence)) { fence = null; return; }
+    if (fenceBody(l, fence) !== null) return;
+    fence = null; // blockquote 在 ``` 之前結束，區塊跟著結束；這一行照一般行處理
+  }
+  const o = fenceOpen(l);
+  if (o) { fence = o; return; }
   const h = l.match(/^(#{1,6})\s+(.*?)\s*$/);
   if (h) heads.push({ i, level: h[1].length, text: h[2] });
 });
@@ -1510,7 +1548,8 @@ for (const s of srcHeads) {
   for (const l of lines.slice(s.i + 1, stop)) {
     // 排除全形標點：中文段落裡裸寫的 https://kubernetes.io。會把「。」吃進 hostname，
     // 官方連結反而被判成不在白名單。
-    for (const m of l.matchAll(/https?:\/\/[^\s<>()\[\]"`，。、；：！？（）「」『』【】]+/g)) urls.push(m[0]);
+    // 結尾的 ASCII 句讀（英文句子裡的 https://kubernetes.io. ）同理剝掉：URL 本身不會以這些字元結尾。
+    for (const m of l.matchAll(/https?:\/\/[^\s<>()\[\]"`，。、；：！？（）「」『』【】]+/g)) urls.push(m[0].replace(/[.,;:!?]+$/, ""));
   }
 }
 

@@ -146,7 +146,10 @@ bash scripts/validate.sh      # 或 npm run validate
   `loadAll` 解析 `k8s-ecosystem-guide.md` 裡每一個 ```` ```yaml ````／```` ```yml ```` 區塊
   （整份 guide 算一項 check，失敗時每個壞區塊各印一行起始行號與原因）。讀者會把 guide 的
   YAML 整段複製去 apply，縮排錯了 markdown 照樣渲染得很正常，所以要在 commit 前擋。
-  刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
+  fence 判定（`GUIDE_FENCE_JS`，[10]／[11] 共用）認得帶縮排、帶 info string、以及長在
+  blockquote 裡（`> ```yaml`）的 fence，內容會先剝掉同樣的縮排與 `>` 前綴再解析；
+  blockquote 在結尾 ``` 之前就斷掉（某一行漏了 `>`）也算 FAIL。要支援新的 fence 長相
+  時改那一處，不要在個別檢查裡另寫一套判定。刻意寫錯、或從大檔案截出而縮排不能獨立成立的片段，在 fence 的**緊鄰前一行**（中間
   不能有空行）放這個標記就略過。**原因必填**，空的 FAIL；標記後面接的不是 yaml fence
   也 FAIL（區塊被搬走、標記留在原地的典型樣子）。**同一區塊並列兩種寫法（A／B、錯／對）
   造成 duplicated key 時不要用 skip，拆成兩個區塊** —— skip 的區塊等於沒有閘門；只有
