@@ -415,3 +415,11 @@ Started: (not yet run)
 - Learnings: 「DR host 層級 TLS 會雙重加密」是帳本的推論，官方頁沒有逐字句子；故事未引用為官方原文。
 - 觀察（未改）：P05-204 的 AuthorizationPolicy yaml 本體仍是 remoteIpBlocks，ipBlocks 只在註解。
 ---
+## 2026-11-01 - US-028
+- Part 5 附錄 multi-cluster（P05-205..209）：Multi-Primary 改為各 istiod 直接 watch 對方 API server；Multi-Network 從模式表拆出成獨立的「網路模型」維度；root CA 改為 intermediate CA；API server 存取權改為「每個 primary 要有所有 cluster」；east-west gateway 改為視網路模型而定。
+- 連動修改：「必要條件（缺一不可）」標題改為「依模式而定」（否則與 P05-209 矛盾）；Multi-Primary 代價欄一併對齊 P05-205。
+- 檔案：k8s-ecosystem-guide.md
+- Review：第 1 輪 Standards 無硬性違規（判斷題：remote-secret 機制重複寫兩處、標題「第 3 點尤其」不精確 → 已修）；Spec 所有引文在官方頁皆找到，無缺漏。
+- 觀察（不在本故事範圍）：必要條件第 4 點 network label 仍寫成無條件，應留意是否為後續帳本列所涵蓋。
+- Learnings：P05-206 引文實際在 deployment-models 頁，不在 multi-primary_multi-network 頁。
+---
