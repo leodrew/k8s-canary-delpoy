@@ -3733,8 +3733,7 @@ metadata:
   namespace: ea-pmc
 spec:
   replicas: 4
-  # selector 和 template 在此省略：Rollout 跟 Deployment 一樣必須有 selector 加 template
-  # （或改用 workloadRef 引用既有 Deployment，見下表），少了 controller 會判這個 Rollout 的 spec 無效
+  # 此處已省略 selector 和 template（實際的 Rollout 需要寫出它們，或改用 workloadRef 引用既有 Deployment，見表下說明）
   strategy:
     canary:
       # 用 subset-level 的做法：沿用 7.2 的 DestinationRule 和 app-routing VS（兩個 destination 同一個 host、靠 subset 區分）。
@@ -3762,7 +3761,7 @@ spec:
         - setWeight: 100
 ```
 
-背景分析要引用的 AnalysisTemplate 也要一起建立，否則上面的 `success-rate` 找不到。`failureLimit` 是中止條件：失敗次數超過它，這次發布就中止。
+背景分析要引用的 AnalysisTemplate 也要一起建立，否則上面的 `success-rate` 找不到。`failureLimit` 是中止條件之一：失敗次數到達上限，這次發布就中止。
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -3774,11 +3773,11 @@ spec:
   metrics:
     - name: success-rate
       interval: 1m
-      failureLimit: 3                       # 失敗超過 3 次就判定分析失敗，Rollout 中止並回到 stable
+      failureLimit: 3                       # 失敗次數上限；達到上限分析即失敗，Rollout 中止（確切的計數語意見 Argo 官方 analysis 文件）
       provider:
         prometheus:
           address: http://prometheus.monitoring:9090   # 依你的環境調整
-          query: "<你的 PromQL：查 canary 的成功率，依你的指標名稱撰寫>"
+          query: "<你的 PromQL：查 canary 的成功率，依你的指標名稱撰寫>"   # 必須替換成真正的查詢，否則 successCondition 永遠拿不到資料
       successCondition: result[0] >= 0.99
 ```
 
@@ -3788,7 +3787,7 @@ spec:
 | **代價** | **要把 Deployment 改寫成 Rollout CRD**（GitOps / Helm chart 都要調整）；也可以改用 `workloadRef` 引用既有 Deployment，見表下說明；多一套 controller 和 CLI 要維運 |
 | **什麼時候值得** | 一週發布 2 次以上、或有夜間發布需求（自動回滾比叫人起床可靠）；已經在用 Argo CD 的話幾乎是免費加購 |
 
-**不一定要改寫 Deployment**：Rollout 可以用 `workloadRef` 引用既有的 Deployment（官方遷移文件：「Reference an existing Deployment using `workloadRef` field.」），再把原 Deployment scale down 到 0（官方：「Instead of removing Deployment you can scale it down to zero and reference it from the Rollout resource」），`scaleDown` 可選 `never`／`onsuccess`／`progressively` 漸進接管。
+**不一定要改寫 Deployment**：Rollout 可以用 `workloadRef` 引用既有的 Deployment（官方遷移文件：「Reference an existing Deployment using `workloadRef` field.」），再把原 Deployment scale down 到 0（官方：「Instead of removing Deployment you can scale it down to zero and reference it from the Rollout resource」），`scaleDown` 可選 `never`／`onsuccess`／`progressively`，決定原 Deployment 何時縮減。
 
 **兩個 Service 要自己建**：這個範例沒有 `canaryService` / `stableService`；若你改用 host-level 做法，官方寫「Finally, a canary and stable Service should be deployed.」—— 這兩個 Service 由你建立，Argo 只在發布期間改它們的 selector。
 
@@ -3832,7 +3831,7 @@ spec:
 | **代價** | 它會**接管**你的 VirtualService / DestinationRule（自己產生自己改），你不能再手動維護那些檔案，跟 GitOps 的「宣告即真相」有摩擦 |
 | **什麼時候值得** | 想要自動灰度但**不想改現有 Deployment 結構**；已經有 Prometheus 可以提供指標 |
 
-**Argo Rollouts vs Flagger 一句話**：Argo 要你**改 workload 定義**（或用 `workloadRef` 引用既有 Deployment）、換來對灰度步驟的完全掌控；Flagger 不改 workload、但要你**交出流量設定的所有權**。已經在用 Argo CD 就選 Argo Rollouts，否則 Flagger 導入成本較低。
+**Argo Rollouts vs Flagger 一句話**：Argo 要你**改 workload 定義**、換來對灰度步驟的完全掌控；Flagger 不改 workload、但要你**交出流量設定的所有權**。已經在用 Argo CD 就選 Argo Rollouts，否則 Flagger 導入成本較低。
 
 #### KEDA
 
