@@ -359,3 +359,9 @@ Started: (not yet run)
 - Review round 1：Standards 無違規（3 條 judgement 觀察：未註明 Gateway API、「擇一即可」稍冗、引文只支撐「都沒設=全 workload」，皆不改）；Spec 確認原句在官方頁、新措辭一致、無 scope creep。1 輪收斂。
 - Learnings: 無新慣例。Part 3 的 `### 參考來源` 與 VERIFIED_PARTS 由 US-020 處理。
 ---
+## 2026-11-01 - US-020
+- 修正 Part 3 的 P03-013（matched policy none）、P03-014（--port 15006）、P03-015（XFCC 改用 app 回顯／access log，config_dump 只看設定）、P03-016（grep 加群組名，以 auth can-i --list 為準）；加 Part 3 `### 參考來源`，VERIFIED_PARTS 加 "Part 3"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1（BASE=09cf0be）：直接 WebFetch 核對引文——15006 句（istio proxy-cmd）、XFCC 句（authn-policy）、rbac_filter.cc 的 `matched policy {}`／none、K8s RBAC 的 ServiceAccount 群組句，全部逐字存在且 guide 措辭一致。Standards／Spec 皆無發現。（因本輪 feat commit 已在前一輪完成，本輪只做 review 與收尾；未起 sub-agent，由本代理直接驗證。）
+- Learnings: K8s RBAC 頁超過 100000 字，SA 群組句在 offset 100000 之後（已在 patterns 記過）。
+---
