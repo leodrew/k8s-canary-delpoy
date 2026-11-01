@@ -586,3 +586,10 @@ Started: (not yet run)
 - Review round 1: Standards 0 hard、Spec 0（WebFetch 三個來源引文皆找到）。無 fix commit。
 - Learnings: 無新增通用慣例。
 ---
+
+## 2026-11-01 - US-052
+- 修正 Part 9 發現 1／發現 2（P09-002..006）：track-a 已修註記、不需 rollout restart、least request、DR 同 host 衝突提醒、cookie 改 istio-affinity。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 / Spec 0（三個來源 URL 引文皆驗證存在）。
+- 觀察（未改，屬其他列）：guide 內 cookie 名稱 istio-affinity 與 istio-session-affinity 並存；~4230 摘要表「低（需重啟）」。
+---
