@@ -507,3 +507,10 @@ Started: (not yet run)
 - Review round 1: Standards 2 項（hosts 儲存格與踩雷重複 → 已刪重複；kubectl 提醒重複 → 觀察不改，因各處語境不同）；Spec 1 項（舊註解「四種 mode」→ 已改）。只做 1 輪；fix 僅改兩處小字，validate.sh exit 0，未再跑第 2 輪。
 - 觀察：「istioctl 預設裝在 istio-system」來自帳本建議文字，官方 gateway 頁的 istioctl 範例未明說，未另行查證。
 ---
+## 2026-11-01 - US-041
+- P06-411: deleted the "較新的 Istio 支援 namespace/name 跨 namespace 引用" sentence (IST0161 requires same namespace as the Gateway workload).
+- P06-412: replaced "更新 secret 後通常幾秒內生效，不需要重啟" with the ledger's conservative wording (理論上不用重啟 gateway; verify with `istioctl proxy-config secret`); removed the unsourced timing guarantee.
+- Files changed: k8s-ecosystem-guide.md (2 lines). No linked edits elsewhere.
+- Review round 1: Standards 0 findings (observation: "SDS" not glossed in the bullet, optional); Spec 0 findings (IST0161 quote confirmed on page; secure-ingress page has no no-restart/seconds claim, matching the ledger).
+- Learnings: none new.
+---
