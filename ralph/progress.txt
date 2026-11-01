@@ -494,3 +494,9 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards：無硬性違規（2 項純文風判斷：雙冒號、結尾「超過 52 就違反限制」與開頭重複，未改）。Spec：WebFetch 確認官方引文逐字存在（cron-jobs 頁前 100000 字內），新措辭與引文一致；順帶移除舊句「名稱 + 時間戳有 63 字元上限」（同一句中不精確的部分，非範圍外修改）。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-039
+- 修正 Part 6.5 Gateway（1/3）：P06-401（selector 錯誤行為＋IST0101）、P06-402（GRPC-WEB）、P06-403（port.name 必填／servers[].name 唯一）、P06-404（TLS／generic Secret）、P06-405（ca.crt 或 <secret>-cacert）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 findings（所有引文都在官方頁找到）；Standards 3 findings（mTLS 註解續行未對齊、IST0101 英文未加「」、表格格與 YAML 註解重複）→ 全改，fix commit。Round 2 未再跑（皆為機械性修正，validate.sh 通過）。
+- Learnings: P06-403 的「必填」是帳本建議措辭，官方頁只說 Port.name 是 "Label assigned to the port."。
+---
