@@ -1378,7 +1378,9 @@ options ndots:5
 ```bash
 # 預設的 istio-proxy 映像只裝了 knot-dnsutils、沒有 nslookup（distroless 變體連 shell 都沒有），
 # 所以用臨時除錯容器來查
-kubectl debug -n ea-pmc deploy/pmc-epmmformquerygui -it --image=busybox:1.36 --target=app -- \
+# （kubectl debug 要指定 Pod，不能直接寫 deploy/…，所以先取一個 Pod 名字）
+POD=$(kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui -o jsonpath='{.items[0].metadata.name}')
+kubectl debug -n ea-pmc "$POD" -it --image=busybox:1.36 --target=app -- \
   nslookup epmm-api-svc.ea-epmm.svc.cluster.local
 # 確定是預設 proxyv2 映像時，也可以直接在 sidecar 裡用 kdig：
 #   kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy -- kdig epmm-api-svc.ea-epmm.svc.cluster.local
