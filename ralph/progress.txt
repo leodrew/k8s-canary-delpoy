@@ -488,3 +488,9 @@ Started: (not yet run)
 - Round 2：因修正只動措辭，由我自行對照上述發現複查，未再跑 sub-agent；validate.sh exit 0。
 - Learnings: 官方英文放「」、錯誤訊息字串不加引號；`set +e` 的註解要寫「不要加 set -e」。
 ---
+## 2026-11-01 - US-038
+- 修正 Part 6 的 6.4 CronJob（3/3）：P06-219「Job 名稱長度」由「建議不超過 52」改為「必須不超過 52」，並寫明 controller 會再加 11 字元、Job 名稱上限 63（k8s-ecosystem-guide.md 單行）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards：無硬性違規（2 項純文風判斷：雙冒號、結尾「超過 52 就違反限制」與開頭重複，未改）。Spec：WebFetch 確認官方引文逐字存在（cron-jobs 頁前 100000 字內），新措辭與引文一致；順帶移除舊句「名稱 + 時間戳有 63 字元上限」（同一句中不精確的部分，非範圍外修改）。
+- Learnings: 無新增通用慣例。
+---
