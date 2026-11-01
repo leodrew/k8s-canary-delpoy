@@ -2861,10 +2861,10 @@ kubectl create job --from=cronjob/pmc-form-daily-sync manual-test-1 -n ea-pmc
 
 CronJob controller 掛掉或 cluster 維護一段時間後恢復，它會回頭檢查「錯過了哪些排程」：
 
-- **不設 `startingDeadlineSeconds`**：controller 從 `lastScheduleTime` 一路往現在數。如果錯過超過 **100 次**排程，它會放棄並在事件裡寫 `Cannot determine if job needs to be started: too many missed start times`，**然後這個 CronJob 就永遠不再排程了**，直到你手動處理。
-- 而如果錯過的次數不到 100、又是 `concurrencyPolicy: Allow`，它會**一次補跑所有錯過的排程**，瞬間爆出一堆 Pod。
+- **不設 `startingDeadlineSeconds`**：controller 從 `lastScheduleTime` 一路往現在數。如果錯過超過 **100 次**排程，現行 controller 會發一個 `TooManyMissedTimes` Warning 事件（訊息 "too many missed start times. Set or decrease .spec.startingDeadlineSeconds or check clock skew"）。官方概念頁說這次「不啟動 Job」，但原始碼仍會回傳最近一次排程時間，兩者並不一致，所以**不要依賴這個行為**；設了 `startingDeadlineSeconds` 就不會碰到它。（舊版 controller 會卡死、不再排程，現行版本不是這樣。）
+- controller 只會為「最近一次」錯過的排程建一個 Job，不會把錯過的排程一次補跑完。官方說法是 "the Jobs will always run at least once"，所以 Job 要能容忍重複執行。
 
-**設了 `startingDeadlineSeconds: 300` 之後**：controller 只回頭看 300 秒內的排程，超過的直接放棄。**兩個問題都解決了。**
+**設了 `startingDeadlineSeconds: 300` 之後**：controller 只回頭看 300 秒內的排程，超過窗口的那次會被跳過（`MissSchedule` 事件）。這樣就不會觸發 >100 次的警告。
 
 > 建議值：設成「比排程間隔小」的值。每小時跑一次就設 `1800`（30 分鐘）；每天跑一次可以設 `3600`。
 
@@ -2894,17 +2894,21 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set -e
+                  set +e               # 不要用 set -e：java 一失敗 shell 就直接退出，
+                                        # 下面的 RC=$? 和 curl 都不會執行，sidecar 沒被叫停，Job 正好在失敗時卡住
                   java -jar /app/sync.jar
                   RC=$?
-                  curl -sf -X POST http://localhost:15020/quitquitquit || true
+                  # app image 裡要有 curl；這個端點只接受 localhost 的 POST，所以打 127.0.0.1
+                  curl -sf -X POST http://127.0.0.1:15020/quitquitquit || true
                   exit $RC
 ```
 
 ```yaml
-# 解法 C（最乾淨，需要 K8s 1.29+ 且 Istio 開啟 native sidecar）
+# 解法 C（最乾淨，需要 K8s 支援 native sidecar 且 Istio 啟用）
 # sidecar 變成 native init container，K8s 會在主容器結束後自動關掉它
-# 需要在 istiod 設 ENABLE_NATIVE_SIDECARS=true
+# K8s：SidecarContainers 1.28 alpha、1.29 起預設開啟、1.33 GA
+# Istio 1.27 起預設就是 native sidecar，不需要再設；舊版 Istio 才要在 istiod 設
+# ENABLE_NATIVE_SIDECARS=true，或像下面這樣在 Pod 加 annotation
 spec:
   jobTemplate:
     spec:
@@ -2914,11 +2918,11 @@ spec:
             sidecar.istio.io/nativeSidecar: "true"
 ```
 
-> **選擇建議**：Job 如果只是打外部 API 或寫資料庫（不需要 mesh 內的 mTLS 身分），用**解法 A** 最省事。需要以特定身分呼叫 mesh 內服務時，用**解法 B**。環境版本夠新就直接上**解法 C**。
+> **選擇建議**：Job 如果只是打外部 API 或寫資料庫（不需要 mesh 內的 mTLS 身分），用**解法 A** 最省事。需要以特定身分呼叫 mesh 內服務時，用**解法 B**。環境版本夠新就直接上**解法 C**（Istio 1.27+ 搭配 K8s 1.29+ 時預設就是這樣，Job 卡住本來就不該發生；排查時先確認 `istio-proxy` 是不是在 `initContainers` 裡）。
 
 #### 其他踩雷
 
-- **`schedule` 用 UTC**：不設 `timeZone` 的話，「每天 2 點」實際上是台北時間早上 10 點。
+- **`schedule` 的時區**：不設 `timeZone` 時用 kube-controller-manager 的本地時區（多數 cluster 是 UTC），所以「每天 2 點」若 controller 是 UTC，實際上是台北時間早上 10 點。
 - **`restartPolicy: Always`** 會被 API server 拒絕（Job 不接受）。
 - **Job 名稱長度**：CronJob 名稱 + 時間戳有 63 字元上限，CronJob 名稱建議不超過 52 字元。
 - **失敗的 Job 不會自動清**：`failedJobsHistoryLimit` 之外的會被清掉，但範圍內的會一直留著。搭配 `ttlSecondsAfterFinished` 更保險。
