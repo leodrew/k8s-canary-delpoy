@@ -2452,7 +2452,7 @@ spec:
     app: pmc-epmmformquerygui    # 選中哪些 Pod（比對 Pod 的 label，不是 Deployment 的）
 
   ports:
-    - name: http                 # 【Istio 關鍵】名稱決定協定判定，一定要命名
+    - name: http                 # 【Istio 關鍵】appProtocol 或 port 名稱前綴擇一明確宣告協定（兩者都寫最好）；appProtocol 優先於名稱
       port: 8080                 # Service 對外的 port
       targetPort: 8080           # Pod 容器的 port（可以填 containerPort 的名字，如 "http"）
       protocol: TCP
@@ -2502,11 +2502,11 @@ spec:
 | Key | 說明 | 踩雷 |
 |---|---|---|
 | `type` | ClusterIP / NodePort / LoadBalancer / ExternalName | Headless 是 `clusterIP: None`，不是 type |
-| `ports[].name` | **Istio 靠這個判協定** | **不命名 = 只能用 L4 功能** |
+| `ports[].name` | **Istio 靠這個判協定** | **沒命名也沒 `appProtocol` 時只靠自動偵測，偵測失敗才當 TCP（L4）** |
 | `ports[].appProtocol` | 明確宣告 `http` / `grpc` / `tcp` | 比 name 更可靠，優先用 |
 | `ports[].targetPort` | Pod 的 port，可用名稱 | 填錯 = endpoint 有但連不上 |
 | `sessionAffinity` | `ClientIP` / `None` | **Istio 下失效** |
-| `externalTrafficPolicy` | `Local` 保留 client IP | `Local` 時，沒有該 Pod 的 node 會拒絕連線 |
+| `externalTrafficPolicy` | `Local` 保留 client IP | `Local` 時，沒有該 Pod 的 node 會直接丟棄（drop）封包，client 看到的是 timeout 而不是 connection refused；外部 LB 會用 `healthCheckNodePort` 把這種 node 排除 |
 | `internalTrafficPolicy` | `Local` 只走本機 Pod | 本機沒 Pod 就連不到 |
 | `loadBalancerSourceRanges` | LB 層白名單 | 需要 LB 供應商支援 |
 
@@ -2522,7 +2522,7 @@ Istio 用 **port 名稱的前綴**判斷要用 L7 還是 L4 處理：
 | `tcp` / `tcp-db` / `mysql` | TCP | 不行 |
 | **未命名** | 自動偵測 | 不穩定，不建議 |
 
-新版 Istio 有自動協定偵測，未命名的 port 通常也能認出 HTTP，但**偵測需要看第一個封包，對 server-first 協定（MySQL、Redis）會誤判並造成連線 hang**。而且偵測結果不可預期，除錯時很痛苦。
+新版 Istio 有自動協定偵測，未命名的 port 通常也能認出 HTTP，但**偵測需要看 client 送出的第一批資料，所以 server-first 協定（server 先開口，例如 SMTP、MySQL、MongoDB）與自動偵測及 PERMISSIVE mTLS 不相容，必須明確宣告為 TCP**；Istio 官方文件說 SMTP 25、DNS 53、MySQL 3306、MongoDB 27017 這些標準 port 會自動當成 TCP，非標準 port 就要自己宣告。（Redis 是 client 先送命令，不屬於 server-first。）而且偵測結果不可預期，除錯時很痛苦。
 
 > **對你的環境**：`spring_full_v4.md` 的 Service ports **沒有 `name` 也沒有 `appProtocol`**。建議補上 `name: http` + `appProtocol: http`，這樣 VirtualService 的 path 比對、header 路由、L7 metrics 才有明確保證。
 
@@ -2547,7 +2547,12 @@ spec:
       consistentHash:
         # 方案 A（最推薦）：用 session cookie 做黏著
         httpCookie:
-          name: JSESSIONID       # Spring Boot 的 session cookie
+          # 不要跟 Spring 的 JSESSIONID 共用名稱：設了 ttl 之後，請求沒帶這個 cookie 時
+          # Envoy 會自己產生一個同名 cookie，與 Spring 的 session cookie 撞名，
+          # Spring 收到不認得的 session id 又會重發 JSESSIONID，雜湊值跟著變，黏著反而被破壞。
+          # 所以用專用名稱 + ttl，交給 Envoy 管理。
+          # （若一定要用 JSESSIONID 就拿掉 ttl，但第一個請求落在哪個 Pod，不保證就是之後雜湊對到的那個 Pod）
+          name: istio-session-affinity
           ttl: 10800s
 
         # 方案 B：用自訂 header
