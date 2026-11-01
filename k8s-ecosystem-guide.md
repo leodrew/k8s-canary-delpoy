@@ -4103,7 +4103,7 @@ spec:
 
 ### 發現 3：VirtualService 沒有 `mesh`，內部流量繞過所有路由規則
 
-**現狀**：
+**現狀**（`spring_full_v4.md` 的 VirtualService；repo 的 `canary-manual/track-a/base/03-virtualservice.yaml` 已修：hosts 加了內部 FQDN、gateways 加了 `mesh`，下面「怎麼改」就是那個寫法）：
 
 ```yaml
 spec:
@@ -4139,7 +4139,7 @@ spec:
 
 ### 發現 4：Service port 沒有命名，Istio 協定判定靠自動偵測
 
-**現狀**：
+**現狀**（`spring_full_v4.md` 的 Service；repo 的 `canary-manual/track-a/base/01-service.yaml` 已修：port 設了 `name: http` 與 `appProtocol: http`）：
 
 ```yaml
   ports:
@@ -4147,11 +4147,11 @@ spec:
       targetPort: 8080
 ```
 
-**為什麼是問題**：沒有 `name` 也沒有 `appProtocol`，Istio 只能靠自動協定偵測。雖然新版 Istio 通常能正確認出 HTTP，但：
+**為什麼是問題**：沒有 `name` 也沒有 `appProtocol`，Istio 只能靠自動協定偵測。Istio 官方說「Istio can automatically detect HTTP and HTTP/2 traffic.」，所以對 HTTP 服務（Spring Boot 這個）自動偵測本來就有效；明確宣告的價值是消除不確定性，而不是「不宣告 L7 功能就會失效」：
 
 - 偵測需要檢查第一個封包，多一點延遲
-- 偵測結果不可預期，除錯時無法確定 Envoy 到底用 L7 還是 L4 處理
-- L7 功能（path 路由、header 比對、L7 metrics）沒有明確保證
+- 偵測結果不是你宣告出來的，除錯時要多一步確認 Envoy 到底用 L7 還是 L4 處理
+- 真正**必須**明確宣告的是 server-first 協定：官方說「Server First protocols, such as MySQL, are incompatible with automatic protocol selection.」；HTTP 服務不屬於這類
 
 **怎麼改**：
 
@@ -4229,7 +4229,7 @@ spec:
 
 | 優先 | 項目 | 風險 | 效益 |
 |---|---|---|---|
-| 1 | 發現 4：Service port 命名 | 極低 | 立即，且是其他 L7 功能的前提 |
+| 1 | 發現 4：Service port 命名 | 極低 | 立即；消除協定判定的不確定性（HTTP 自動偵測本來就有效，不是其他 L7 功能的前提） |
 | 2 | 發現 6：加 `preStop` | 極低 | 消除部署期間的零星 502 |
 | 3 | 發現 5：加 PDB + `maxUnavailable: 0` | 低 | 避免維護時全面停機 |
 | 4 | 發現 1：獨立 ServiceAccount | 低（需重啟） | **所有授權工作的前提** |
