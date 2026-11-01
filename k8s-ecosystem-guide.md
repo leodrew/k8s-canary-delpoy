@@ -2951,17 +2951,19 @@ metadata:
 spec:
   selector:
     istio: ingressgateway         # 【關鍵】對應到哪個 ingressgateway Pod 的 label
-                                  # 選錯 = 設定下發到不存在的 Pod，完全沒作用也沒錯誤
+                                  # 選錯 = istiod 照樣接受、apply 不會被拒絕，但設定沒有套到任何 Pod；
+                                  # `istioctl analyze` 會回報 IST0101 Referenced selector not found
 
   servers:
     # ---------- HTTPS ----------
     - port:
         number: 443
-        name: https               # 名稱在同一個 Gateway 內要唯一
-        protocol: HTTPS           # HTTP / HTTPS / GRPC / HTTP2 / TCP / TLS / MONGO
+        name: https               # port.name 必填（官方只說是 port 的 label）；要求唯一的是選填的 servers[].name
+        protocol: HTTPS           # HTTP / HTTPS / GRPC / GRPC-WEB / HTTP2 / TCP / TLS / MONGO
       tls:
         mode: SIMPLE              # 見下方四種 mode
-        credentialName: myapp-tls-cert   # 對應到 K8s Secret（type: kubernetes.io/tls）
+        credentialName: myapp-tls-cert   # 對應到 K8s Secret：TLS Secret（tls.crt／tls.key）
+                                         # 或 generic Secret（cert／key）都可以
                                          # 【踩雷】secret 必須在 ingressgateway 的 namespace
         minProtocolVersion: TLSV1_2
       hosts:
@@ -2986,7 +2988,8 @@ spec:
         protocol: HTTPS
       tls:
         mode: MUTUAL              # 驗 client 憑證
-        credentialName: myapp-tls-cert      # 這個 secret 要額外包含 ca.crt
+        credentialName: myapp-tls-cert      # CA 憑證可放在同一個 secret 的 ca.crt key，
+                                        # 也可另建名為 <secret>-cacert、key 為 cacert 的 secret
       hosts:
         - "api.example.com"
 ```
@@ -3005,7 +3008,7 @@ spec:
 
 | Key | 說明 | 踩雷 |
 |---|---|---|
-| `selector` | 對到 ingressgateway 的 **Pod label** | 選錯完全沒反應，也不會報錯 |
+| `selector` | 對到 ingressgateway 的 **Pod label** | 選錯時 istiod 照樣接受、不會拒絕 apply，設定也不會生效；`istioctl analyze` 會回報 IST0101 Referenced selector not found |
 | `servers[].port.protocol` | 協定 | `HTTPS` 才會做 TLS 終止 |
 | `servers[].hosts` | 接受的 Host header | **`*` 太寬鬆**，多個 Gateway 會互搶 |
 | `servers[].tls.credentialName` | TLS secret 名稱 | **secret 必須在 gateway pod 的 namespace** |
@@ -3026,7 +3029,7 @@ istioctl proxy-config listener deploy/istio-ingressgateway -n istio-system
 istioctl analyze -n istio-system
 ```
 
-- **憑證更新後沒生效**：Istio 是透過 SDS 動態載入憑證的，更新 secret 後通常幾秒內生效，不需要重啟。如果沒生效，檢查 secret 的 `type` 是不是 `kubernetes.io/tls`，以及有沒有 `tls.crt` / `tls.key` 兩個 key。
+- **憑證更新後沒生效**：Istio 是透過 SDS 動態載入憑證的，更新 secret 後通常幾秒內生效，不需要重啟。如果沒生效，檢查 secret 的 key 是否正確：TLS Secret 要有 `tls.crt` / `tls.key`，generic Secret 要有 `cert` / `key`（兩種格式 Istio 都接受）。
 - **Gateway 和 VirtualService 的 host 必須有交集**，否則 404。
 
 ---
