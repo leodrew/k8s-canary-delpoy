@@ -3174,7 +3174,7 @@ spec:
 
 #### 故障注入：要放在獨立的 VirtualService
 
-官方 common-problems 頁面寫明：「Currently, Istio does not support configuring fault injections and retry or timeout policies on the same `VirtualService`.」所以上面規則 2 的 timeout／retries 不能跟 fault 放在同一個 VirtualService。下面是拆出來的獨立版本，只在測試環境單獨套用：
+官方 common-problems 頁面寫明：「Currently, Istio does not support configuring fault injections and retry or timeout policies on the same `VirtualService`.」所以上面規則 2 的 timeout／retries 不能跟 fault 放在同一個 VirtualService。下面是拆出來的獨立版本，只在測試環境單獨套用；它跟上面的 VirtualService 是二選一的示範，不要在同一個叢集同時 apply 兩份管同一個 host 的 VirtualService（多份 VirtualService 對同一個 host 的合併順序沒有保證）：
 
 ```yaml
 apiVersion: networking.istio.io/v1
@@ -3200,6 +3200,7 @@ spec:
           httpStatus: 503
       route:
         - destination: { host: epmm-api-svc.ea-epmm.svc.cluster.local }
+    # 沒有 match = 全部命中，一定放最後；少了它，沒帶 x-chaos-test 的請求在這個 VirtualService 裡沒有路由可走
     - name: default
       route:
         - destination: { host: epmm-api-svc.ea-epmm.svc.cluster.local }
