@@ -542,3 +542,10 @@ Started: (not yet run)
 - Review round 1: Spec 0 findings（兩句引文在官方頁逐字存在）；Standards 0 硬違規，3 則散文風格觀察（未改）。
 - Learnings: 無新增慣例。
 ---
+## 2026-11-01 - US-046
+- 修正 Part 7 的 7.5 HorizontalPodAutoscaler（P07-009～P07-012）：HPA 改為 -v1（name 與 scaleTargetRef 對到 7.2 的 Deployment，註明 v2 另複製一份）；7.2 兩份 Deployment 補 resources.requests（帳本 P07-009 建議改法）；minReplicas 理由改為節點故障／drain／PDB（刪掉「滾動更新會有空窗」）；memory 指標整段註解掉並說明多指標取最大值；istio_requests_per_second 註明名稱由 adapter 規則自訂、不限 prometheus-adapter。
+- Files changed: k8s-ecosystem-guide.md
+- 連動修改：7.2 補 requests（P07-009 明文要求），無其他。
+- Review rounds: 1 輪。Standards：0 硬性違規，3 項純風格觀察（長註解、requests 重複、v2 HPA 只用註解說明）未改。Spec：4 個來源都 WebFetch 確認引文存在（P07-010、P07-011 在 offset 100000 之後）、新措辭一致，0 發現。
+- Learnings: 無新增通用慣例。
+---
