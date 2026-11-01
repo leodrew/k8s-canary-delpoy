@@ -2961,7 +2961,7 @@ spec:
         name: https               # port.name 必填（官方只說是 port 的 label）；要求唯一的是選填的 servers[].name
         protocol: HTTPS           # HTTP / HTTPS / GRPC / GRPC-WEB / HTTP2 / TCP / TLS / MONGO
       tls:
-        mode: SIMPLE              # 見下方四種 mode
+        mode: SIMPLE              # 見下方 TLS mode 表
         credentialName: myapp-tls-cert   # 對應到 K8s Secret：TLS Secret（tls.crt／tls.key）
                                          # 或 generic Secret（cert／key）都可以
                                          # 【踩雷】secret 必須在 ingressgateway 的 namespace
@@ -3011,7 +3011,7 @@ spec:
 |---|---|---|
 | `selector` | 對到 ingressgateway 的 **Pod label**（label 依安裝方式而定，請先 `kubectl get deploy -A` 找出實際的 gateway 再查它的 label） | 選錯時 apply 不會被拒絕，設定也不會生效（`istioctl analyze` 能抓到，見上方 YAML 註解） |
 | `servers[].port.protocol` | 協定 | `HTTPS` 會終止 TLS 再做 L7 路由；`TLS` 搭 `SIMPLE`／`MUTUAL` 也會終止 TLS（給非 HTTP 流量用），搭 `PASSTHROUGH` 則不解密、只看 SNI |
-| `servers[].hosts` | 接受的 Host header | 避免多個 Gateway 用重疊的 host 或共用同一張（萬用字元）憑證（見下方「踩雷」） |
+| `servers[].hosts` | 接受的 Host header | 多個 Gateway 的 host 重疊、或共用同一張憑證時會出問題（見下方「踩雷」） |
 | `servers[].tls.credentialName` | TLS secret 名稱 | **secret 必須在 gateway pod 的 namespace** |
 | `servers[].tls.httpsRedirect` | 80 → 443 | 只在 `protocol: HTTP` 的 server 上設 |
 | `servers[].tls.minProtocolVersion` | 最低 TLS 版本 | 合規要求常見 |
