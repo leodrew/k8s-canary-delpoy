@@ -2925,7 +2925,7 @@ spec:
 
 - **`schedule` 的時區**：不設 `timeZone` 時用 kube-controller-manager 的本地時區（多數 cluster 是 UTC），所以「每天 2 點」若 controller 是 UTC，實際上是台北時間早上 10 點。
 - **`restartPolicy: Always`** 會被 API server 拒絕（Job 不接受）。
-- **Job 名稱長度**：CronJob 名稱 + 時間戳有 63 字元上限，CronJob 名稱建議不超過 52 字元。
+- **Job 名稱長度**：CronJob 名稱必須不超過 52 字元：controller 會自動在你給的名稱後面再加 11 個字元，而 Job 名稱上限是 63 字元，超過 52 就違反限制。
 - **失敗的 Job 不會自動清**：`failedJobsHistoryLimit` 之外的會被清掉，但範圍內的會一直留著。搭配 `ttlSecondsAfterFinished` 更保險。
 
 ---
