@@ -1808,12 +1808,11 @@ spec:
 
 如果 A cluster 的出口 IP 是固定的（通常是 NAT gateway 或 node 的固定 IP），可以在 **B 的 ingressgateway** 上做白名單。
 
-> ⚠️ **不要在共用的 `istio: ingressgateway` 上寫 `action: ALLOW`。** 官方語意是：workload 上只要出現任何一條 ALLOW，沒有命中任何 ALLOW 的請求就會被拒絕（"If there are no ALLOW policies for the workload, allow the request." 只在「完全沒有 ALLOW」時才成立）。ingressgateway 通常是整個 cluster 共用的，一條 ALLOW 掛上去，**其他所有 host 的流量**沒命中就 403，整個 cluster 對外服務一起中斷。所以改用 `DENY` + `notRemoteIpBlocks`，並用 `to.operation.hosts` 把影響範圍限縮在 epmm-api 這一個 host。
+> ⚠️ **不要在共用的 `istio: ingressgateway` 上寫 `action: ALLOW`。** 官方語意是：workload 上只要出現任何一條 ALLOW，沒有命中任何 ALLOW 的請求就會被拒絕（"If there are no ALLOW policies for the workload, allow the request." 只在「完全沒有 ALLOW」時才成立）。ingressgateway 通常是整個 cluster 共用的，一條 ALLOW 掛上去，**其他所有 host 的流量**沒命中就 403，整個 cluster 對外服務一起中斷。所以改用 `DENY` + `notRemoteIpBlocks`，並用 `to.operation.hosts` 把影響範圍限縮在 epmm-api 這一個 host（理由見下方 yaml 註解）。
 
 ```yaml
 # B cluster：epmm-api 這個 host 只允許 A cluster 的出口網段進來
-# 用 DENY + notRemoteIpBlocks 而不是 ALLOW：ALLOW 一出現，同一個 gateway 上其他 host
-# 沒命中任何 ALLOW 的流量全部變 403（共用 ingressgateway 的其他服務會一起中斷）。
+# 用 DENY + notRemoteIpBlocks 而不是 ALLOW（原因見上方警告）；
 # DENY 只作用在 to.operation.hosts 列出的 host，其他 host 不受影響。
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
@@ -1838,7 +1837,7 @@ spec:
 **前置條件（一定要做，否則比對到錯的 IP）：** gateway 必須真的拿得到 client IP。官方說法是 gateway 前面的 proxy 必須解析 HTTP 流量並在每一跳 append `X-Forwarded-For`（"proxies in front of the Istio gateway proxy must parse HTTP traffic and append to the X-Forwarded-For header at each hop."），拿不到時 Envoy 退回使用直接連線的來源位址（"Envoy falls back to using the immediate downstream address as the trusted client address."）——也就是 LB／node IP，這時上面的 DENY **永遠不會觸發，所有來源都被靜默放行**（見 Part 1 關鍵觀念二）。
 
 - **前面是 L7 LB**（F5 做 HTTP 終止並附加 XFF）：設 `numTrustedProxies`，見下方。
-- **前面是 L4 LB**（TCP 透傳、不會加 XFF）：`numTrustedProxies` 沒有用；改用 PROXY protocol，或把 Service 設 `externalTrafficPolicy: Local` 保留來源 IP，再用 `ipBlocks` 比對。
+- **前面是 L4 LB**（TCP 透傳、不會加 XFF）：`numTrustedProxies` 沒有用；改用 PROXY protocol（gateway 要設定成接受 PROXY protocol；官方說它不適用 L7 流量，且設了 `numTrustedProxies` 時會被忽略，兩者不要混用），或把 Service 設 `externalTrafficPolicy: Local` 保留來源 IP，再用 `ipBlocks` 比對。
 - 本節假設 TLS 在 gateway 終止（圖上 ⓸）；若是這樣，F5 就是 L4 透傳、加不了 XFF，要走上面第二條路。
 
 ```yaml
