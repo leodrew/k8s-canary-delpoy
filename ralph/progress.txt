@@ -423,3 +423,11 @@ Started: (not yet run)
 - 觀察（不在本故事範圍）：必要條件第 4 點 network label 仍寫成無條件，應留意是否為後續帳本列所涵蓋。
 - Learnings：P05-206 引文實際在 deployment-models 頁，不在 multi-primary_multi-network 頁。
 ---
+## 2026-11-01 - US-029
+- 修正 Part 5 附錄 multi-cluster（P05-210..213）：network label 限 multi-network 且標在 istio-system、補 clusterName/meshID/CIDR 共通前提；locality failover 補 outlierDetection、改「幾乎無感需 retry」、依 locality 非 cluster；「不能換」列改為 API server＋east-west gateway 不可達才不能換（細節放表下）；istiod 同步升級改為遵守版本差支援規則（P05-213 保守寫法）。
+- Part 5 結尾加 ### 參考來源（已修各列 URL 去重），"Part 5" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 1（表格格子過長→移到表下，已修）；Spec 0 實質發現（稱參考來源漏 6 個 URL，但那些屬判定正確的列，依 patterns 不列，不改）。Round 2: 乾淨。
+- 觀察（未改，不在 ledgerIds）：Part 16 約 8436 行有同樣的 outlierDetection 說法，可能與 Part 5 漂移。
+- Learnings: 帳本「正確」列沒有判定欄（URL 在第 4 欄），抓來源 URL 時要用判定欄過濾。
+---
