@@ -571,3 +571,10 @@ Started: (not yet run)
   第 2 輪：clean。
 - Learnings: 帳本 P08-002 的「ALL_LOGGER_IDS 沒有 default」原文不在引文來源裡；寫因果解釋時只寫來源能支持的部分。
 ---
+## 2026-11-01 - US-050
+- 修正 Part 8 的 8.2 Envoy access log 判讀（P08-003/004/005/006）：加 access log 預設關閉的前提（Telemetry API／meshConfig.accessLogFile）、格式範例補 `...`；RBAC 拒絕改成表下說明（flag 是 `-`，看 403＋rbac_access_denied_matched_policy）；404 症狀列依 NR／完全沒 log 拆開（HTTP Host 不符＝NR，SNI 不符＝TLS 失敗）；502 改「502／503」並附 UC／UF／URX，細節放表下說明。
+- 連動修改：無超出四列的改動（P09-015 的 ~3689 行留給別的故事）。
+- Files: k8s-ecosystem-guide.md
+- Review rounds: R1 Standards = 長表格格子、flag 表出現兩個 `-`、兩列 404 重疊、`...` 措辭 → 全改；Spec = 無阻擋（SNI 說法為帳本自身無來源的主張、NR 後半句被 WebFetch 截斷未能確認）。R2 = 無實質缺陷（404/NR 格子偏長，接受）。
+- Learnings: 無新增通用慣例。
+---
