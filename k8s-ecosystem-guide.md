@@ -4207,7 +4207,7 @@ spec:
 
 ---
 
-### 發現 6：缺少 `preStop` hook（滾動更新期間的零星 502）
+### 發現 6：缺少 `preStop` hook（滾動更新期間的零星 502／503）
 
 **現狀**：`spring_full_v4.md` 的 Deployment 沒有 `lifecycle.preStop`，`terminationGracePeriodSeconds` 用預設值 30。（repo 的 `canary-manual/track-a/release/` 兩份 Deployment 已修：`preStop` 睡 10 秒、`terminationGracePeriodSeconds: 60`。下面是還沒修的環境該怎麼改。）
 
@@ -4235,7 +4235,7 @@ K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`（`preStop: { sle
 | 優先 | 項目 | 風險 | 效益 |
 |---|---|---|---|
 | 1 | 發現 4：Service port 命名 | 極低 | 立即；消除協定判定的不確定性（見發現 4 說明） |
-| 2 | 發現 6：加 `preStop` | 極低 | 消除部署期間的零星 502 |
+| 2 | 發現 6：加 `preStop` | 極低 | 消除部署期間的零星 502／503 |
 | 3 | 發現 5：加 PDB + `maxUnavailable: 0` | 低 | 避免維護時全面停機 |
 | 4 | 發現 1：獨立 ServiceAccount | 低（需重啟） | **所有授權工作的前提** |
 | 5 | 發現 2：consistentHash（短期） | 低 | 減少偶發登出 |
