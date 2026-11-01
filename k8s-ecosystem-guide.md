@@ -1491,7 +1491,7 @@ spec:
 
 > **務必記得規則 2。** 「加了 AuthorizationPolicy 之後服務就掛了」常見的原因就是漏了 ingressgateway。規則 3 只有在關掉 probe 改寫或 metrics merge 時才需要（見上面規則 3 的註解）。
 
-**上線前先用 dry-run 預演一輪（不要用 `AUDIT`）：**
+**上線前先用 dry-run 預演一輪（不要用 `AUDIT`）**
 
 `AUDIT` 不影響放行／拒絕，記錄的是「命中規則」的請求，而且沒有另外設定並啟用稽核 plugin 就什麼都不會記，無法預演 `ALLOW` 會擋掉什麼。保留 `action: ALLOW`，改加 dry-run annotation（Alpha）：
 
@@ -1501,7 +1501,7 @@ metadata:
     istio.io/dry-run: "true"   # 只預演、不執行；跑幾天，確認沒有該放行卻被標成 shadow denied 的來源
 ```
 
-結果看 proxy 的 debug log 中的 `shadow denied`，或 `authz_dry_run_result` 指標；確認沒誤傷後把 annotation 拿掉才會真正生效。
+結果看 proxy log 中的 `shadow denied`，或 proxy 指標上的 `authz_dry_run_result` label（要先把 rbac 的 log level 調成 debug 才看得到 `shadow denied`）；確認沒誤傷後把 annotation 拿掉才會真正生效。
 
 ### 步驟 3：ea-pmc 側的 Sidecar 要看得到對方
 
