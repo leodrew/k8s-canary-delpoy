@@ -3761,7 +3761,7 @@ spec:
         - setWeight: 100
 ```
 
-背景分析要引用的 AnalysisTemplate 也要一起建立，否則上面的 `success-rate` 找不到。`failureLimit` 是中止條件之一：失敗次數到達上限，這次發布就中止。
+背景分析要引用的 AnalysisTemplate 也要一起建立，否則上面的 `success-rate` 找不到。`failureLimit` 是中止條件之一：失敗次數超過容許值，這次發布就中止（確切計數語意見官方 analysis 文件）。
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -3773,7 +3773,7 @@ spec:
   metrics:
     - name: success-rate
       interval: 1m
-      failureLimit: 3                       # 失敗次數上限；達到上限分析即失敗，Rollout 中止（確切的計數語意見 Argo 官方 analysis 文件）
+      failureLimit: 3                       # 容許的失敗次數；超過就判定分析失敗，Rollout 中止（確切計數語意見 Argo 官方 analysis 文件）
       provider:
         prometheus:
           address: http://prometheus.monitoring:9090   # 依你的環境調整
