@@ -2952,7 +2952,7 @@ spec:
   selector:
     istio: ingressgateway         # 【關鍵】對應到哪個 ingressgateway Pod 的 label
                                   # 選錯 = istiod 照樣接受、apply 不會被拒絕，但設定沒有套到任何 Pod；
-                                  # `istioctl analyze` 會回報 IST0101 Referenced selector not found
+                                  # `istioctl analyze` 會回報 IST0101「Referenced selector not found」
 
   servers:
     # ---------- HTTPS ----------
@@ -2989,7 +2989,7 @@ spec:
       tls:
         mode: MUTUAL              # 驗 client 憑證
         credentialName: myapp-tls-cert      # CA 憑證可放在同一個 secret 的 ca.crt key，
-                                        # 也可另建名為 <secret>-cacert、key 為 cacert 的 secret
+                                            # 也可另建名為 <secret>-cacert、key 為 cacert 的 secret
       hosts:
         - "api.example.com"
 ```
@@ -3008,7 +3008,7 @@ spec:
 
 | Key | 說明 | 踩雷 |
 |---|---|---|
-| `selector` | 對到 ingressgateway 的 **Pod label** | 選錯時 istiod 照樣接受、不會拒絕 apply，設定也不會生效；`istioctl analyze` 會回報 IST0101 Referenced selector not found |
+| `selector` | 對到 ingressgateway 的 **Pod label** | 選錯時 apply 不會被拒絕，設定也不會生效（`istioctl analyze` 能抓到，見上方 YAML 註解） |
 | `servers[].port.protocol` | 協定 | `HTTPS` 才會做 TLS 終止 |
 | `servers[].hosts` | 接受的 Host header | **`*` 太寬鬆**，多個 Gateway 會互搶 |
 | `servers[].tls.credentialName` | TLS secret 名稱 | **secret 必須在 gateway pod 的 namespace** |
