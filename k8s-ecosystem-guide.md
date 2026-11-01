@@ -1531,7 +1531,7 @@ istioctl proxy-config cluster deploy/pmc-epmmformquerygui -n ea-pmc \
 
 ### 步驟 4：NetworkPolicy 版（底層防護）
 
-Istio policy 管的是「經過 sidecar 的流量」。要連「繞過 sidecar 的直連」都擋掉，加上 NetworkPolicy：
+Istio policy 是由**被呼叫端自己的 sidecar** 執行的。攻擊者在自己的 Pod 裡能繞過的只有**自己**的 sidecar（官方：「the security boundary is that a client may not bypass _another_ pod's sidecar.」），所以直連 `epmm-api` 的 Pod IP 時，`epmm-api` 的 inbound 仍會被它自己的 sidecar 攔下。AuthorizationPolicy 管不到的是 sidecar 不處理的流量（UDP／ICMP 等非 TCP）與被排除在攔截之外的 port；NetworkPolicy 補的是 L3/L4 的縱深防禦，也防 sidecar 被拿掉或設錯。加上 NetworkPolicy：
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -1556,10 +1556,19 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
     # 必開：ingressgateway
+    # namespaceSelector 與 podSelector 寫在【同一個】from 元素裡 = 兩者要同時成立（AND）；
+    # 只寫 namespaceSelector 會放行 istio-system 的所有 Pod 打所有 port（官方範例：
+    # 「from any Pod in any namespace with the label user=alice」是同一種寫法的語意）。
+    # 少了 ports 同理：不限 port。這裡收斂到 ingressgateway 的 Pod 與 8080。
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              istio: ingressgateway
+      ports:
+        - { protocol: TCP, port: 8080 }
 ```
 
 **兩者的分工（這是 Q1 對照表在真實場景的應用）：**
@@ -1569,8 +1578,10 @@ spec:
 | `ea-other` 的 Pod 打 `epmm-api:8080` | 可以 | 可以 |
 | `ea-pmc` 的**別的** Pod 打 `epmm-api` | 可以（podSelector 有比對） | 可以（principals 不同） |
 | `ea-pmc` 的 query GUI 打**不該打的** `DELETE /api/admin` | **不行**（只看 IP/port） | **可以**（L7） |
-| 攻擊者在 pod 裡直接連 Pod IP，繞過 sidecar | **可以** | 不行 |
-| 攻擊者偽造 `X-User-Id` header | 不行 | 可以（`when` 條件） |
+| 攻擊者在 pod 裡直接連 Pod IP，繞過**自己**的 sidecar | **可以** | **可以**（`epmm-api` 自己的 sidecar 仍會執行；沒有 mTLS 憑證就沒有 principal，ALLOW 不命中，STRICT 下明文直接被拒） |
+| 攻擊者偽造 `X-User-Id` header | 不行 | 不精確（見表下說明） |
+
+**偽造 header 的補充：** `when: request.headers[...]` 只比對值，看不出 header 是不是偽造的（官方：`request.headers` 是「HTTP request headers.」）。要防偽造，用 RequestAuthentication 驗 JWT，再用 `request.auth.claims[...]`（官方：「Raw claims of the authenticated JWT token.」）或 `requestPrincipals` 授權；或在 ingress 端剝掉外部帶進來的 `X-User-Id`。
 
 **結論：兩個都要。** NetworkPolicy 是網路層的粗篩，AuthorizationPolicy 是應用層的細篩。
 
@@ -1582,11 +1593,40 @@ kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
   curl -sS -o /dev/null -w "%{http_code}\n" \
   http://epmm-api-svc.ea-epmm.svc.cluster.local:8080/api/v1/health
 
-# 2. 200 = 通；403 = 授權問題（Part 3）；000/timeout = NetworkPolicy 或 DNS
+# 2. 200 = 通；403 = 授權問題（Part 3，`RBAC: access denied`）；
+#    503（Envoy 回應旗標 UF，「Upstream connection failure in addition to 503 response code」）= 多半是網路層
+#    （NetworkPolicy 擋掉時 Envoy 連上游失敗，通常要等到 connect timeout）或 mTLS 不一致；
+#    000 = 多半是 DNS 失敗（curl exit 6）或來源端沒有 sidecar。
+#    來源端有 sidecar 時 curl 連的是本機 Envoy，TCP 一定建得起來，所以 NetworkPolicy 擋掉不會看到 000。
 
-# 3. 確認走的是 mTLS 而不是明文
+# 3. 確認【設定上】會走 mTLS（describe 是設定推論、且為 experimental，不是實際流量）
 istioctl x describe pod -n ea-epmm $(kubectl get pod -n ea-epmm -l app=epmm-api -o name | head -1 | cut -d/ -f2)
+
+# 4. 確認【實際流量】是 mTLS：看 istio_requests_total{connection_security_policy="mutual_tls"} 或 access log
 ```
+
+### 參考來源
+
+- Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
+- Kubernetes — DNS for Services and Pods：https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
+- Kubernetes — Service Accounts：https://kubernetes.io/docs/concepts/security/service-accounts/
+- Kubernetes — Configure Service Accounts for Pods：https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+- Kubernetes — Deployments：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- man7 — resolv.conf(5)：https://www.man7.org/linux/man-pages/man5/resolv.conf.5.html
+- Istio — Dockerfile.base：https://raw.githubusercontent.com/istio/istio/master/docker/Dockerfile.base
+- Istio — SPIRE integration：https://istio.io/latest/docs/ops/integrations/spire/
+- Istio — PeerAuthentication reference：https://istio.io/latest/docs/reference/config/security/peer_authentication/
+- Istio — Security concepts：https://istio.io/latest/docs/concepts/security/
+- Istio — Security Policy Examples：https://istio.io/latest/docs/ops/configuration/security/security-policy-examples/
+- Istio — Health Checking of Istio Services：https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/
+- Istio — Prometheus integration：https://istio.io/latest/docs/ops/integrations/prometheus/
+- Istio — AuthorizationPolicy reference：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- Istio — Authorization dry-run：https://istio.io/latest/docs/tasks/security/authorization/authz-dry-run/
+- Istio — Security Best Practices：https://istio.io/latest/docs/ops/best-practices/security/
+- Istio — Authorization conditions：https://istio.io/latest/docs/reference/config/security/conditions/
+- Istio — istioctl describe：https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-describe/
+- Istio — istioctl reference：https://istio.io/latest/docs/reference/commands/istioctl/
+- Envoy — Substitution formatter（response flags）：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
 
 ---
 
