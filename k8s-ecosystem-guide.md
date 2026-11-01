@@ -4272,7 +4272,11 @@ K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`（`preStop: { sle
 ```bash
 kubectl get deploy,svc -n istio-system -l istio=ingressgateway
 # deployment.apps/istio-ingressgateway   2/2
-# service/istio-ingressgateway           LoadBalancer   10.20.30.40   80:31380/TCP,443:31390/TCP
+# service/istio-ingressgateway           LoadBalancer   10.20.30.40   15021:30721/TCP,80:31380/TCP,443:31390/TCP
+#
+# （示意輸出：nodePort 是叢集隨機分配的，你的數字會不一樣。
+#   現行 Istio 預設的 Service 開 15021（狀態埠）、80、443 三個 port；
+#   舊版 chart 才會把 80／443 固定成 31380／31390，且沒有 15021。）
 ```
 
 一個 `type: LoadBalancer` 的 Service，加上背後幾個 Pod。**跟你的 `pmc-epmmformquerygui-svc` 結構上完全一樣。**
