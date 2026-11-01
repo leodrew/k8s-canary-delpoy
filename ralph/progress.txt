@@ -431,3 +431,10 @@ Started: (not yet run)
 - 觀察（未改，不在 ledgerIds）：Part 16 約 8436 行有同樣的 outlierDetection 說法，可能與 Part 5 漂移。
 - Learnings: 帳本「正確」列沒有判定欄（URL 在第 4 欄），抓來源 URL 時要用判定欄過濾。
 ---
+## 2026-11-01 - US-030
+- 修正 Part 6.1 Deployment（1/2）：P06-001（Deployment 不搬流量）、P06-002（minReadySeconds 影響 available，擋不住流量）、P06-003（maxSkew 在 ScheduleAnyway 下只是偏好）、P06-004（toleration 改示範 unreachable，註明預設 300 秒會自動加）、P06-005（PriorityClass 需先存在、作用為排程順序＋搶占）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 round. Standards: 0 hard violations; judgement calls only (long comments; whenUnsatisfiable comment repeats the maxSkew point; tolerationSeconds: 300 repeats the default, which the comment says honestly). Spec: 5/5 quotes found on pages (P06-001/002/004 after offset 100000), wording agrees; no findings. No changes made after review.
+- 觀察（不在本故事範圍，未改）：line ~2389 表格「minReadySeconds … app 需要暖機時設 10~30」可能屬同一誤解，留意是否屬別的帳本列。
+- Learnings: none new for patterns.md.
+---
