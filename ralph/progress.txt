@@ -393,3 +393,9 @@ Started: (not yet run)
 - 觀察（無帳本列，未改）：約 1656 行 ASCII 圖仍標 `sa/istio-ingressgateway`；約 8307 行仍寫「永遠是 FZ2 的 sa/istio-ingressgateway」。
 - Learnings: 無新慣例。
 ---
+## 2026-11-01 - US-025
+- 修正 Part 5「補救方案一：JWT」：P05-003 issuer/jwksUri/requestPrincipals 去掉 /auth 並加註解（iss 逐字相同、http-relative-path=/auth 例外）；P05-004 azp 改成保守註解（以實際 token 為準，提 request.auth.presenter）；P05-005 重寫 RequestAuthentication 提示（無效 token 401、沒帶 token 通過）；P05-006 DENY 註解改寫並加表下 > 注意 說明。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0, Spec 0（五個來源 URL 皆 WebFetch 確認引文存在；Keycloak 17 見 migrating-to-quarkus 頁）。
+- 連動修改：無。"Keycloak 17" 出自該頁 "Starting with Keycloak 17 the default distribution is now powered by Quarkus"。
+---
