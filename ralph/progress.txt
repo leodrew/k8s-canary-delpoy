@@ -386,3 +386,10 @@ Started: (not yet run)
 - Review round 1: Standards 2 hard（表格格子過長、與段落重複）＋ 引用 user=alice 當 AND 語意不準；Spec 1（同一個 user=alice 引用）。已修：格子改「見表下說明」、新增「直連 Pod IP 的補充」、註解改引官方 AND 句。未再跑第 2 輪（修正皆為措辭，validate.sh 通過）。
 - 備註：「UDP／ICMP」「通常等到 connect timeout」是帳本建議改法／Part 2 既有措辭，非官方頁逐字。
 ---
+## 2026-11-01 - US-024
+- 修正 Part 5 的 P05-001（Sidecar egress.hosts：REGISTRY_ONLY 丟棄／ALLOW_ANY 通常放行）、P05-002（身分不再寫「永遠」，格式 <trust-domain>/ns/<ns>/sa/<SA>，加查 SA 的 kubectl 指令，policy 的 principals 改 -service-account 並加註解）。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1：Standards 2 條 judgement（⓶ 格子偏長、SA 說明在註解與正文重複），皆照帳本建議改法／repo 註解風格而不改；Spec 0 發現，兩個 URL 的引文都在頁面上且新措辭一致。1 輪收斂。
+- 觀察（無帳本列，未改）：約 1656 行 ASCII 圖仍標 `sa/istio-ingressgateway`；約 8307 行仍寫「永遠是 FZ2 的 sa/istio-ingressgateway」。
+- Learnings: 無新慣例。
+---
