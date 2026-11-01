@@ -535,3 +535,10 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（僅判斷題）；Spec 1 項：130% 引文是 maxSurge=30% 的例子，已補「以 maxSurge 設為 30% 為例」。第 2 輪未再跑（單句措辭修正）。
 - Learnings: 官方引文若是範例值（非預設），引用時要標明是範例。
 ---
+## 2026-11-01 - US-045
+- 7.4 建議區塊（P07-007）：移除「解法 A + 離峰就夠」，改為「A 無法避免登出，只能降低影響；要保證用 B 或 C」，並引用 Istio 官方 "soft session affinity" 原句。
+- P07-006（解法 A 的 cookie 名稱）在先前故事已修成 istio-session-affinity，本故事未再改動。
+- Files changed: k8s-ecosystem-guide.md（1 行）
+- Review round 1: Spec 0 findings（兩句引文在官方頁逐字存在）；Standards 0 硬違規，3 則散文風格觀察（未改）。
+- Learnings: 無新增慣例。
+---
