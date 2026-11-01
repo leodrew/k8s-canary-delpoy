@@ -3793,7 +3793,7 @@ spec:
 
 #### Flagger
 
-**做什麼**：跟 Argo Rollouts 目標一樣，但**不改你的 Deployment**——它用一個 `Canary` CRD 包住既有的 Deployment，自動幫你產生和修改 VirtualService / DestinationRule。
+**做什麼**：跟 Argo Rollouts 目標一樣，但**不用改寫你的 Deployment YAML**——它用一個 `Canary` CRD 引用既有的 Deployment，自動幫你產生和修改 VirtualService / DestinationRule。但它會**接管這個 Deployment 的副本數**：Flagger 另外建 `<name>-primary` Deployment 承接正式流量，再把原本的 Deployment 縮到 0 當成 canary 用（官方：「the target deployment is scaled to zero」）；同時建立 `<name>`、`<name>-primary`、`<name>-canary` 三個 Service。
 
 ```yaml
 apiVersion: flagger.app/v1beta1
@@ -3809,7 +3809,7 @@ spec:
     hosts: ["myapp.example.com"]
   analysis:
     interval: 1m
-    threshold: 5              # 連續 5 次分析失敗就回滾
+    threshold: 5              # 整次分析累計 5 次指標檢查失敗就回滾（官方：「max number of failed metric checks before rollback」；不要求連續）
     maxWeight: 50
     stepWeight: 10            # 每次 +10%
     metrics:
@@ -3822,12 +3822,12 @@ spec:
     webhooks:                            # 灰度過程中自動跑負載測試
       - name: load-test
         url: http://flagger-loadtester.test/
-        metadata: { cmd: "hey -z 1m -q 10 http://myapp.example.com/" }
+        metadata: { cmd: "hey -z 1m -q 10 http://pmc-epmmformquerygui-canary.ea-pmc:8080/" }   # 直接打 canary Service（官方範例也是 podinfo-canary），打公開網域只有 stepWeight% 會到 canary，低流量時分析樣本不夠
 ```
 
 | | |
 |---|---|
-| **解決** | 同 Argo Rollouts，但**不用改 Deployment** |
+| **解決** | 同 Argo Rollouts，但**不用改寫 Deployment YAML**（副本數會被 Flagger 接管，見上） |
 | **代價** | 它會**接管**你的 VirtualService / DestinationRule（自己產生自己改），你不能再手動維護那些檔案，跟 GitOps 的「宣告即真相」有摩擦 |
 | **什麼時候值得** | 想要自動灰度但**不想改現有 Deployment 結構**；已經有 Prometheus 可以提供指標 |
 
@@ -3835,7 +3835,7 @@ spec:
 
 #### KEDA
 
-**做什麼**：HPA 只能看 CPU / memory / 自訂指標。KEDA 讓你依**外部事件**縮放——佇列長度、Kafka lag、資料庫查詢結果、cron 排程，而且**支援縮到 0**。
+**做什麼**：原生 HPA 也支援 Object / External 指標（見 7.5 的範例），KEDA 的價值在於**內建大量 scaler**（佇列長度、Kafka lag、資料庫查詢結果、cron 排程），不用自己架 metrics adapter，而且從 0 喚醒更成熟。原生 HPA 從 Kubernetes v1.37 起（`HPAScaleToZero` 進入 beta、預設開啟）也能縮到 0，但官方限制：「Setting `minReplicas: 0` requires at least one object or external metric to be configured」，純 CPU / memory 不行。
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
@@ -3845,7 +3845,7 @@ metadata:
   namespace: ea-pmc
 spec:
   scaleTargetRef: { name: pmc-form-processor }
-  minReplicaCount: 0          # 【HPA 做不到】沒事的時候縮到 0，完全不佔資源
+  minReplicaCount: 0          # 沒事的時候縮到 0，完全不佔資源（原生 HPA 從 v1.37 起也可以，但只限 Object/External 指標；KEDA 內建 scaler、從 0 喚醒更成熟）
   maxReplicaCount: 20
   cooldownPeriod: 300
   triggers:
@@ -3889,6 +3889,21 @@ spec:
 ---
 
 > **延伸閱讀**：想讓 canary 不用等人做 pilot run，見 [Part 12](#part-12用-argo-rollouts-取代人工-pilot-run) —— 含 `setHeaderRoute` 精準指定哪些請求走 v2，以及從人工過渡到全自動的四階段路徑。
+
+### 參考來源
+
+- argo-rollouts — analysis：https://argo-rollouts.readthedocs.io/en/stable/features/analysis/
+- argo-rollouts — specification：https://argo-rollouts.readthedocs.io/en/stable/features/specification/
+- argo-rollouts — Istio traffic management：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/
+- argo-rollouts — migrating：https://argo-rollouts.readthedocs.io/en/stable/migrating/
+- flagger — Istio progressive delivery：https://docs.flagger.app/tutorials/istio-progressive-delivery
+- flagger — deployment strategies：https://docs.flagger.app/usage/deployment-strategies
+- flagger — how it works：https://docs.flagger.app/usage/how-it-works
+- istio.io — 0.1 canary：https://istio.io/latest/blog/2017/0.1-canary/
+- istio.io — metrics：https://istio.io/latest/docs/reference/config/metrics/
+- istio.io — destination-rule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- kubernetes.io — deployment：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- kubernetes.io — horizontal-pod-autoscale：https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
 
 ---
 

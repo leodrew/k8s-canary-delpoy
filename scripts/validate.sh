@@ -1542,7 +1542,7 @@ check "guide-yaml $GUIDE" node -e "$GUIDE_FENCE_JS$GUIDE_YAML_SCRIPT" "$GUIDE"
 #     四個組織 —— 任何人都能在 github.com 上開 repo，網域本身不代表官方。
 #   - 白名單只要求「至少一個」：參考來源裡同時列二手資料（部落格、issue 討論）是允許的，
 #     但不能整段都是二手資料。
-VERIFIED_PARTS=("Part 0" "Part 1" "Part 2" "Part 3" "Part 4" "Part 5" "Part 6")
+VERIFIED_PARTS=("Part 0" "Part 1" "Part 2" "Part 3" "Part 4" "Part 5" "Part 6" "Part 7")
 
 echo
 echo "== [11] 已修完的 Part 有參考來源（VERIFIED_PARTS）=="
