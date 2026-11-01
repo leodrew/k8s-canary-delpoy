@@ -549,3 +549,9 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards：0 硬性違規，3 項純風格觀察（長註解、requests 重複、v2 HPA 只用註解說明）未改。Spec：4 個來源都 WebFetch 確認引文存在（P07-010、P07-011 在 offset 100000 之後）、新措辭一致，0 發現。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-047
+- 修正 Part 7.6 Argo Rollouts 範例（P07-014..018）：標明省略 selector/template；改用 subset-level（destinationRule + canarySubsetName/stableSubsetName），移除 canaryService/stableService；inline analysis 改為 strategy.canary.analysis 背景分析並附 AnalysisTemplate；補 workloadRef 說明與「兩個 Service 要自己建」。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（重複、註解指路、PromQL 佔位警告）；Spec 3 項（P07-014 過度斷言 spec invalid、failureLimit 語意過細、scaleDown 漸進措辭）→ 全數改為保守寫法。Round 2: 僅剩 failureLimit 計數語意措辭，已改為「超過容許值」並指向官方文件。
+- Learnings: 帳本標「無法驗證」的列，不要補任何官方頁沒寫的行為斷言。
+---
