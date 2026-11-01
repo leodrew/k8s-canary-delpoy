@@ -1673,7 +1673,7 @@ Part 4 的做法在同一個 cluster 內成立，是因為**兩邊的 sidecar �
 | # | 位置 | 資源 | 還有用嗎？ | 說明 |
 |---|---|---|:---:|---|
 | ⓵ | A 的來源 sidecar | **A 的 AuthorizationPolicy** | **幾乎沒用** | AuthzPolicy 主要管 inbound。出向要管得用 egress gateway |
-| ⓶ | A 的來源 sidecar | **A 的 Sidecar `egress.hosts`** | **要！** | 若有收斂過，沒把對方 host 列進去就**出不去** |
+| ⓶ | A 的來源 sidecar | **A 的 Sidecar `egress.hosts`** | **要！** | 若有收斂過，沒列進 `egress.hosts` 的目的地會被當成 unmatched traffic：`REGISTRY_ONLY` 時丟棄（出不去）；預設 `ALLOW_ANY` 時通常仍經 PassthroughCluster 放行，只是失去 ServiceEntry／DR 的設定（TLS origination、逾時等） |
 | ⓶ | A 的 mesh 設定 | **ServiceEntry** | **`REGISTRY_ONLY` 時必須** | 把外部 host 註冊進 mesh；`ALLOW_ANY`（預設）可省略但不建議 |
 | ⓶ | A 的 mesh 設定 | **DestinationRule** | **看情況** | 要做 TLS origination（http→https）、連線池、逾時就要 |
 | ⓷ | A 的網路層 | **A 的 NetworkPolicy egress** | **要！** | default-deny 的話要放行對方 VIP 的 CIDR |
@@ -1691,7 +1691,13 @@ Part 4 的做法在同一個 cluster 內成立，是因為**兩邊的 sidecar �
 
 這是整節最重要的一句話：
 
-> **A 的 workload 身分在進入 B 的 ingressgateway 那一刻就消失了。B 的 `epmm-api` sidecar 看到的來源永遠是 `cluster.local/ns/istio-system/sa/istio-ingressgateway`。**
+> **A 的 workload 身分在進入 B 的 ingressgateway 那一刻就消失了。B 的 `epmm-api` sidecar 看到的來源是 ingressgateway 自己的身分，格式為 `<trust-domain>/ns/<gateway 的 namespace>/sa/<gateway 的 ServiceAccount>`，不再是 A 的身分。**
+
+實際的值要先查，不要照抄：istioctl／operator 預設裝法的 SA 是 `istio-ingressgateway-service-account`，Helm gateway chart 則跟 release 名稱走；trust domain 也不一定是 `cluster.local`。
+
+```bash
+kubectl get pod -n istio-system -l istio=ingressgateway -o jsonpath='{..serviceAccountName}'
+```
 
 為什麼：A→B 的 TLS 連線在 B 的 ingressgateway 就被終止（terminate）了。ingressgateway 接著用**自己的身分**、B 的 CA 簽的憑證，重新發起一條到 `epmm-api` 的 mTLS 連線。A 的憑證資訊到此為止。
 
@@ -1710,7 +1716,9 @@ Part 4 的做法在同一個 cluster 內成立，是因為**兩邊的 sidecar �
 ```yaml
     - from:
         - source:
-            principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway"]
+            # SA 名稱先用上面的指令查實際值再填；寫錯的話這條永遠不命中，全部 403。
+            #   istioctl 預設裝法是 istio-ingressgateway-service-account，Helm 則等於 release 名稱
+            principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
 ```
 
 但這樣等於「**只要能進 ingressgateway 的人都能打 epmm-api**」—— 粒度全失。所以要用下面三種補救之一，把「A 是誰」這個資訊用別的方式帶過去。
