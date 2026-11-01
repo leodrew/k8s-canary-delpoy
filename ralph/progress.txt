@@ -380,3 +380,9 @@ Started: (not yet run)
 - Review round 1：Standards 無硬性違規（2 點 cosmetic：標題冒號、註解與 Part 0 部分重複，只改了冒號）；Spec 無阻擋，1 minor：authz_dry_run_result 是 label 不是指標、shadow denied 需 rbac debug level → 已改。round 2 因只是兩處措辭修正，未再開 sub-agent，只重跑 validate.sh（exit 0）。
 - Learnings: authz_dry_run_result 是指標上的 label；shadow denied 要 rbac:debug log level。
 ---
+## 2026-11-01 - US-023
+- Part 4 步驟 4／5：P04-012（NetworkPolicy ingressgateway 加 podSelector＋ports）、P04-013（繞過的是自己的 sidecar，AuthZ 改「可以」）、P04-014（header 偽造補充段）、P04-016（200/403/503+UF/000 判讀）、P04-017（describe 是設定推論；加實際流量檢查）。Part 4 結尾加 ### 參考來源（20 個 URL），"Part 4" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 2 hard（表格格子過長、與段落重複）＋ 引用 user=alice 當 AND 語意不準；Spec 1（同一個 user=alice 引用）。已修：格子改「見表下說明」、新增「直連 Pod IP 的補充」、註解改引官方 AND 句。未再跑第 2 輪（修正皆為措辭，validate.sh 通過）。
+- 備註：「UDP／ICMP」「通常等到 connect timeout」是帳本建議改法／Part 2 既有措辭，非官方頁逐字。
+---
