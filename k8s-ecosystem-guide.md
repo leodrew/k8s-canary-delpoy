@@ -3339,7 +3339,7 @@ istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
 
 ### 7.1 為什麼 K8s 原生做不到真正的 canary
 
-K8s 的 Deployment 滾動更新期間，新舊版本其實會並存（官方：新的 ReplicaSet 可以在滾動更新開始時立刻擴大，「the total number of old and new Pods does not exceed 130% of desired Pods」，預設 `maxSurge` 為 25%）。問題在於比例只能用 Pod 數量表達，而且 rollout 會自動一路推進到 100%：你無法讓它停在某個比例上，也無法讓特定使用者（例如只有內部測試者）才分到新版。
+K8s 的 Deployment 滾動更新期間，新舊版本其實會並存（官方：新的 ReplicaSet 可以在滾動更新開始時立刻擴大；以 `maxSurge` 設為 30% 為例，「the total number of old and new Pods does not exceed 130% of desired Pods」。`maxSurge` 預設為 25%）。問題在於比例只能用 Pod 數量表達，而且 rollout 會自動一路推進到 100%：你無法讓它停在某個比例上，也無法讓特定使用者（例如只有內部測試者）才分到新版。
 
 想用 replica 數量硬湊比例（例如 v1 開 9 個、v2 開 1 個 = 10%）有三個問題：
 
