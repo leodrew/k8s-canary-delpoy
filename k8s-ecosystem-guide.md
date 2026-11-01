@@ -3339,7 +3339,7 @@ istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
 
 ### 7.1 為什麼 K8s 原生做不到真正的 canary
 
-K8s 的 Deployment 滾動更新是**全有全無**的：一旦開始 rollout，所有新流量會逐步導到新版本，你只能控制「換得多快」，不能控制「換多少比例」。
+K8s 的 Deployment 滾動更新期間，新舊版本其實會並存（官方：新的 ReplicaSet 可以在滾動更新開始時立刻擴大，「the total number of old and new Pods does not exceed 130% of desired Pods」，預設 `maxSurge` 為 25%）。問題在於比例只能用 Pod 數量表達，而且 rollout 會自動一路推進到 100%：你無法讓它停在某個比例上，也無法讓特定使用者（例如只有內部測試者）才分到新版。
 
 想用 replica 數量硬湊比例（例如 v1 開 9 個、v2 開 1 個 = 10%）有三個問題：
 
@@ -3431,9 +3431,11 @@ spec:
 
   trafficPolicy:                     # 套用到所有 subset 的預設策略
     loadBalancer:
-      consistentHash:                # 解決 session 黏著（見 7.4）
+      consistentHash:                # subset 內的軟黏著（見 7.4），不解決 canary 跨版本的問題
         httpCookie:
-          name: JSESSIONID
+          # 不要用 JSESSIONID：設了 ttl 之後，請求沒帶這個 cookie 時 Envoy 會自己產生一個同名 cookie，
+          # 與 Spring 的 session cookie 撞名（詳見 6.2 的說明）。改用專屬名稱，交給 Envoy 管理。
+          name: istio-session-affinity
           ttl: 10800s
     connectionPool:
       tcp:  { maxConnections: 100, connectTimeout: 3s }
@@ -3489,7 +3491,7 @@ spec:
             host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
             subset: v1
             port: { number: 8080 }
-          weight: 100                # <- 只改這兩個數字就完成灰度
+          weight: 100                # <- 灰度主要靠調這兩個數字；v2 的 Pod 數也要跟著擴（見下方說明）
         - destination:
             host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
             subset: v2
@@ -3501,6 +3503,8 @@ spec:
         perTryTimeout: 4s
         retryOn: "5xx,reset,connect-failure"
 ```
+
+**推進權重時，v2 的容量也要跟上。** 步驟 1 的 v2 寫死 `replicas: 1` 而且沒有 HPA；權重拉到 50% 或 100% 時，一個 Pod 會被打爆。推進權重的同時要擴大 v2 的 replicas，或替 v2 也配一個 HPA（見 7.5）。
 
 #### 步驟 5：灰度推進流程
 
@@ -3563,7 +3567,7 @@ canary 分流是**逐請求（per-request）**決定的，所以一個已登入�
 
 | 解法 | 做法 | 優缺點 |
 |---|---|---|
-| **A. consistentHash by cookie** | DestinationRule 用 `httpCookie: JSESSIONID` | 快，但**只在 subset 內生效**——weight 分流仍在 subset 之間，同一個 cookie 還是可能被分到不同 subset |
+| **A. consistentHash by cookie** | DestinationRule 用 `httpCookie`（專屬名稱如 `istio-session-affinity`，不要用 `JSESSIONID`） | 快，但是軟黏著，**只在 subset 內生效**——weight 分流仍在 subset 之間，同一個 cookie 還是可能被分到不同 subset |
 | **B. 用 header/cookie 決定版本** | 不用 weight，改用 `match` 比對 cookie 值決定走 v1 或 v2 | 黏著保證，但比例控制變粗糙 |
 | **C. session 外部化** | Spring Session + Redis | **根本解**，canary、擴縮容、Pod 重啟全都不再是問題 |
 
