@@ -500,3 +500,10 @@ Started: (not yet run)
 - Review round 1: Spec 0 findings（所有引文都在官方頁找到）；Standards 3 findings（mTLS 註解續行未對齊、IST0101 英文未加「」、表格格與 YAML 註解重複）→ 全改，fix commit。Round 2 未再跑（皆為機械性修正，validate.sh 通過）。
 - Learnings: P06-403 的「必填」是帳本建議措辭，官方頁只說 Port.name 是 "Label assigned to the port."。
 ---
+## 2026-11-01 - US-040
+- 修正 Part 6 6.5 Gateway（2/3）：P06-406（TLS mode 標題改、補 OPTIONAL_MUTUAL）、P06-407（ISTIO_MUTUAL 說明與例子）、P06-408（protocol 欄位 TLS 終止說明）、P06-409（Gateway 互搶改寫為共用憑證 HTTP/2 404 機制）、P06-410（namespace／deploy 名稱依安裝方式而定的提醒）。
+- 連動修改：YAML 註解「見下方四種 mode」改為「見下方 TLS mode 表」（標題改名後的一致性）；proxy-config 指令加註解、selector 列加提醒（P06-410 第二段與 selector 提醒）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 2 項（hosts 儲存格與踩雷重複 → 已刪重複；kubectl 提醒重複 → 觀察不改，因各處語境不同）；Spec 1 項（舊註解「四種 mode」→ 已改）。只做 1 輪；fix 僅改兩處小字，validate.sh exit 0，未再跑第 2 輪。
+- 觀察：「istioctl 預設裝在 istio-system」來自帳本建議文字，官方 gateway 頁的 istioctl 範例未明說，未另行查證。
+---
