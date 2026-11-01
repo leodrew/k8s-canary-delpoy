@@ -2354,7 +2354,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                # 先跑 preStop，結束後才送 SIGTERM；先睡幾秒，讓終止中的 endpoint 狀態傳遞到所有 kube-proxy／sidecar
+                # 先跑 preStop，結束後才送 SIGTERM；先睡幾秒，讓終止中的 endpoint 狀態傳遞到所有 kube-proxy／Envoy
                 # 這是消除「滾動更新時零星 502」的關鍵
                 # 注意 exec 寫法要求 image 裡有 /bin/sh；distroless 之類沒有 sh 的 image，hook 會失敗、等於沒睡，502 照樣出現
                 # K8s v1.30 起 beta、v1.34 起 GA 的 sleep action 由 kubelet 執行、不依賴 shell，可改寫成 preStop: { sleep: { seconds: 10 } }
@@ -2410,12 +2410,12 @@ spec:
 | `readinessProbe` | **移出 Service endpoint**（不接流量） | 要**敏感**：後端 DB 斷了就該立刻拿掉流量 |
 | `livenessProbe` | **重啟容器** | 要**遲鈍**：只偵測「真的死了」。太敏感會造成雪崩式重啟 |
 
-> **最常見的錯誤**：liveness 和 readiness 用同樣嚴格的門檻（或 liveness 打會檢查 DB 等外部依賴的 endpoint）。結果後端 DB 一慢，所有 Pod 同時被判定 liveness 失敗一起重啟，把小問題放大成全面停機。官方說 liveness 與 readiness 共用同一個低成本 HTTP endpoint 是常見做法（"A common pattern for liveness probes is to use the same low-cost HTTP endpoint as for readiness probes, but with a higher `failureThreshold`."），重點在 liveness 的 `failureThreshold` 要比 readiness 高；幾倍沒有官方依據，3 倍左右只是經驗值。上面範例的做法是讓 liveness、readiness 各打自己的 health group，並讓 liveness 的 `periodSeconds` 拉長到 30 秒。
+> **最常見的錯誤**：liveness 和 readiness 用同樣嚴格的門檻（或 liveness 打會檢查 DB 等外部依賴的 endpoint）。結果後端 DB 一慢，所有 Pod 同時被判定 liveness 失敗一起重啟，把小問題放大成全面停機。官方說 liveness 與 readiness 共用同一個低成本 HTTP endpoint 是常見做法（「A common pattern for liveness probes is to use the same low-cost HTTP endpoint as for readiness probes, but with a higher `failureThreshold`.」），重點在 liveness 的 `failureThreshold` 要比 readiness 高；幾倍沒有官方依據，3 倍左右只是經驗值。上面範例的做法是讓 liveness、readiness 各打自己的 health group，並讓 liveness 的 `periodSeconds` 拉長到 30 秒。
 
 #### 踩雷
 
 - **`selector.matchLabels` 建立後不能改**。要改只能砍掉重建 Deployment。
-- **只設 `limits` 不設 `requests`**：K8s 會把 requests 設成等於 limits，這點沒錯，但不代表 Pod 就是 Guaranteed，也會讓排程變困難（node 必須有完整的 limit 空間）。要成為 Guaranteed，Pod 裡**每一個**容器的 cpu 和 memory 都得設 limit，且 request 等於 limit（官方：「Every Container in the Pod must have a CPU limit and a CPU request, both greater than zero.」）；只設 memory limit 的話是 Burstable。Istio 注入的 `istio-proxy` 也算一個容器，它的 requests／limits 不相等時，整個 Pod 就不會是 Guaranteed。
+- **只設 `limits` 不設 `requests`**：K8s 會把 requests 設成等於 limits，但 Pod 不會因此就是 Guaranteed，還會讓排程變困難（node 必須有完整的 limit 空間）。要成為 Guaranteed，Pod 裡**每一個**容器的 cpu 和 memory 都得設 limit，且 request 等於 limit（官方：「Every Container in the Pod must have a CPU limit and a CPU request, both greater than zero.」）；只設 memory limit 的話是 Burstable。Istio 注入的 `istio-proxy` 也算一個容器，它的 requests／limits 不相等時，整個 Pod 就不會是 Guaranteed。
 - **memory `limits` 是硬上限**，超過直接 OOMKilled，沒有寬限。Java 應用要確認 JVM 的 `-XX:MaxRAMPercentage` 有對齊 limit。
 - **cpu `limits` 會造成 throttling**。Java app 在 GC 時很容易撞到，症狀是「CPU 用量沒滿但延遲飆高」。可考慮不設 cpu limit，只設 requests。
 - **沒有 `preStop` sleep**：滾動更新時，Pod 已經開始終止，但「終止中」的 endpoint 狀態（官方：終止中的 endpoint 不會馬上從 EndpointSlice 移除，而是標成 terminating）還沒傳遞到所有 kube-proxy／Envoy；在這個 mesh 裡延遲主要來自 istiod 把 EDS 更新推到各個 sidecar，那幾百毫秒的流量會變成 502。**加一個 `sleep 10` 就能消除大部分零星 502。**
