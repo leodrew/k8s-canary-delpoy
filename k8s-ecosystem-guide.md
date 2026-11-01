@@ -2130,10 +2130,12 @@ spec:
 |---|---|
 | 兩個 cluster 是不同環境（prod / dr） | **不用換**，走 VIP 就好 |
 | 兩個 cluster 屬於不同團隊 / 不同安全域 | **不要換**，mesh 打通等於信任邊界打通 |
-| 連 API server 與 east-west gateway 都無法對外開放，只有幾個開放的 VIP | **不能換**。multi-network 本來就是給 Pod 不能直連的網路用的，不需要 Pod 互通；需要的是 east-west gateway 與 API server（Primary-Remote 再加 istiod）可達（官方：「The API Server in each cluster must be accessible to the other clusters in the mesh.」） |
+| 連 API server 與 east-west gateway 都無法對外開放，只有幾個開放的 VIP | **不能換**（見表下說明） |
 | 同一個應用需要跨 cluster 高可用 failover | **值得換** |
 | 服務間呼叫非常頻繁，走 VIP 延遲受不了 | **值得換** |
 | 需要細粒度的跨 cluster 服務身分授權 | **值得換** |
+
+**「不能換」那一列的說明**：multi-network 本來就是給 Pod 不能直連的網路用的，不需要 Pod 互通；需要的是 east-west gateway 與 API server（Primary-Remote 再加 istiod）可達（官方：「The API Server in each cluster must be accessible to the other clusters in the mesh.」）。所以只有連這兩者都無法開放時才不能換。
 
 > **給你的實務建議**：以你目前「透過對方 VIP 打對方 VirtualService」的架構，**維持現狀 + JWT 授權**是正確選擇。multi-cluster 的維運成本（憑證輪替、跨 cluster 除錯、control plane／data plane 的版本差要遵守官方支援規則）遠高於它解決的問題，除非你真的需要跨 cluster failover。
 
