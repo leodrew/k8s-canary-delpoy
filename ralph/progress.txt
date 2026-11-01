@@ -521,3 +521,10 @@ Started: (not yet run)
 - Review round 1: Spec 無發現（所有引文皆在官方頁，僅帳本 P06-414 的 "includes all retries." 在 Istio 頁找不到逐字，guide 未引用）；Standards 無硬性違規，判斷題 6 項，修了 2 項（二選一警告、default 路由 WHY 註解），其餘（表格格子偏長、續行註解縮排）屬觀察。未再跑第二輪。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-043
+- 修正 Part 6 的 6.6 VirtualService（2/2）：P06-418（CORS 改成「可能互相干擾」＋preflight 預設轉給 app＋建議實測）、P06-419（仍經 sidecar、least request）、P06-420（依 endpoint 數量 least request，Pod 數相同才約 50/50）。
+- Part 6 結尾加 `### 參考來源`（34 個 URL，與帳本非「正確」列逐一對過），"Part 6" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review 1 輪：Standards 無硬性違規（3 個判斷題：踩雷 4 句子偏長、來源標籤有重名、least request 說明出現兩處，未改）；Spec 無發現（引文皆在官方頁找到）。觀察：traffic-management 引文原句後接逗號，guide 在引文內加了句點，未改。
+- Learnings: virtual-service 頁的 "Default is forward to upstream." 在 offset 100000 之後。
+---
