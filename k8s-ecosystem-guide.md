@@ -4345,7 +4345,7 @@ kubectl get deploy,svc -n istio-system -l istio=ingressgateway
 | `10.0.0.0/8` | RFC 1918（私有位址） | **公司內網可路由**——其他機房、其他系統、使用者的 PC 都連得到 |
 | `100.64.0.0/10` | RFC 6598（Shared Address Space，原本給 CGNAT 用） | **不可路由**——通常只在這座 cluster 或這個機房內有效，公司骨幹網路不會轉發 |
 
-> **為什麼企業愛用 `100.64.0.0/10` 當內部網段**：它不是 RFC 1918，所以**不會跟公司既有的 10.x / 172.16.x / 192.168.x 網段撞號**。很多 K8s 發行版也拿它當 Pod / Service CIDR，就是這個原因。
+> **為什麼企業愛用 `100.64.0.0/10` 當內部網段**：它不是 RFC 1918，所以**不會跟公司既有的 10.x / 172.16.x / 192.168.x 網段撞號**。（RFC 6598 第 4 節也警告：不是 CGN 用途的使用者 “are likely to experience problems”，所以挪作他用前要先確認不會跟 ISP／上游的 CGN 位址衝突。）
 >
 > **要注意**：`100.64.0.0/10` 是否「不可路由」是**公司網路政策決定的，不是協定規定的**。務必跟網路組確認你們的實際規則。
 
@@ -4373,12 +4373,13 @@ metadata:
   namespace: istio-system
   annotations:
     # ⚠ 指定 VIP 的方式「依你們的 LB 實作而異」，見下方說明
-    metallb.universe.tf/address-pool: corp-routable
+    # MetalLB 0.14.9 起新前綴是 metallb.io；舊的 metallb.universe.tf 已 deprecated
+    metallb.io/address-pool: corp-routable
 spec:
   type: LoadBalancer
   selector:
     istio: ingressgateway                 # 選中第一組的 Pod
-  loadBalancerSourceRanges:               # LB 層的第一道白名單（比 Istio 更前面）
+  loadBalancerSourceRanges:               # LB 層白名單（比 Istio 更前面）；是否生效取決於 LB 實作（F5 CIS／MetalLB），不支援時會被靜默忽略
     - 10.0.0.0/8
   ports:
     - name: http2
@@ -4395,7 +4396,7 @@ metadata:
   name: istio-ingressgateway-internal
   namespace: istio-system
   annotations:
-    metallb.universe.tf/address-pool: internal-nonroutable
+    metallb.io/address-pool: internal-nonroutable
 spec:
   type: LoadBalancer
   selector:
@@ -4425,7 +4426,7 @@ spec:
     metadata:
       labels:
         istio: ingressgateway-internal    # ⚠ 這個 label 就是 Gateway CRD 要 selector 的目標
-        sidecar.istio.io/inject: "false"  # gateway 本身不注入 sidecar（它自己就是 Envoy）
+        sidecar.istio.io/inject: "true"   # 官方 gateway 範例：Enable gateway injection。設成 "false" 就不注入，下面 image: auto 不會被換成真的 image，Pod 拉不到 image
       annotations:
         inject.istio.io/templates: gateway
     spec:
@@ -4527,7 +4528,7 @@ spec:
 # 寫法 2：MetalLB 的 address pool
 metadata:
   annotations:
-    metallb.universe.tf/address-pool: corp-routable
+    metallb.io/address-pool: corp-routable    # 舊前綴 metallb.universe.tf 已 deprecated（0.14.9 起用 metallb.io）
 ---
 # 寫法 3：F5 Container Ingress Services（企業內網常見）
 metadata:
@@ -4625,7 +4626,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 
 #### 踩雷 2：憑證放在錯的 namespace
 
-`credentialName` 指向的 secret 必須在 **gateway Pod 所在的 namespace**（通常 `istio-system`）。兩組 gateway 如果在同一個 namespace，兩份憑證都放那裡；如果你把第二組裝到別的 namespace，憑證也要跟著搬。
+`credentialName` 指向的 secret 必須在 **gateway Pod 所在的 namespace**（通常 `istio-system`；不過 Istio 官方建議 “As a security best practice, it is recommended to deploy the gateway in a different namespace from the control plane”，也就是把 gateway 放到獨立的 namespace，例如官方 Helm 範例的 `istio-ingress`，上面第二組的 manifest 為了簡化仍寫 `istio-system`，改放別處時 Service、Deployment 與相關指令的 namespace 要一起換）。兩組 gateway 如果在同一個 namespace，兩份憑證都放那裡；如果你把第二組裝到別的 namespace，憑證也要跟著搬。
 
 #### 踩雷 3：只改了 Service 沒改 Deployment 的 label
 
