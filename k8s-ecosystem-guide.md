@@ -2094,12 +2094,12 @@ spec:
 
 | 模式 | 說明 | 代價 |
 |---|---|---|
-| **Multi-Primary** | 兩個 cluster 各有 istiod，每個 istiod 透過 remote secret 直接 watch 對方 cluster 的 API server 取得 endpoint（istiod 之間不互相同步） | 每個 istiod 都要能連到對方的 API server |
+| **Multi-Primary** | 兩個 cluster 各有 istiod，每個 istiod 直接 watch 對方 cluster 的 API server 取得 endpoint（istiod 之間不互相同步；機制見下方必要條件第 2 點） | 每個 istiod 都要能連到對方的 API server |
 | **Primary-Remote** | 一個 istiod 管兩個 cluster | 遠端 cluster 依賴主 cluster，istiod 掛了就完蛋 |
 
 **網路模型**（pod 之間能不能直連）是另一個獨立的選擇：single-network 時各 cluster 的 pod 可以直接互通；multi-network 時，官方的說法是「the workload instances in different networks can only reach each other through one or more Istio gateways.」，流量要靠 east-west gateway 轉發，設定最複雜。這兩個維度可以自由組合，例如官方有 Multi-Primary on different networks 的安裝指南。
 
-**必要條件（依模式而定，第 3 點尤其如此）：**
+**必要條件（依模式而定，各點內說明適用條件）：**
 
 1. **共用 root CA** —— 共用同一個 root CA，替每個 cluster 簽一張各自的 intermediate CA 放進 `cacerts` secret，istiod 用 intermediate 簽發 workload 憑證（istiod 不直接用 root 簽），否則憑證互不信任
 2. **每個 primary 要有所有 cluster 的 API server 存取權** —— `istioctl create-remote-secret` 產生的 kubeconfig secret。Multi-Primary 是雙向（各自讀對方）；Primary-Remote 是單向（primary 的 istiod 讀 remote 的 API server）
