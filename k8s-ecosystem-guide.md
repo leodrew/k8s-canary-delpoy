@@ -3987,7 +3987,10 @@ kubectl logs -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy --tail=50
 
 ```bash
 # 1. 設定有沒有下發？
-istioctl proxy-status | grep -v SYNCED        # 有輸出 = 有 pod 設定不同步
+# 只看標題列與含 STALE 的列。不要用 grep -v SYNCED：一列只要任一欄是 SYNCED 就整列被濾掉，
+# 「CDS 是 SYNCED、RDS 是 STALE」的 pod 會被藏起來，而標題列又一定會印出來，「有輸出」不代表有問題。
+# 除了標題列之外還有輸出 = 有 pod 設定不同步（NOT SENT 通常只是 istiod 沒東西可送，不一定有問題）
+istioctl proxy-status | awk 'NR==1 || /STALE/'
 
 # 2. 全域設定有沒有錯？
 istioctl analyze -A
@@ -3996,9 +3999,13 @@ istioctl analyze -A
 istioctl x describe pod -n ea-pmc $(kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui -o name | head -1 | cut -d/ -f2)
 
 # 4. endpoint 是空的嗎？
-kubectl get endpoints -n ea-pmc pmc-epmmformquerygui-svc
+# Endpoints API 自 Kubernetes v1.33 起 deprecated，官方建議 client 改用 EndpointSlice API
+kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc
 
 # 5. 從 gateway 內部直接打，排除外部網路因素
+# 前提：gateway pod 沒有 iptables 攔截，這個 curl 送出的是明文。ea-pmc 的 PeerAuthentication 若是 STRICT
+# （官方：「Connection is an mTLS tunnel (TLS with client cert must be presented)」），這一步一定失敗，
+# 但不代表服務壞了。STRICT 時改從有 sidecar 的 pod 測試（例如步驟 6 的 app pod 內 curl，但把 localhost 換成 Service 名稱）
 kubectl exec -n istio-system deploy/istio-ingressgateway -- \
   curl -sS -o /dev/null -w "%{http_code}\n" \
   http://pmc-epmmformquerygui-svc.ea-pmc:8080/gui_epmmFormQuery/actuator/health
@@ -4009,6 +4016,17 @@ kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
 ```
 
 > **除錯順序永遠是「由外而內」**：先確認 gateway 收得到 → 再確認路由對得上 → 再確認 endpoint 有東西 → 最後才查授權。反過來查會浪費很多時間。
+
+### 參考來源
+
+- istio.io — proxy-cmd：https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/
+- istio.io — istioctl 指令參考：https://istio.io/latest/docs/reference/commands/istioctl/
+- istio 原始碼 — proxyconfig.go：https://raw.githubusercontent.com/istio/istio/master/istioctl/pkg/proxyconfig/proxyconfig.go
+- istio.io — access-log：https://istio.io/latest/docs/tasks/observability/logs/access-log/
+- envoyproxy.io — substitution_formatter：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
+- istio.io — gateway：https://istio.io/latest/docs/reference/config/networking/gateway/
+- kubernetes.io — service：https://kubernetes.io/docs/concepts/services-networking/service/
+- istio.io — peer_authentication：https://istio.io/latest/docs/reference/config/security/peer_authentication/
 
 ---
 
