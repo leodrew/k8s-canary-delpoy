@@ -2581,7 +2581,12 @@ spec:
 
 把設定從 image 裡拆出來。同一個 image 可以跑在 dev / uat / prod，只換 ConfigMap。改一個參數不需要重新 build。
 
-**ConfigMap 存明文設定，Secret 存機密**——但要注意 **Secret 預設只是 base64 編碼，不是加密**。有 `kubectl get secret` 權限的人就能看到內容。真正的加密要在 etcd 層開 encryption at rest，或改用外部 secret 管理（Vault / External Secrets Operator）。
+**ConfigMap 存明文設定，Secret 存機密**——但要注意 **Secret 預設只是 base64 編碼，不是加密**。有 `kubectl get secret` 權限的人就能看到內容；能存取 etcd 的人也看得到；在該 namespace 能建 Pod 或 Deployment 的人，也能把任何 Secret 掛進 Pod 讀出來。所以只收 `get secret` 權限不夠。官方建議的做法有四步：
+
+1. 對 Secret 開 encryption at rest（etcd 層加密）
+2. 以最小權限設定 RBAC
+3. 只讓需要的特定容器存取 Secret
+4. 改用外部 secret store（如 Vault / External Secrets Operator）
 
 #### 全註解 YAML
 
@@ -2662,8 +2667,10 @@ spec:
 | 方式 | 改 ConfigMap 後會自動更新嗎 | 說明 |
 |---|:---:|---|
 | `envFrom` / `env` 環境變數 | **不會，永遠不會** | 環境變數在容器啟動時就固定了，**必須重啟 Pod** |
-| volume 掛整個目錄 | **會**（約 1 分鐘內） | kubelet 定期同步，用 symlink 原子替換 |
-| volume + **`subPath`** | **不會** | subPath 是掛載當下複製的，**這是最陰的雷** |
+| volume 掛整個目錄 | **會**（最長約 2 分鐘，見表下說明） | kubelet 定期同步，用 symlink 原子替換 |
+| volume + **`subPath`** | **不會** | subPath 綁定的是掛載當下那個檔案，看不到之後的更新，**這是最陰的雷** |
+
+「最長約 2 分鐘」的出處：官方說從 ConfigMap 更新到新 key 投射進 Pod 的總延遲，最長可到「kubelet sync period (1 minute by default) + TTL of ConfigMaps cache (1 minute by default) in kubelet」，也就是預設約 2 分鐘；改一下 Pod 的 annotation 可以立刻觸發刷新。
 
 #### 讓 ConfigMap 變更自動觸發滾動更新
 
@@ -2680,7 +2687,9 @@ spec:
 
 ```bash
 # 產生 checksum（CI/CD 裡自動做）
-kubectl get configmap pmc-epmmformquery-config -n ea-pmc -o yaml | sha256sum
+# 只對 data 算，不要對整份 -o yaml 算：那會把 server 填的 uid / resourceVersion /
+# creationTimestamp / managedFields 一起算進去，資料沒變、重建物件或改 metadata 時 hash 也會變
+kubectl get configmap pmc-epmmformquery-config -n ea-pmc -o jsonpath='{.data.application\.yml}' | sha256sum | cut -c1-8
 
 # Helm 使用者可以直接寫：
 #   checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
