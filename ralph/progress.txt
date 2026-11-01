@@ -562,3 +562,12 @@ Started: (not yet run)
 - Review round 1: Spec 0 findings（所有引文都在官方頁面上找到）；Standards 0 硬性違規，6 項判斷題（KEDA 註解與正文重複、「從 0 喚醒更成熟」無官方引文但出自帳本建議改法、cmd 註解偏長等）未處理，屬觀察。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-049
+- 修正 Part 8 的 8.1 istioctl 常用指令（P08-001、P08-002）：STALE 與 NOT SENT 拆開寫（NOT SENT 通常是正常狀態）；
+  復原 log level 改為 `-r`，並說明 `--level warning`（不指定 logger = 全部），`default:warning` 不是有效 logger 名稱。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 第 1 輪 Standards：英文引文要放進「」（2 處，已改）；Spec：「Envoy 沒有名為 default 的 logger」
+  在 proxyconfig.go 找不到支持（原始碼只特別放行名稱 `level`），改成只講 default:warning 不是有效名稱、會回 unrecognized logger name。
+  第 2 輪：clean。
+- Learnings: 帳本 P08-002 的「ALL_LOGGER_IDS 沒有 default」原文不在引文來源裡；寫因果解釋時只寫來源能支持的部分。
+---
