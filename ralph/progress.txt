@@ -372,3 +372,11 @@ Started: (not yet run)
 - Review round 1：Standards 無硬性違規（5 項 judgement 級重複／冗長，未改，措辭沿用帳本建議）；Spec 引文皆查到，1 項發現：kubectl debug 不能接 deploy/ → 改成先取 Pod 名。修後 validate.sh exit 0；第 2 輪未重跑完整 review（修正僅一行指令，與帳本 <pod> 寫法一致）。
 - Learnings: kubectl debug 只收 Pod（或 node），不收 deploy/；Part 4 的參考來源尚未加（留給最後一個 Part 4 故事，並同時加入 VERIFIED_PARTS）。
 ---
+## 2026-11-01 - US-022
+- 修正 Part 4 步驟 2（P04-008～011）：2a 註解改成 STRICT 的真正作用並指回 Part 0「表中三列的補充」；規則 2 的 SA 改 istio-ingressgateway-service-account 並附查法；規則 3 註解說明預設不需要（probe 改寫／metrics merge 走 15020）且無 from；AUDIT 預演改成 istio.io/dry-run annotation。
+- 連動修改（同小節一致性）：「務必記得規則 2 和 3。90%…」改成只強調規則 2（原句與修正後的規則 3 矛盾，且 90% 無來源）；dry-run yaml 前加一段說明為何不用 AUDIT。
+- 未動：~1654 行的 ingressgateway principal（屬 P05-002）。
+- Files: k8s-ecosystem-guide.md、ralph/patterns.md（刪 P04-008 提醒）
+- Review round 1：Standards 無硬性違規（2 點 cosmetic：標題冒號、註解與 Part 0 部分重複，只改了冒號）；Spec 無阻擋，1 minor：authz_dry_run_result 是 label 不是指標、shadow denied 需 rbac debug level → 已改。round 2 因只是兩處措辭修正，未再開 sub-agent，只重跑 validate.sh（exit 0）。
+- Learnings: authz_dry_run_result 是指標上的 label；shadow denied 要 rbac:debug log level。
+---
