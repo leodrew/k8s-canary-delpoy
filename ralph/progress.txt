@@ -365,3 +365,10 @@ Started: (not yet run)
 - Review round 1（BASE=09cf0be）：直接 WebFetch 核對引文——15006 句（istio proxy-cmd）、XFCC 句（authn-policy）、rbac_filter.cc 的 `matched policy {}`／none、K8s RBAC 的 ServiceAccount 群組句，全部逐字存在且 guide 措辭一致。Standards／Spec 皆無發現。（因本輪 feat commit 已在前一輪完成，本輪只做 review 與收尾；未起 sub-agent，由本代理直接驗證。）
 - Learnings: K8s RBAC 頁超過 100000 字，SA 群組句在 offset 100000 之後（已在 patterns 記過）。
 ---
+## 2026-11-01 - US-021
+- 修正 Part 4 步驟 0／1：P04-002（FQDN 並不省查詢，加結尾點／調 ndots）、P04-003（ndots 說明改為先套 search domain、命中就停）、P04-004（istio-proxy 沒有 nslookup → kubectl debug busybox／kdig）、P04-006（apply 即滾動更新，不需 rollout restart）、P04-007（grep spiffe:// → jq+base64+openssl）。
+- P04-005 未動。連動修改：步驟 1 末段的驗證指令一併換成 P04-007 的寫法。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 無硬性違規（5 項 judgement 級重複／冗長，未改，措辭沿用帳本建議）；Spec 引文皆查到，1 項發現：kubectl debug 不能接 deploy/ → 改成先取 Pod 名。修後 validate.sh exit 0；第 2 輪未重跑完整 review（修正僅一行指令，與帳本 <pod> 寫法一致）。
+- Learnings: kubectl debug 只收 Pod（或 node），不收 deploy/；Part 4 的參考來源尚未加（留給最後一個 Part 4 故事，並同時加入 VERIFIED_PARTS）。
+---
