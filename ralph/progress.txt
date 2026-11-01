@@ -471,3 +471,10 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards 0 硬性違規（3 個判斷題：2715 偏長且重複「官方未列出」、2717 一句兩點、「同樣會被拒絕」無引文）；Spec 0 發現（兩段引文皆在官方頁找到；P06-207 的「被拒絕」與 Helm 說法只有帳本推論支撐，屬帳本品質備註）。未改措辭，以免偏離帳本建議改法。
 - Learnings: 無新增可重用慣例。
 ---
+## 2026-11-01 - US-036
+- 修正 6.4 CronJob（1/3）：P06-208（podFailurePolicy 搭配 restartPolicy: Never，範例與註解）、P06-209（sidecar.istio.io/inject 由 annotations 移到 labels，兩處）、P06-211（jobTemplate.metadata.labels 加 app: pmc-form-daily-sync，kubectl 改用 -l app=...）、P06-212（Pod 清理來源補上 ttl 與歷史上限）、P06-213（Failed 列補 podFailurePolicy FailJob、backoffLimitPerIndex／maxFailedIndexes）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（觀察：restartPolicy 說明在兩處重複、Failed 列偏長，皆屬風格）；Spec 五條引文都在官方頁找到且新措辭一致。
+- 觀察（未改，不屬本故事）：約第 4968 行仍把 sidecar.istio.io/inject 放在 annotations，屬 P12-004。
+- Learnings: 無新增通則。
+---
