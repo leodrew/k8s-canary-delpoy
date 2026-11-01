@@ -2562,16 +2562,16 @@ spec:
         # useSourceIp: true
 ```
 
-`consistentHash` 用的是 ring hash 演算法：**Pod 數量變動時，只有一小部分 session 會被重新分配**，比單純的 modulo hash 好很多。
+`consistentHash` 是一致性雜湊（演算法可選 `ringHash` 或 `maglev`，在 `consistentHash` 底下設定）：**Pod 數量變動時，只有一小部分 session 會被重新分配**，比單純的 modulo hash 好很多。
 
 > **但這仍然是治標。** 只要 Pod 重啟，那個 Pod 上的 session 就沒了。根本解法是把 session 外部化（Spring Session + Redis）。canary 發布時這個問題會更嚴重（Part 7）。
 
 #### 其他踩雷
 
 - **`selector` 比對的是 Pod label，不是 Deployment label**。改 Deployment 的 `metadata.labels` 不會影響 Service 選中誰。
-- **endpoint 是空的**：`kubectl get endpoints <svc>` 沒東西 = selector 沒對上，或所有 Pod 都 not ready。
-- **`targetPort` 填了不存在的名稱**：不會報錯，但 endpoint 永遠是空的。
-- **`externalTrafficPolicy: Local` + 節點沒有 Pod** = 該節點的請求全部失敗。要搭配 `topologySpreadConstraints` 確保每個 node 都有 Pod。
+- **endpoint 是空的**：`kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=<svc>` 裡沒有 endpoint（舊的 `kubectl get endpoints` 對應的 Endpoints API 自 v1.33 起已 deprecated）= selector 沒對上，或所有 Pod 都 not ready。
+- **`targetPort` 填了不存在的名稱**：官方只說字串會被當成目標 Pod 的 container port 名稱去查，沒寫查不到時的行為；名稱對不到 containerPort 時，該 port 不會產生可用的 endpoint，API 也不會報錯。要確認就看 EndpointSlice 的 `ports` 欄位有沒有那個 port。
+- **`externalTrafficPolicy: Local` + 節點沒有 Pod** = 打到該節點的請求拿不到 endpoint。正規做法是讓 LB 透過 Service 的 `healthCheckNodePort` 判斷節點有沒有 endpoint，自動避開沒有的節點；`topologySpreadConstraints` 保證不了每個 node 都有 Pod（例如只有 2 個 replica 時），真的要每台都有只能用 DaemonSet。
 
 ---
 
