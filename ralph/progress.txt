@@ -405,3 +405,13 @@ Started: (not yet run)
 - Review round 1: Spec 抓到 L4 bullet 缺「PROXY protocol 需 gateway 設定、與 numTrustedProxies 不併用」；Standards 抓到 DENY 理由在警告與 yaml 註解重複。已在 fix commit 處理。未跑第二輪 review（剩餘皆為風格層級觀察：引號樣式、externalTrafficPolicy 官方頁未載明但為帳本建議）。
 - 觀察（未改）：externalTrafficPolicy: Local 出自帳本建議，network-topologies 頁沒提到；Part 5 尚未加進 VERIFIED_PARTS（最後一個 Part 5 故事才加）。
 ---
+## 2026-11-01 - US-027
+- 修正 Part 5「A cluster 這一側要準備什麼」「B cluster 這一側的完整組合」（P05-201～P05-204）：
+  ServiceEntry 加 port 80/HTTP/targetPort 443（保留 443 給 app 自己講 https）；DR 的 TLS 移進 portLevelSettings port 80，
+  拿掉 sni 的錯誤註解，改給 caCertificates／credentialName（secret 在 ea-pmc＋workloadSelector）＋subjectAltNames；
+  NetworkPolicy 加「疊加式、需搭配 kube-dns 53 與 istiod 15012 egress」註解；B 側 AuthorizationPolicy 補 remoteIpBlocks 前提、ipBlocks／externalTrafficPolicy: Local 與 node／NAT 出口 IP 註解。
+- Files: k8s-ecosystem-guide.md（只動上述 yaml 區塊，沒有連動修改其他句子）
+- Review: round 1 — Standards 無硬性違規（觀察：註解與前文有些重複、workloadSelector 只在註解提到）；Spec 五個 URL 皆查到引文，P05-201～204 皆符合，無發現。未需 fix round。
+- Learnings: 「DR host 層級 TLS 會雙重加密」是帳本的推論，官方頁沒有逐字句子；故事未引用為官方原文。
+- 觀察（未改）：P05-204 的 AuthorizationPolicy yaml 本體仍是 remoteIpBlocks，ipBlocks 只在註解。
+---
