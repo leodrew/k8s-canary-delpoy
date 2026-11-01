@@ -3915,7 +3915,7 @@ spec:
 # ---------- 總體健康檢查（出事先跑這個）----------
 istioctl analyze -A                         # 掃描全 cluster 的設定問題
 istioctl proxy-status                       # 所有 sidecar 的設定同步狀態
-# STALE = istiod 已下發設定、但 Envoy 還沒回 ACK，可能有問題（官方：has not received an acknowledgement）
+# STALE = istiod 已下發設定、但 Envoy 還沒回 ACK，可能有問題（官方：「has not received an acknowledgement」）
 # NOT SENT = istiod 沒東西可送，通常是正常狀態（例如 ingressgateway 的 RDS 常顯示 NOT SENT），不用當成故障
 
 # ---------- 單一 Pod 的完整診斷 ----------
@@ -3935,7 +3935,7 @@ istioctl x authz check deploy/epmm-api -n ea-epmm         # 這個 workload 被�
 istioctl proxy-config log deploy/epmm-api -n ea-epmm --level rbac:debug
 istioctl proxy-config log deploy/epmm-api -n ea-epmm --level router:debug,connection:debug
 istioctl proxy-config log deploy/epmm-api -n ea-epmm -r                      # 復原：-r 把所有 logger 重設回預設 level（warning）
-# 也可用 --level warning（不指定 logger 名稱 = 套用到全部 logger）；Envoy 沒有名為 default 的 logger，寫 default:warning 會報 unrecognized logger name
+# 也可用 --level warning（不指定 logger 名稱 = 套用到全部 logger）；default:warning 不是有效的 logger 名稱，istioctl 會回「unrecognized logger name」
 ```
 
 ### 8.2 Envoy access log 判讀
