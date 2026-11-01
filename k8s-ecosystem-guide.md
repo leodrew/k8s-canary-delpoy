@@ -1808,8 +1808,13 @@ spec:
 
 如果 A cluster 的出口 IP 是固定的（通常是 NAT gateway 或 node 的固定 IP），可以在 **B 的 ingressgateway** 上做白名單。
 
+> ⚠️ **不要在共用的 `istio: ingressgateway` 上寫 `action: ALLOW`。** 官方語意是：workload 上只要出現任何一條 ALLOW，沒有命中任何 ALLOW 的請求就會被拒絕（"If there are no ALLOW policies for the workload, allow the request." 只在「完全沒有 ALLOW」時才成立）。ingressgateway 通常是整個 cluster 共用的，一條 ALLOW 掛上去，**其他所有 host 的流量**沒命中就 403，整個 cluster 對外服務一起中斷。所以改用 `DENY` + `notRemoteIpBlocks`，並用 `to.operation.hosts` 把影響範圍限縮在 epmm-api 這一個 host。
+
 ```yaml
-# B cluster：只允許 A cluster 的出口網段進來
+# B cluster：epmm-api 這個 host 只允許 A cluster 的出口網段進來
+# 用 DENY + notRemoteIpBlocks 而不是 ALLOW：ALLOW 一出現，同一個 gateway 上其他 host
+# 沒命中任何 ALLOW 的流量全部變 403（共用 ingressgateway 的其他服務會一起中斷）。
+# DENY 只作用在 to.operation.hosts 列出的 host，其他 host 不受影響。
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
@@ -1819,39 +1824,46 @@ spec:
   selector:
     matchLabels:
       istio: ingressgateway
-  action: ALLOW
+  action: DENY
   rules:
     - from:
         - source:
-            remoteIpBlocks:
-              - "10.20.30.0/24"        # A cluster 的出口 NAT 網段
+            notRemoteIpBlocks:
+              - "10.20.30.0/24"        # A cluster 的出口 NAT 網段；不在這個網段的一律擋
       to:
         - operation:
-            hosts: ["epmm-api.b-cluster.example.com"]
+            hosts: ["epmm-api.b-cluster.example.com"]   # 只寫 epmm-api，不要漏掉這行
 ```
 
-**前置條件（一定要做，否則比對到錯的 IP）：**
+**前置條件（一定要做，否則比對到錯的 IP）：** gateway 必須真的拿得到 client IP。官方說法是 gateway 前面的 proxy 必須解析 HTTP 流量並在每一跳 append `X-Forwarded-For`（"proxies in front of the Istio gateway proxy must parse HTTP traffic and append to the X-Forwarded-For header at each hop."），拿不到時 Envoy 退回使用直接連線的來源位址（"Envoy falls back to using the immediate downstream address as the trusted client address."）——也就是 LB／node IP，這時上面的 DENY **永遠不會觸發，所有來源都被靜默放行**（見 Part 1 關鍵觀念二）。
+
+- **前面是 L7 LB**（F5 做 HTTP 終止並附加 XFF）：設 `numTrustedProxies`，見下方。
+- **前面是 L4 LB**（TCP 透傳、不會加 XFF）：`numTrustedProxies` 沒有用；改用 PROXY protocol，或把 Service 設 `externalTrafficPolicy: Local` 保留來源 IP，再用 `ipBlocks` 比對。
+- 本節假設 TLS 在 gateway 終止（圖上 ⓸）；若是這樣，F5 就是 L4 透傳、加不了 XFF，要走上面第二條路。
 
 ```yaml
 meshConfig:
   defaultConfig:
     gatewayTopology:
-      numTrustedProxies: 1     # B 的 VIP/F5 算一層
+      numTrustedProxies: 1     # 只有 F5 做 L7 終止並附加 XFF 時，才算一層
 ```
 
 **怎麼確認 `numTrustedProxies` 該填幾：**
 
 ```bash
-# 在 B 的 ingressgateway 開 access log 印出 XFF，實際打一次看有幾個 IP
-kubectl logs -n istio-system deploy/istio-ingressgateway --tail=20 | grep x-forwarded-for
-# 如果看到 "1.2.3.4, 10.0.0.5" 兩段，代表中間有 1 層 proxy → numTrustedProxies: 1
+# access log 預設沒開：先開（meshConfig.accessLogFile=/dev/stdout，或用 Telemetry API）
+# 預設 TEXT 格式只印 XFF 的「值」（引號內那一欄），不印 header 名稱，所以 grep x-forwarded-for 永遠是空的。
+# 實際打一次，直接看最近幾行 log，找引號內的 IP 串：
+kubectl logs -n istio-system deploy/istio-ingressgateway --tail=20
+# 如果某行有 "1.2.3.4, 10.0.0.5" 兩段，代表中間有 1 層 proxy → numTrustedProxies: 1
+# 另一個做法：打 httpbin 的 /get，看它回報收到的 X-Forwarded-For
 ```
 
 **限制**：IP 白名單只能證明「來自那個網段」，不能證明「是哪個服務」。A cluster 裡任何一個 Pod 都共用同一個出口 IP。**所以 IP 白名單應該當作 JWT 的補強，不是替代。**
 
-### 補救方案三：TLS passthrough（保留原始憑證，複雜度高）
+### 補救方案三：TLS passthrough（端到端 TLS，由 app 自行做 mTLS，複雜度高）
 
-讓 B 的 Gateway 不終止 TLS，直接把加密流量透傳給後端，由後端自己驗 client 憑證。
+讓 B 的 Gateway 不終止 TLS，直接把加密流量透傳給後端（"pass the ingress traffic “as is”, without terminating TLS"）。保留下來的是 A 的 **app** 自己發起的 TLS，不是 A 的 Istio workload 身分：A 的 app 要自備 B 的 app 信任的 client cert，由 **B 的應用程式**（不是 B 的 sidecar）驗證。B 的 sidecar 上 `principals` 看到的仍是 gateway 那條 mTLS 的身分，而且透傳之後只能做 L4 判斷。
 
 ```yaml
 apiVersion: networking.istio.io/v1
@@ -1886,7 +1898,7 @@ spec:
             port: { number: 8443 }
 ```
 
-**代價很大**：因為不解密，所以 **VirtualService 的所有 L7 功能全部失效**——沒有 path 路由、沒有 header 比對、沒有 canary weight、沒有 L7 metrics。而且憑證管理要自己做。**除非有強制的端到端加密合規要求，否則不建議。**
+**代價很大**：因為不解密，所以 **VirtualService 的所有 L7 功能全部失效**——沒有 path 路由、沒有 header 比對、沒有 L7 metrics（`tls` route 仍可用 `weight` 做連線層級的比例分流，只是不能依 header 或 path）。而且憑證管理要自己做。**除非有強制的端到端加密合規要求，否則不建議。**
 
 ### A cluster 這一側要準備什麼
 
