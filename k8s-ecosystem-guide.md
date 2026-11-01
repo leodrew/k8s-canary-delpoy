@@ -3946,7 +3946,7 @@ kubectl logs -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy --tail=50
 
 > **前提：access log 預設是關的。** 沒打開的話上面這行不會有任何請求紀錄（官方：「Istio offers a few ways to enable access logs.」）。要用 Telemetry API 打開，或在安裝時設 `meshConfig.accessLogFile=/dev/stdout`；只有 `demo` configuration profile 會預設啟用。
 
-預設格式的欄位順序（後面還有 `upstream_host` 之後的其他欄位，這裡用 `...` 省略）：
+預設格式的欄位順序（實際輸出在 `upstream_host` 後還有更多欄位）：
 
 ```
 [時間] "METHOD PATH PROTOCOL" 狀態碼 response_flags ... "upstream_host" ...
@@ -3966,20 +3966,22 @@ kubectl logs -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy --tail=50
 | `UT` | Upstream Timeout | 後端太慢，或 `timeout` 設太短 |
 | `UAEX` | 外部授權拒絕 | `CUSTOM` action 的 ext_authz |
 | `DC` | Downstream Connection termination | client 主動斷線 |
-| `-`（RBAC 拒絕沒有專屬 flag） + 403 | 授權拒絕 | 看 `RESPONSE_CODE_DETAILS` 是否為 `rbac_access_denied_matched_policy[...]`；見 **Part 3** |
+
+> **RBAC 拒絕沒有專屬 flag**：Envoy 的 response flag 清單裡沒有 RBAC，所以 AuthorizationPolicy 擋下時 flag 是 `-`，要靠 403 加上 `RESPONSE_CODE_DETAILS` 的 `rbac_access_denied_matched_policy[...]` 判讀，見 **Part 3**。
 
 **症狀 → 原因 對照：**
 
 | 你看到 | 最可能的原因 |
 |---|---|
-| 404 且 gateway 有 log、flag 是 `NR` | HTTP 的 `Host` 沒對上任何 VirtualService／Gateway `hosts`（HTTPS 的 SNI 不符則是 TLS 握手失敗，不會回 404） |
+| 404 且 log 有 `NR` | 沒有路由匹配：HTTP 的 `Host` 沒對上 Gateway／VirtualService 的 `hosts`，或 VirtualService 的 `match`／`gateways` 沒對上（HTTPS 的 SNI 不符是 TLS 握手失敗，不會回 404） |
 | gateway 完全沒 log | 通常是 access log 沒開，或流量根本沒到 gateway（DNS、LB、防火牆） |
-| 404 且 log 有 `NR` | VirtualService 的 `match` 或 `gateways` 沒對上 |
 | 503 且 `UH` / `NC` | subset 找不到 Pod，或 Service selector 錯 |
 | 503 且 `UF` | mTLS 不匹配、NetworkPolicy 擋、或後端真的掛了 |
 | 403 + `RBAC: access denied` | AuthorizationPolicy（Part 3） |
-| 偶發 502／503 且集中在部署期間 | 缺 `preStop` sleep（Part 6.1）。Envoy 回的多半是 503 加 `UC`／`UF`／`URX`；502 較常是外層 F5／nginx 回的 |
+| 偶發 502／503 且集中在部署期間 | 缺 `preStop` sleep（Part 6.1；見表下說明） |
 | 內部呼叫不吃 VS 規則 | `gateways` 缺 `mesh`（Part 6.6） |
+
+> **502 還是 503？** 在 Envoy 底下多半看到 503 加 `UC`／`UF`／`URX`；502 較常是外層 F5／nginx 回的。
 
 ### 8.3 一分鐘分流診斷
 
