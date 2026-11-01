@@ -528,3 +528,10 @@ Started: (not yet run)
 - Review 1 輪：Standards 無硬性違規（3 個判斷題：踩雷 4 句子偏長、來源標籤有重名、least request 說明出現兩處，未改）；Spec 無發現（引文皆在官方頁找到）。觀察：traffic-management 引文原句後接逗號，guide 在引文內加了句點，未改。
 - Learnings: virtual-service 頁的 "Default is forward to upstream." 在 offset 100000 之後。
 ---
+## 2026-11-01 - US-044
+- 修正 Part 7.1/7.2（P07-001..004）：7.1 改成「並存但比例綁 Pod 數、自動推進」；DR cookie 改 istio-session-affinity（與 6.2 一致）並註明 subset 內軟黏著；VS 註解與表下補「推進權重時 v2 也要擴／配 HPA」。
+- 連動：7.4 表格 A 列同步改 cookie 名稱與「軟黏著」（P07-006 同一處，為前後一致）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（僅判斷題）；Spec 1 項：130% 引文是 maxSurge=30% 的例子，已補「以 maxSurge 設為 30% 為例」。第 2 輪未再跑（單句措辭修正）。
+- Learnings: 官方引文若是範例值（非預設），引用時要標明是範例。
+---
