@@ -1741,9 +1741,13 @@ spec:
     matchLabels:
       app: epmm-api
   jwtRules:
-    - issuer: "https://keycloak.example.com/auth/realms/my-realm"
-      jwksUri: "https://keycloak.example.com/auth/realms/my-realm/protocol/openid-connect/certs"
+    - issuer: "https://keycloak.example.com/realms/my-realm"
+      jwksUri: "https://keycloak.example.com/realms/my-realm/protocol/openid-connect/certs"
       forwardOriginalToken: true      # 讓後端 app 也拿得到原始 token
+      # issuer 必須跟 token 的 iss 逐字相同，否則所有 token 都 401；以 Keycloak 的
+      # /realms/my-realm/.well-known/openid-configuration 回傳的 issuer 為準。
+      # Keycloak 17 以後的 Quarkus 版預設沒有 /auth 前綴，只有設了 http-relative-path=/auth
+      # 或用舊版 WildFly 才要保留 /auth（requestPrincipals 的前綴也要一起改）。
 ---
 # 只有帶正確 JWT 的才放行
 apiVersion: security.istio.io/v1
@@ -1761,10 +1765,12 @@ spec:
         - source:
             # 格式: <issuer>/<subject>
             requestPrincipals:
-              - "https://keycloak.example.com/auth/realms/my-realm/*"
+              - "https://keycloak.example.com/realms/my-realm/*"
       when:
         # 進一步用 claim 區分是「哪個 cluster 的哪個服務」
-        - key: request.auth.claims[azp]        # authorized party = client_id
+        # azp = authorized party。Keycloak 的 azp 是否等於 client_id 以實際 decode 出來的 token 為準；
+        # Istio 也有內建的 request.auth.presenter，內容就是 azp claim。
+        - key: request.auth.claims[azp]
           values: ["pmc-cluster-a-client"]
       to:
         - operation:
@@ -1772,7 +1778,7 @@ spec:
             paths: ["/api/*"]
 ```
 
-> **重要**：`RequestAuthentication` **本身不擋任何東西**。它只做「如果有 JWT 就驗，驗過就把 claim 放進 metadata」。**沒帶 token 的請求會直接通過**。要真的擋，必須另外寫一條 AuthorizationPolicy 用 `requestPrincipals` 要求「必須有已驗證的 JWT」。這是初學者最常見的誤解。
+> **重要**：`RequestAuthentication` 不擋**沒帶** token 的請求，但會直接以 401 拒絕帶了**無效** token（簽章錯、過期、iss 不符）的請求。它只做「如果有 JWT 就驗，驗過就把 claim 放進 metadata」。**沒帶 token 的請求會直接通過**（只是沒有已驗證的身分）。要真的擋，必須另外寫一條 AuthorizationPolicy 用 `requestPrincipals` 要求「必須有已驗證的 JWT」。這是初學者最常見的誤解。
 
 **補一條「沒 JWT 就擋」的保險：**
 
@@ -1793,8 +1799,10 @@ spec:
             notRequestPrincipals: ["*"]     # 「沒有任何已驗證 JWT 身分的」一律擋
       to:
         - operation:
-            notPaths: ["/actuator/health*"]  # health check 除外
+            notPaths: ["/actuator/health*"]  # 只是不被這條 DENY 擋；放不放行仍取決於 ALLOW（見下方說明）
 ```
+
+> 注意：`notPaths` 只讓 health 路徑躲過這條 DENY。同一個 workload 上已經有 `epmm-api-require-jwt` 這條 ALLOW（只放 `/api/*` 的 GET/POST），沒有任何 ALLOW 命中的請求仍會被拒絕（403），所以這裡的「除外」並不會讓 `/actuator/health` 被放行。要讓外部呼叫者也能打 health，得在 ALLOW 另加一條 rule 放行該路徑；kubelet 探針則經 probe rewrite 走 pilot-agent，本來就不受這些政策影響。另外，有 `requestPrincipals` 的 ALLOW 在，這條 DENY 其實是多餘的保險。
 
 ### 補救方案二：IP 白名單（`remoteIpBlocks`）
 
