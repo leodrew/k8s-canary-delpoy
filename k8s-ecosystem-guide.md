@@ -3375,6 +3375,8 @@ spec:
       containers:
         - name: app
           image: your-registry/pmc-epmmformquerygui:1.2.3
+          resources:
+            requests: { memory: "512Mi", cpu: "250m" }   # 7.5 的 HPA 靠它算 CPU utilization；沒設的話 HPA 不會動
 ---
 # v2（新版本）—— 只有 version label 和 image 不同
 apiVersion: apps/v1
@@ -3398,6 +3400,8 @@ spec:
       containers:
         - name: app
           image: your-registry/pmc-epmmformquerygui:1.3.0
+          resources:
+            requests: { memory: "512Mi", cpu: "250m" }   # 同上：每一版都要設，7.5 的 HPA 才算得出來
 ```
 
 #### 步驟 2：Service 不變（同時選中兩個版本）
@@ -3601,15 +3605,15 @@ canary 分流是**逐請求（per-request）**決定的，所以一個已登入�
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: pmc-epmmformquerygui-hpa
+  name: pmc-epmmformquerygui-v1-hpa   # 每一版 Deployment 各一個 HPA（v2 另複製一份，name 與 scaleTargetRef 換成 -v2）
   namespace: ea-pmc
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: pmc-epmmformquerygui      # 要縮放誰
+    name: pmc-epmmformquerygui-v1   # 要縮放誰：7.2 的 Deployment 叫 -v1／-v2，沒有叫 pmc-epmmformquerygui 的，寫錯名字 HPA 找不到目標
 
-  minReplicas: 2                    # 【建議至少 2】1 個的話滾動更新會有空窗
+  minReplicas: 2                    # 【建議至少 2】只有 1 個時，節點故障、drain 或 PDB 擋住自願中斷時就沒有備援
   maxReplicas: 10                   # 上限，避免失控擴容把 cluster 吃光
 
   metrics:
@@ -3621,18 +3625,20 @@ spec:
           type: Utilization
           averageUtilization: 70    # 目標：平均 CPU 用量 = requests 的 70%
                                     # 【關鍵】分母是 requests，沒設 requests 這個 HPA 不會動
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80    # Java 應用的 memory 通常不會降，慎用（見踩雷）
+    # 【預設不啟用 memory】HPA 有多個指標時，每個指標各算一個期望 replica 數，然後取「最大值」；
+    # JVM 的 memory 降不下來，這一項會讓 HPA 永遠縮不回去（見踩雷）
+    # - type: Resource
+    #   resource:
+    #     name: memory
+    #     target:
+    #       type: Utilization
+    #       averageUtilization: 80
 
     # ---------- 型別 2：Pods（每個 Pod 的自訂指標平均值）----------
     - type: Pods
       pods:
         metric:
-          name: istio_requests_per_second     # 需要 prometheus-adapter
+          name: istio_requests_per_second     # 名稱由 adapter 的規則自訂（Istio 標準指標是 istio_requests_total counter，要在規則裡用 rate 定義），並需要提供 custom.metrics API 的實作
         target:
           type: AverageValue
           averageValue: "100"                 # 每個 Pod 平均 100 RPS
