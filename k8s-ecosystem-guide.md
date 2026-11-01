@@ -3018,7 +3018,7 @@ spec:
 
 #### 踩雷
 
-- **`credentialName` 的 secret 放錯 namespace**：secret 必須在 **ingressgateway Pod 所在的 namespace**（istioctl 預設安裝在 `istio-system`；Helm 則依安裝時的 release 名稱與 namespace 而定，官方 Helm 範例用的是 `istio-ingress`，請先 `kubectl get deploy -A` 找出實際位置），不是 Gateway 資源所在的 namespace，也不是你 app 的 namespace。這是 Gateway 最常見的錯誤。較新的 Istio 支援 `namespace/name` 的跨 namespace 引用，但要確認你的版本支援。
+- **`credentialName` 的 secret 放錯 namespace**：secret 必須在 **ingressgateway Pod 所在的 namespace**（istioctl 預設安裝在 `istio-system`；Helm 則依安裝時的 release 名稱與 namespace 而定，官方 Helm 範例用的是 `istio-ingress`，請先 `kubectl get deploy -A` 找出實際位置），不是 Gateway 資源所在的 namespace，也不是你 app 的 namespace。這是 Gateway 最常見的錯誤。
 - **多個 Gateway 共用同一張（萬用字元）憑證，第二個 host 會 404**：瀏覽器會重用已建立的 HTTP/2 連線，連到第一個 host 之後再存取第二個 host 時，請求被送到不對的 Gateway 而得到 404（Istio 官方 common-problems 文件記載的情況）。官方的解法是把它們合併成單一個萬用字元 Gateway。**避免多個 Gateway 用重疊的 host 或共用憑證。**
 - **`selector` 對不到 Pod**：設定會被 istiod 接受但完全沒有作用。驗證方式：
 
@@ -3032,7 +3032,7 @@ istioctl proxy-config listener deploy/istio-ingressgateway -n istio-system
 istioctl analyze -n istio-system
 ```
 
-- **憑證更新後沒生效**：Istio 是透過 SDS 動態載入憑證的，更新 secret 後通常幾秒內生效，不需要重啟。如果沒生效，檢查 secret 的 key 是否正確：TLS Secret 要有 `tls.crt` / `tls.key`，generic Secret 要有 `cert` / `key`（兩種格式 Istio 都接受）。
+- **憑證更新後沒生效**：Istio 透過 SDS 下發憑證，理論上不用重啟 gateway；更新後請用 `istioctl proxy-config secret` 確認新憑證已經生效。如果沒生效，檢查 secret 的 key 是否正確：TLS Secret 要有 `tls.crt` / `tls.key`，generic Secret 要有 `cert` / `key`（兩種格式 Istio 都接受）。
 - **Gateway 和 VirtualService 的 host 必須有交集**，否則 404。
 
 ---
