@@ -578,3 +578,11 @@ Started: (not yet run)
 - Review rounds: R1 Standards = 長表格格子、flag 表出現兩個 `-`、兩列 404 重疊、`...` 措辭 → 全改；Spec = 無阻擋（SNI 說法為帳本自身無來源的主張、NR 後半句被 WebFetch 截斷未能確認）。R2 = 無實質缺陷（404/NR 格子偏長，接受）。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-051
+- 修正 Part 8 的 8.3 一分鐘分流診斷：P08-007（proxy-status 改 awk 'NR==1 || /STALE/'，註解說明 grep -v SYNCED 為何錯）、P08-008（endpoints → endpointslices）、P08-009（步驟 5 註明明文／STRICT 前提）。
+- Part 8 結尾加 ### 參考來源（8 個去重 URL），"Part 8" 加進 VERIFIED_PARTS。
+- 連動：步驟 5 註解建議 STRICT 時改從有 sidecar 的 pod 測（例如步驟 6 的 app pod），屬「例如」性質的延伸，帳本只說「改從有 sidecar 的 pod 測試」。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 0 hard、Spec 0（WebFetch 三個來源引文皆找到）。無 fix commit。
+- Learnings: 無新增通用慣例。
+---
