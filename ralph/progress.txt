@@ -593,3 +593,9 @@ Started: (not yet run)
 - Review round 1: Standards 0 / Spec 0（三個來源 URL 引文皆驗證存在）。
 - 觀察（未改，屬其他列）：guide 內 cookie 名稱 istio-affinity 與 istio-session-affinity 並存；~4230 摘要表「低（需重啟）」。
 ---
+## 2026-11-01 - US-053
+- 修正 Part 9 發現 3／4：P09-007、P09-008 在「現狀」標註 track-a 已修（對照 03-virtualservice.yaml、01-service.yaml 確認內容）；P09-009 重寫發現 4 的「為什麼是問題」（HTTP 自動偵測有效，引 Istio 官方兩句；只有 server-first 必須明確宣告），並改優先表第 1 列的效益欄（連動：同一論點）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 hard、4 smells（表格格子過長 → 已縮短並指向發現 4 說明；其餘為指路/重複的輕微觀察，未改）；Spec 0 findings（兩句引文逐字在官方頁找到）。
+- 觀察（屬其他帳本列，未動）：L2523/L2525/L2527（Part 4）、L5430、L6986 仍說未命名 port 會讓 L7／header 路由失效。
+---
