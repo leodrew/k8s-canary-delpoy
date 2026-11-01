@@ -2994,35 +2994,38 @@ spec:
         - "api.example.com"
 ```
 
-#### TLS 四種 mode
+#### TLS mode
 
 | mode | 行為 | 用途 |
 |---|---|---|
 | `SIMPLE` | 標準單向 TLS，gateway 出示憑證並解密 | **最常用** |
 | `MUTUAL` | 雙向 TLS，額外驗 client 憑證 | B2B API、跨 cluster 高安全需求 |
 | `PASSTHROUGH` | **不解密**，依 SNI 直接轉發 | 端到端加密（代價：失去所有 L7 功能） |
-| `ISTIO_MUTUAL` | 用 Istio 自動簽發的憑證做 mTLS | mesh 內部的 gateway（如 east-west gateway） |
+| `OPTIONAL_MUTUAL` | 同 `MUTUAL`，但 client 憑證可有可無（有出示才驗證） | 同一個入口同時接受有／無 client 憑證的連線 |
+| `ISTIO_MUTUAL` | gateway 使用 Istio 自動簽發、代表 gateway workload 身分的憑證，跟 sidecar 之間走 mTLS | sidecar 到 egress gateway 這一段的 mTLS |
 | `AUTO_PASSTHROUGH` | 自動 passthrough，不需要 VirtualService | multi-cluster 的 east-west gateway 專用 |
 
 #### 常用 key 對照
 
 | Key | 說明 | 踩雷 |
 |---|---|---|
-| `selector` | 對到 ingressgateway 的 **Pod label** | 選錯時 apply 不會被拒絕，設定也不會生效（`istioctl analyze` 能抓到，見上方 YAML 註解） |
-| `servers[].port.protocol` | 協定 | `HTTPS` 才會做 TLS 終止 |
-| `servers[].hosts` | 接受的 Host header | **`*` 太寬鬆**，多個 Gateway 會互搶 |
+| `selector` | 對到 ingressgateway 的 **Pod label**（label 依安裝方式而定，請先 `kubectl get deploy -A` 找出實際的 gateway 再查它的 label） | 選錯時 apply 不會被拒絕，設定也不會生效（`istioctl analyze` 能抓到，見上方 YAML 註解） |
+| `servers[].port.protocol` | 協定 | `HTTPS` 會終止 TLS 再做 L7 路由；`TLS` 搭 `SIMPLE`／`MUTUAL` 也會終止 TLS（給非 HTTP 流量用），搭 `PASSTHROUGH` 則不解密、只看 SNI |
+| `servers[].hosts` | 接受的 Host header | 避免多個 Gateway 用重疊的 host 或共用同一張（萬用字元）憑證（見下方「踩雷」） |
 | `servers[].tls.credentialName` | TLS secret 名稱 | **secret 必須在 gateway pod 的 namespace** |
 | `servers[].tls.httpsRedirect` | 80 → 443 | 只在 `protocol: HTTP` 的 server 上設 |
 | `servers[].tls.minProtocolVersion` | 最低 TLS 版本 | 合規要求常見 |
 
 #### 踩雷
 
-- **`credentialName` 的 secret 放錯 namespace**：secret 必須在 **ingressgateway Pod 所在的 namespace**（通常是 `istio-system`），不是 Gateway 資源所在的 namespace，也不是你 app 的 namespace。這是 Gateway 最常見的錯誤。較新的 Istio 支援 `namespace/name` 的跨 namespace 引用，但要確認你的版本支援。
-- **`hosts: ["*"]` 造成 Gateway 互搶**：多個團隊各自建 Gateway 又都寫 `*`，行為會變得不可預期。**永遠寫明確的 host。**
+- **`credentialName` 的 secret 放錯 namespace**：secret 必須在 **ingressgateway Pod 所在的 namespace**（istioctl 預設安裝在 `istio-system`；Helm 則依安裝時的 release 名稱與 namespace 而定，官方 Helm 範例用的是 `istio-ingress`，請先 `kubectl get deploy -A` 找出實際位置），不是 Gateway 資源所在的 namespace，也不是你 app 的 namespace。這是 Gateway 最常見的錯誤。較新的 Istio 支援 `namespace/name` 的跨 namespace 引用，但要確認你的版本支援。
+- **多個 Gateway 共用同一張（萬用字元）憑證，第二個 host 會 404**：瀏覽器會重用已建立的 HTTP/2 連線，連到第一個 host 之後再存取第二個 host 時，請求被送到不對的 Gateway 而得到 404（Istio 官方 common-problems 文件記載的情況）。官方的解法是把它們合併成單一個萬用字元 Gateway。**避免多個 Gateway 用重疊的 host 或共用憑證。**
 - **`selector` 對不到 Pod**：設定會被 istiod 接受但完全沒有作用。驗證方式：
 
 ```bash
 # 看 gateway pod 有沒有真的收到這個 listener
+# （deploy 名稱與 namespace 依安裝方式而定：istioctl 預設是 istio-system 的 istio-ingressgateway，
+#   Helm 則跟 release 名稱與 namespace 走，請先 kubectl get deploy -A 確認）
 istioctl proxy-config listener deploy/istio-ingressgateway -n istio-system
 
 # 一次檢查所有設定問題
