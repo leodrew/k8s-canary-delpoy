@@ -2179,7 +2179,7 @@ spec:
 
 #### 解決什麼問題
 
-裸 Pod 掛了就沒了。Deployment 提供三件事：**維持指定數量的副本**、**滾動更新不中斷服務**、**出事可以一鍵回滾**。它自己不直接管 Pod，而是管 ReplicaSet，每次改 `template` 就產生一個新的 ReplicaSet，然後逐步把流量從舊的挪到新的。
+裸 Pod 掛了就沒了。Deployment 提供三件事：**維持指定數量的副本**、**滾動更新不中斷服務**、**出事可以一鍵回滾**。它自己不直接管 Pod，而是管 ReplicaSet，每次改 `template` 就產生一個新的 ReplicaSet，然後逐步調整新、舊 ReplicaSet 的 Pod 數量。Deployment 本身不搬流量：流量會不會轉移，取決於 Service／EndpointSlice 依 Pod 的 ready 狀態更新後端清單（在 mesh 裡則是 Envoy）。
 
 #### 全註解 YAML
 
@@ -2196,7 +2196,7 @@ spec:
   replicas: 2                        # 用 HPA 時「不要寫這行」，否則每次 apply 都會把 HPA 調好的數字打回來
   revisionHistoryLimit: 5            # 保留幾個舊 ReplicaSet 可供回滾（預設 10，會佔 etcd）
   progressDeadlineSeconds: 600       # 超過這麼久還沒 rollout 完就標記為失敗（預設 600）
-  minReadySeconds: 10                # Pod ready 後還要穩定這麼久才算「可用」，防止一 ready 就被塞流量
+  minReadySeconds: 10                # Pod ready 後還要穩定這麼久，Deployment 才把它算進 available（影響滾動更新推進速度；Pod 一 ready 仍會進 EndpointSlice 接流量，這個欄位擋不住）
 
   strategy:
     type: RollingUpdate              # 另一個選項是 Recreate（先全殺再全起，會有 downtime）
@@ -2254,9 +2254,9 @@ spec:
                 # 換成 topology.kubernetes.io/zone 就是跨可用區分散
 
       topologySpreadConstraints:     # 比 antiAffinity 更精確的分散控制（推薦用這個）
-        - maxSkew: 1                 # 各 zone 之間 Pod 數量最多差 1
+        - maxSkew: 1                 # 盡量讓各 zone 的 Pod 數量差距不超過 1（只有 DoNotSchedule 才是硬上限）
           topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: ScheduleAnyway   # 不滿足時還是排（DoNotSchedule = 寧可 Pending）
+          whenUnsatisfiable: ScheduleAnyway   # 不滿足時還是排，maxSkew 只是排程偏好、實際差距可能超過 1（DoNotSchedule = 寧可 Pending）
           labelSelector:
             matchLabels:
               app: pmc-epmmformquerygui
@@ -2266,12 +2266,12 @@ spec:
           operator: "Equal"          # Equal 要比對 value；Exists 只要 key 存在就容忍
           value: "application"
           effect: "NoSchedule"       # NoSchedule / PreferNoSchedule / NoExecute
-        - key: "node.kubernetes.io/not-ready"
+        - key: "node.kubernetes.io/unreachable"   # node 失聯（Ready=Unknown）；not-ready 指的是 Ready=False
           operator: "Exists"
           effect: "NoExecute"
-          tolerationSeconds: 300     # node 失聯後，撐 300 秒才被驅逐（預設 300）
+          tolerationSeconds: 300     # 系統本來就會自動加 not-ready／unreachable 各 300 秒的 toleration，這裡寫 300 只是重複預設值；只有要調整秒數時才需要寫
 
-      priorityClassName: high-priority   # 資源不足時，優先保住高優先權的 Pod
+      priorityClassName: high-priority   # 優先權決定排程佇列順序，資源不足時可搶占（preempt）低優先權的 Pod；叢集須先建好名為 high-priority 的 PriorityClass，否則 Pod 在 admission 階段就被拒絕
 
       # ---------- 關機行為 ----------
       terminationGracePeriodSeconds: 60  # 收到 SIGTERM 後給多久優雅關閉（預設 30）
