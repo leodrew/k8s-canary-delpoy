@@ -1914,13 +1914,22 @@ spec:
   location: MESH_EXTERNAL          # mesh 外部服務
   resolution: DNS                  # 用 DNS 解析（VIP 可能會換）
   ports:
+    # app 打明文 http://epmm-api.b-cluster.example.com（port 80），由 sidecar 做 TLS origination。
+    # targetPort: 443 把 80 轉去 B 實際的 443；少了它，sidecar 會真的連 B 的 80，連不上。
+    # protocol 必須是 HTTP：DR 的 connectionPool.http 與 L7 功能只對 HTTP port 生效。
+    - number: 80
+      name: http
+      protocol: HTTP
+      targetPort: 443
+    # 這個 port 只給「app 自己已經在講 https」的情況：sidecar 當成不透明 TLS，依 SNI 透傳，
+    # 不會替你加密、也不會套下面 DR 的 tls 設定（DR 的 tls 只設在 port 80）。
     - number: 443
       name: https
       protocol: HTTPS
   exportTo:
     - "."                          # 只有 ea-pmc 看得到，減少其他 sidecar 的設定量
 ---
-# 2. DestinationRule：TLS origination（app 打 http，sidecar 幫你升級成 https）
+# 2. DestinationRule：TLS origination（app 打 http:80，sidecar 幫你升級成 https:443）
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
@@ -1929,9 +1938,20 @@ metadata:
 spec:
   host: epmm-api.b-cluster.example.com
   trafficPolicy:
-    tls:
-      mode: SIMPLE                          # 單向 TLS（只驗對方）
-      sni: epmm-api.b-cluster.example.com   # 內網自簽憑證常常漏這個 → handshake 失敗
+    # TLS 只能設在 port 80 的 portLevelSettings：若設在 host 層級，連 port 443 那條 app 自己
+    # 已加密的連線也會被再加密一次（雙重 TLS）
+    portLevelSettings:
+      - port: { number: 80 }
+        tls:
+          mode: SIMPLE                      # 單向 TLS（只驗對方）
+          # SNI 在 HTTP port 上會依 Host header 自動帶入，不寫 sni 也可以。
+          # 真正會讓自簽憑證失敗的是沒給 CA：沒有 caCertificates／credentialName 時，
+          # sidecar 用 OS 信任庫驗 B 的憑證，自簽（內部 CA）一定 handshake 失敗。
+          caCertificates: /etc/certs/b-cluster-ca.pem    # 要先把內部 CA 掛進 sidecar 的這個路徑
+          # 或改用 credentialName: b-cluster-ca（secret 放在 ea-pmc，也就是 sidecar 所在的 ns），
+          # 此時這份 DR 必須加 workloadSelector 指到 app 的 Pod
+          subjectAltNames:
+            - epmm-api.b-cluster.example.com             # 驗證 B 憑證上的名字，避免只驗到「有簽過」
     connectionPool:
       tcp:  { maxConnections: 100, connectTimeout: 3s }
       http: { http2MaxRequests: 100, maxRequestsPerConnection: 10 }
@@ -1954,6 +1974,10 @@ spec:
         - "ea-pmc/epmm-api.b-cluster.example.com"   # ServiceEntry 屬於它所在的 ns
 ---
 # 4. NetworkPolicy：放行出向
+#    注意這份是「疊加式」的：Pod 一被任何含 Egress 的 policy 選到，就進入 egress 隔離，
+#    沒被放行的出向全部擋掉——包括 DNS（resolution: DNS 時是 Envoy 自己要經 kube-dns 解析 B 的名字）
+#    和 sidecar 連 istiod 的 15012。所以這份必須搭配「既有的、允許 kube-dns 53/UDP+TCP 與
+#    istiod 15012 的 egress policy」一起套用；單獨套用，Pod 會解析不了名字、也拿不到 xDS 設定。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -2011,6 +2035,11 @@ spec:
       timeout: 10s
 ---
 # 3. gateway 層：IP 白名單
+#    前提：remoteIpBlocks 讀的是 X-Forwarded-For／PROXY protocol，所以前面要有 L7 LB 或 PROXY protocol，
+#    且 gateway 要設 numTrustedProxies，否則比對到的不是你以為的 IP。
+#    若 A 直接打 B 的 gateway LB VIP（中間沒有 L7 LB），改用 ipBlocks，
+#    而且 gateway 的 LB Service 要 externalTrafficPolicy: Local 才保得住來源 IP。
+#    另外 gateway 看到的通常是 A 的 node／NAT 出口 IP，不是 A 的 Pod CIDR——下面的 10.20.30.0/24 要填那個。
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
