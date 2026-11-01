@@ -599,3 +599,11 @@ Started: (not yet run)
 - Review round 1: Standards 0 hard、4 smells（表格格子過長 → 已縮短並指向發現 4 說明；其餘為指路/重複的輕微觀察，未改）；Spec 0 findings（兩句引文逐字在官方頁找到）。
 - 觀察（屬其他帳本列，未動）：L2523/L2525/L2527（Part 4）、L5430、L6986 仍說未命名 port 會讓 L7／header 路由失效。
 ---
+## 2026-11-01 - US-054
+- 修正 Part 9 發現 5（P09-011 刪掉「預設 25% 容量減半」改寫成 round down/up 算式；P09-012 PDB selector 加 version: stable，並註明 track-a/base 尚無 04-poddisruptionbudget；P09-013 標 track-a 已修）與發現 6（P09-014 標 track-a 已修＋preStop.sleep 1.34 指回 Part 6.1；P09-015 502 → mesh 內通常 503／UC／UF）。
+- Part 9 結尾加 `### 參考來源`（10 個官方 URL）；VERIFIED_PARTS 加 "Part 9"。
+- 連動修改：發現 6 標題與處理順序表第 2 列的「零星 502」改成「502／503」（與修正後內文一致）。發現 5 加了一句「寫死的值…看得出設計意圖」說明為何仍建議明確寫出（非帳本原句，屬編輯性說明）。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards — 標題／表格殘留 502（已修）、其餘為風格建議（未改；Part 8 來源段落本來就沒有導言行）；Spec — 無阻擋發現，WebFetch 確認 Deployment 頁的 rounding down/up 與 Envoy 的 "in addition to 503 response code"。第 2 輪未重跑（修正只是兩處用字一致性，validate.sh 綠）。
+- Learnings: 修內文結論時順便 grep 同小節標題／表格有沒有殘留舊結論（502）。
+---
