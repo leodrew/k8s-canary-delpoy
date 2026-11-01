@@ -514,3 +514,10 @@ Started: (not yet run)
 - Review round 1: Standards 0 findings (observation: "SDS" not glossed in the bullet, optional); Spec 0 findings (IST0161 quote confirmed on page; secure-ingress page has no no-restart/seconds claim, matching the ledger).
 - Learnings: none new.
 ---
+## 2026-11-01 - US-042
+- 修 6.6 VirtualService：P06-413（weight 改相對比例）、P06-414（attempts 2、(1+attempts)×perTryTimeout<=timeout）、P06-415（fault 拆成獨立 VirtualService，附官方原句）、P06-416（拆出後 header 規則在前＋default）、P06-417（rewrite.uri prefix/exact/regex 差異）。
+- 連動：規則 5 原位改成指路註解；新增「故障注入」小節（含獨立 yaml 區塊）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 無發現（所有引文皆在官方頁，僅帳本 P06-414 的 "includes all retries." 在 Istio 頁找不到逐字，guide 未引用）；Standards 無硬性違規，判斷題 6 項，修了 2 項（二選一警告、default 路由 WHY 註解），其餘（表格格子偏長、續行註解縮排）屬觀察。未再跑第二輪。
+- Learnings: 無新增通用慣例。
+---
