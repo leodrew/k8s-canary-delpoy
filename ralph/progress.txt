@@ -478,3 +478,13 @@ Started: (not yet run)
 - 觀察（未改，不屬本故事）：約第 4968 行仍把 sidecar.istio.io/inject 放在 annotations，屬 P12-004。
 - Learnings: 無新增通則。
 ---
+## 2026-11-01 - US-037
+- 修正 Part 6 / 6.4 CronJob（2/3）：P06-214（TooManyMissedTimes，刪「永遠不再排程」）、P06-215（只補最近一次、MissSchedule）、
+  P06-216（set +e、127.0.0.1、需 curl／只接受 localhost POST）、P06-217（Istio 1.27 預設 native sidecar、K8s 版本線）、P06-218（controller 本地時區）。
+- 連動修改：解法 C 的「選擇建議」補一句 Istio 1.27+／K8s 1.29+ 預設即 native sidecar（屬 P06-217）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 發現（所有引文逐字找到）；Standards 1 項硬性（「」裡放了翻譯）＋ set +e 註解措辭。已改為英文原文放「」、註解改成「不要加 set -e」並移到 set +e 之前。
+  其餘為判斷題（重複敘述、版本沿革註解、troubleshooting 位置）未改。
+- Round 2：因修正只動措辭，由我自行對照上述發現複查，未再跑 sub-agent；validate.sh exit 0。
+- Learnings: 官方英文放「」、錯誤訊息字串不加引號；`set +e` 的註解要寫「不要加 set -e」。
+---
