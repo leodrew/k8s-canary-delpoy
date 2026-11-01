@@ -4036,7 +4036,7 @@ kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
 
 ### 發現 1：Deployment 沒有 `serviceAccountName`（阻擋所有細粒度授權）
 
-**現狀**：`pmc-epmmformquerygui` 的 Pod spec 沒有 `serviceAccountName`，所有 Pod 都使用 `default` SA。
+**現狀**：`spring_full_v4.md` 裡 `pmc-epmmformquerygui` 的 Pod spec 沒有 `serviceAccountName`，所有 Pod 都使用 `default` SA。（repo 的 `canary-manual/track-a/` 已修：Deployment 設了 `serviceAccountName: pmc-epmmformquerygui` 與 `automountServiceAccountToken: false`，SA 定義在 `base/00-serviceaccount.yaml`。下面是還沒修的環境該怎麼改。）
 
 **為什麼是問題**：Istio 的 workload 身分完全來自 ServiceAccount。現在 `ea-pmc` 裡的三個 GUI 服務（FormEdit / FormRender / FormQuery）**身分完全一樣**，都是 `cluster.local/ns/ea-pmc/sa/default`。
 
@@ -4060,21 +4060,23 @@ metadata:
       automountServiceAccountToken: false
 ```
 
-**影響**：低風險，需要 rollout restart 才會拿到新身分。
+**影響**：低風險。`serviceAccountName` 在 `spec.template.spec` 底下，改它就是改 pod template，`kubectl apply` 之後會自動滾動更新、新 Pod 才拿到新身分，不需要另外 `rollout restart`（Kubernetes 官方：「A Deployment's rollout is triggered if and only if the Deployment's Pod template (that is, .spec.template) is changed」）。
 
 ---
 
 ### 發現 2：`sessionAffinity: ClientIP` 在 Istio 下不生效（但架構依賴它）
 
-**現狀**：Service 設了 `sessionAffinity: ClientIP` + 3 小時 timeout，Deployment 跑 2 個 replica，Spring Boot 用 in-memory `HttpSession`。
+**現狀**：`spring_full_v4.md` 的 Service 設了 `sessionAffinity: ClientIP` + 3 小時 timeout，Deployment 跑 2 個 replica，Spring Boot 用 in-memory `HttpSession`。（repo 的 `canary-manual/track-a/base/01-service.yaml` 已拿掉 `sessionAffinity: ClientIP`，改由 `base/02-destinationrule.yaml` 的 `consistentHash` 做黏著。）
 
 **為什麼是問題**：`sessionAffinity` 是 kube-proxy 的功能，而 mesh 內的流量由 sidecar 直接送到 Pod IP，**繞過了 kube-proxy 的負載平衡**（Part 1 關鍵觀念一）。所以這個設定實際上沒有提供你以為的保護。
 
-從外部經 ingressgateway 進來的流量尤其明顯——gateway 的 Envoy 用自己的負載平衡演算法（預設 round-robin）挑 Pod，**同一個使用者的連續請求會在兩個 Pod 之間跳**，session 找不到就會被踢回 Keycloak 重新登入。
+從外部經 ingressgateway 進來的流量尤其明顯——gateway 的 Envoy 用自己的負載平衡演算法（Istio 官方：預設是「least requests model」，即 least request，不是 round-robin）挑 Pod，**同一個使用者的連續請求會在兩個 Pod 之間跳**，session 找不到就會被踢回 Keycloak 重新登入。
 
 **症狀**：使用者偶發性地被登出、或操作到一半跳回登入頁——而且很難重現，因為只在特定的請求分配下才會發生。
 
 **短期修法**：
+
+> 注意：如果 repo 的 `track-a/base/02-destinationrule.yaml`（`pmc-epmmformquerygui-dr`）已套用，它的 host 跟下面這份相同；同一個 host 的兩份 DestinationRule 同時套用會衝突，不要另外再建一份 `pmc-query-affinity`，直接改既有那份。
 
 ```yaml
 apiVersion: networking.istio.io/v1
@@ -4088,7 +4090,10 @@ spec:
     loadBalancer:
       consistentHash:
         httpCookie:
-          name: JSESSIONID
+          # 不要用 JSESSIONID：Istio 官方說 ttl「If specified, a cookie with the TTL will be generated if the cookie is not present」，
+          # 設了 ttl，請求沒帶 cookie 時 Envoy 會自己產生同名 cookie，跟 Spring 的 session cookie 打架，
+          # Spring 換 session id 時雜湊值也跟著變。所以用專用名稱。
+          name: istio-affinity
           ttl: 10800s
 ```
 
