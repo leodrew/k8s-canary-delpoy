@@ -399,3 +399,9 @@ Started: (not yet run)
 - Review round 1: Standards 0, Spec 0（五個來源 URL 皆 WebFetch 確認引文存在；Keycloak 17 見 migrating-to-quarkus 頁）。
 - 連動修改：無。"Keycloak 17" 出自該頁 "Starting with Keycloak 17 the default distribution is now powered by Quarkus"。
 ---
+## 2026-11-01 - US-026
+- 修正 Part 5 補救方案二（ALLOW→DENY+notRemoteIpBlocks 並加警告、numTrustedProxies 前提補 L7/L4 區分、grep XFF 改法）與補救方案三（標題與說明改為 app 自行 mTLS、刪「沒有 canary weight」）。對應 P05-007..011。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 抓到 L4 bullet 缺「PROXY protocol 需 gateway 設定、與 numTrustedProxies 不併用」；Standards 抓到 DENY 理由在警告與 yaml 註解重複。已在 fix commit 處理。未跑第二輪 review（剩餘皆為風格層級觀察：引號樣式、externalTrafficPolicy 官方頁未載明但為帳本建議）。
+- 觀察（未改）：externalTrafficPolicy: Local 出自帳本建議，network-topologies 頁沒提到；Part 5 尚未加進 VERIFIED_PARTS（最後一個 Part 5 故事才加）。
+---
