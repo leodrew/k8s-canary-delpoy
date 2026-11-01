@@ -2712,9 +2712,9 @@ kubectl rollout restart deploy/pmc-epmmformquerygui -n ea-pmc
 #### 踩雷
 
 - **`subPath` 掛載不會更新**——這是最常見的困惑。你的 `access-denied.html` / `fallback.html` 就是用 subPath 掛的，**改了 ConfigMap 之後必須重啟 Pod 才會生效**。
-- **ConfigMap 不存在時 Pod 卡在 `ContainerCreating`**，訊息在 `kubectl describe pod` 的 Events 裡，不是 log 裡。
+- **引用的 ConfigMap 不存在、又沒標 `optional: true` 時，Pod 起不來**（官方原文：「If you reference a ConfigMap that doesn't exist and you don't mark the reference as optional, the Pod won't start.」）。官方沒指定狀態名稱：以 volume 掛載時通常停在 `ContainerCreating`（Events 會有 `FailedMount`）；以 `env`／`envFrom` 引用時通常是 `CreateContainerConfigError`（此細節官方文件未列出）。兩種都要看 `kubectl describe pod` 的 Events，不是 log。
 - **1 MiB 大小上限**。放不下就改用 volume 或 image。
-- **YAML 的 boolean/數字陷阱**：`data` 的值必須是字串。`ENABLED: true` 會被 API 拒絕，要寫 `ENABLED: "true"`。`VERSION: 1.10` 會變成 `1.1`。
+- **YAML 的 boolean/數字陷阱**：`data` 的值必須是字串。`ENABLED: true` 會被 API 拒絕，要寫 `ENABLED: "true"`。沒加引號的 `VERSION: 1.10` 是 YAML 浮點數，同樣會被拒絕，不會被靜默存成 `1.1`；透過 Helm values 等工具帶入時，值可能在進 ConfigMap 之前就先被重新序列化成 `1.1`，所以一律加引號（`VERSION: "1.10"`）。
 - **跨 namespace 不能共用**。ConfigMap 是 namespace 範圍的，`ea-pmc` 的 Pod 不能掛 `ea-epmm` 的 ConfigMap。要共用只能複製（或用 Reflector / Kyverno 這類工具同步）。
 
 ---
