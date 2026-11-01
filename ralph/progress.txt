@@ -450,3 +450,10 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規；Spec 四個來源頁引文都查到、措辭一致，無發現。未改動的觀察：「Istio 用 port 名稱的前綴判斷」那句（表前一行）仍說只靠前綴，與 appProtocol 優先略有張力，不在 P06-011 行範圍，留給後續；其他 Part 的 JSESSIONID httpCookie 區塊屬別的帳本列。
 - Learnings: 無新增通用慣例
 ---
+## 2026-11-01 - US-033
+- 修正 Part 6 的 6.2「其他踩雷」與 consistentHash 段：P06-016（ringHash 或 maglev）、P06-017（改 EndpointSlice 指令並註明 Endpoints API 自 v1.33 deprecated）、P06-018（保守寫法：官方只說會當 port 名稱查，沒寫查不到的行為）、P06-019（healthCheckNodePort 讓 LB 避開沒有 endpoint 的節點；topologySpread 保證不了，要每台都有用 DaemonSet）。
+- Files changed: k8s-ecosystem-guide.md（4 行）
+- Review rounds: 1 輪。Standards：無硬性違規，2 個可選的 judgement call（targetPort 句可標示為推論、deprecated 說明可能重複），不處理。Spec：4 列引文都在頁面上找到（v1.33、service-v1 的 targetPort 引文在 offset 100000 之後），新措辭與引文一致，無發現。
+- 未動：guide 其他位置的 `kubectl get endpoints`（約 3845、4438 行）屬其他帳本列。
+- Learnings: 無新增通用慣例。
+---
