@@ -3587,7 +3587,7 @@ canary 分流是**逐請求（per-request）**決定的，所以一個已登入�
         - destination: { host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local, subset: v1 }
 ```
 
-> **建議**：如果這次改動不大，用**解法 A + 只在離峰時段灰度**就夠。但你架構上遲早要做**解法 C**——因為 `sessionAffinity: ClientIP` 在 Istio 下本來就沒生效（Part 6.2），你現在其實已經在承受「使用者偶爾被登出」的風險了。
+> **建議**：**解法 A 無法避免使用者被登出，只能降低影響。** Istio 官方只把 consistent hash 稱為「soft session affinity」（"Consistent Hash-based load balancing can be used to provide soft session affinity"），而 weight 分流發生在 subset 之間，A 擋不住同一位使用者被送到另一個 subset；只在離峰時段灰度，也只是減少受影響的人數，不是消除。要**保證**不被登出，用**解法 B**（用 cookie 決定版本）或**解法 C**（session 外部化）。你架構上遲早要做**解法 C**——因為 `sessionAffinity: ClientIP` 在 Istio 下本來就沒生效（Part 6.2），你現在其實已經在承受「使用者偶爾被登出」的風險了。
 
 ### 7.5 HorizontalPodAutoscaler
 
