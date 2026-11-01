@@ -4175,9 +4175,11 @@ spec:
 
 - **node drain / cluster 升級時，兩個 Pod 可能同時被驅逐**，造成完全停機。K8s 沒有 PDB 就不知道要保留幾個
 - 尖峰時段只能人工擴容
-- `maxUnavailable` 沒設（預設 25%），2 個 replica 時允許 1 個不可用，滾動更新期間容量減半
+- 滾動更新的 `maxUnavailable` / `maxSurge` 沒有明確寫出來，容量全靠預設值。官方說 `maxUnavailable` 的百分比換算成絕對數字時「rounding down」、`maxSurge`「rounding up」，預設都是 25%：2 個 replica 時 `maxUnavailable` 是 0、`maxSurge` 是 1，所以預設並不會讓容量減半；但寫死的值不會因為 replica 數改變而悄悄換算出別的結果，也才看得出設計意圖
 
 **怎麼改**：
+
+`spec.selector` 只用 `app` 選的話，canary pod 也會被算進去：canary 在線時，兩個 stable pod 仍可能同時被驅逐，而正式流量 100% 走 stable。所以 selector 要再加 `version: stable`（做法見 `canary-manual/CANARY-COMPLETE.md` 3.9；repo 的 `track-a/base/` 目前還沒有這份 PDB 檔案）：
 
 ```yaml
 apiVersion: policy/v1
@@ -4190,9 +4192,10 @@ spec:
   selector:
     matchLabels:
       app: pmc-epmmformquerygui
+      version: stable            # 只保護 stable；少了它，canary pod 也會被算進 minAvailable，canary 在線時兩個 stable 可能同時被驅逐
 ```
 
-同時建議在 Deployment 補：
+同時建議在 Deployment 明確寫出（repo 的 `canary-manual/track-a/release/` 兩份 Deployment 已經加了這三項，下面是還沒修的環境該補的）：
 
 ```yaml
   strategy:
@@ -4206,9 +4209,9 @@ spec:
 
 ### 發現 6：缺少 `preStop` hook（滾動更新期間的零星 502）
 
-**現狀**：Deployment 沒有 `lifecycle.preStop`，`terminationGracePeriodSeconds` 用預設值 30。
+**現狀**：`spring_full_v4.md` 的 Deployment 沒有 `lifecycle.preStop`，`terminationGracePeriodSeconds` 用預設值 30。（repo 的 `canary-manual/track-a/release/` 兩份 Deployment 已修：`preStop` 睡 10 秒、`terminationGracePeriodSeconds: 60`。下面是還沒修的環境該怎麼改。）
 
-**為什麼是問題**：Pod 被刪除時，「從 endpoint 移除」和「收到 SIGTERM」是**並行**發生的。在 endpoint 變更傳播到所有 node 的 kube-proxy 和所有 sidecar 之前（通常幾百毫秒到幾秒），還會有流量繼續打到這個正在關閉的 Pod → **502**。
+**為什麼是問題**：Pod 被刪除時，「從 endpoint 移除」和「收到 SIGTERM」是**並行**發生的。在 endpoint 變更傳播到所有 node 的 kube-proxy 和所有 sidecar 之前（通常幾百毫秒到幾秒），還會有流量繼續打到這個正在關閉的 Pod → 在 mesh 內通常是 **503**（Envoy access log 的 response flag 為 `UC`／`UF`，官方說明這些 flag 都是「in addition to 503 response code」）；502 比較常是外層 F5／nginx 回的。
 
 再加上你有 in-memory session，30 秒的 grace period 對於「等現有請求做完」可能不夠。
 
@@ -4223,6 +4226,8 @@ spec:
       terminationGracePeriodSeconds: 60      # 要大於 preStop sleep + 最長請求時間
 ```
 
+K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`（`preStop: { sleep: { seconds: 10 } }`），細節見 Part 6.1。
+
 ---
 
 ### 建議的處理順序
@@ -4236,6 +4241,19 @@ spec:
 | 5 | 發現 2：consistentHash（短期） | 低 | 減少偶發登出 |
 | 6 | 發現 3：加 `mesh` | **中**（要先驗證 match 完整性） | canary 的前提 |
 | 7 | 發現 2：session 外部化（根本解） | 高（要改 code） | 解決 canary、擴縮容、重啟三個問題 |
+
+### 參考來源
+
+- istio.io — security 概念：https://istio.io/latest/docs/concepts/security/
+- kubernetes.io — virtual-ips：https://kubernetes.io/docs/reference/networking/virtual-ips/
+- istio.io — traffic-management 概念：https://istio.io/latest/docs/concepts/traffic-management/
+- istio.io — destination-rule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- istio.io — virtual-service：https://istio.io/latest/docs/reference/config/networking/virtual-service/
+- istio.io — protocol-selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+- envoyproxy.io — substitution_formatter：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
+- kubernetes.io — Deployment：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- kubernetes.io — disruptions：https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+- kubernetes.io — pod-lifecycle：https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
 
 ---
 
