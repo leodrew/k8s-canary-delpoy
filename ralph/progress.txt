@@ -457,3 +457,11 @@ Started: (not yet run)
 - 未動：guide 其他位置的 `kubectl get endpoints`（約 3845、4438 行）屬其他帳本列。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-01 - US-034
+- 修正 Part 6.3（1/2）：P06-201（Secret 風險補 etcd／建 Pod 權限＋官方四步）、P06-202（subPath 機制改「綁定掛載當下那個檔案」）、P06-204（更新延遲改最長約 2 分鐘＋官方原文＋annotation 立刻刷新）、P06-205（checksum 改對 data 的 jsonpath 算 sha256 前 8 碼）。
+- P06-203（defaultMode，無法驗證）依帳本建議不動。
+- 連動：表格格子寫結論＋「見表下說明」，延遲出處放表下一段。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 0 發現；Spec（WebFetch 全部來源，引文都找得到）0 發現。備註：P06-205 的 ObjectMeta 引文只直接支持 uid，其餘欄位屬一般知識（非發現）。
+- Learnings: 改 guide 時 node 字串裡的 `\.` 會被吃掉，改完 grep 確認（patterns 已有）。
+---
