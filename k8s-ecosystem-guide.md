@@ -2104,7 +2104,8 @@ spec:
 1. **共用 root CA** —— 共用同一個 root CA，替每個 cluster 簽一張各自的 intermediate CA 放進 `cacerts` secret，istiod 用 intermediate 簽發 workload 憑證（istiod 不直接用 root 簽），否則憑證互不信任
 2. **每個 primary 要有所有 cluster 的 API server 存取權** —— `istioctl create-remote-secret` 產生的 kubeconfig secret。Multi-Primary 是雙向（各自讀對方）；Primary-Remote 是單向（primary 的 istiod 讀 remote 的 API server）
 3. **east-west gateway（視網路模型而定）** —— 專門處理跨 cluster 流量的 gateway（跟 ingressgateway 分開）。只有 multi-network（跨網路流量）時才必要；同一個網路的 Multi-Primary 不需要，pod 之間直連（官方：「Service workloads communicate directly (pod-to-pod) across cluster boundaries.」）；Primary-Remote 即使在同一個網路，也常用它把 istiod 暴露給 remote cluster
-4. **network label** —— 每個 cluster 標上 `topology.istio.io/network`
+4. **network label（只有 multi-network 才需要）** —— multi-network 時，在每個 cluster 的 `istio-system` namespace 標上 `topology.istio.io/network`（官方：「If the istio-system namespace is already created, we need to set the cluster's network there:」）；單一網路的指南不設這個 label，只在安裝設定寫 `network: network1`
+5. **真正共通的前提（不論單網路或多網路）** —— 每個 cluster 的 `clusterName` 要唯一、整個 mesh 用相同的 `meshID`；單一網路時，各 cluster 的 Pod／Service CIDR 不可重疊
 
 **換過去之後得到什麼：**
 
@@ -2115,7 +2116,12 @@ spec:
             principals: ["cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"]
 
 # 而且可以做跨 cluster 的 locality failover
-# A cluster 的服務掛了自動導到 B cluster，app 完全無感
+# A cluster 的服務掛了，流量可依 locality（region／zone）failover 到 B cluster
+# 前提：DestinationRule 必須設 outlierDetection（官方：「This is required in order for failover to function properly.」），
+#       需要時再加 localityLbSetting／failover；沒設 outlierDetection 就不會生效
+# failover 要等錯誤累積到 ejection 才觸發，這之前會有請求先失敗，
+#       所以要搭配 retry 才能讓 app「幾乎無感」，不是完全無感
+# 注意：failover 是依 locality（region／zone）決定，不是依 cluster
 ```
 
 **什麼時候值得換：**
@@ -2124,12 +2130,36 @@ spec:
 |---|---|
 | 兩個 cluster 是不同環境（prod / dr） | **不用換**，走 VIP 就好 |
 | 兩個 cluster 屬於不同團隊 / 不同安全域 | **不要換**，mesh 打通等於信任邊界打通 |
-| 網路不互通，只有幾個開放的 VIP | **不能換**，multi-cluster 要求網路可達 |
+| 連 API server 與 east-west gateway 都無法對外開放，只有幾個開放的 VIP | **不能換**。multi-network 本來就是給 Pod 不能直連的網路用的，不需要 Pod 互通；需要的是 east-west gateway 與 API server（Primary-Remote 再加 istiod）可達（官方：「The API Server in each cluster must be accessible to the other clusters in the mesh.」） |
 | 同一個應用需要跨 cluster 高可用 failover | **值得換** |
 | 服務間呼叫非常頻繁，走 VIP 延遲受不了 | **值得換** |
 | 需要細粒度的跨 cluster 服務身分授權 | **值得換** |
 
-> **給你的實務建議**：以你目前「透過對方 VIP 打對方 VirtualService」的架構，**維持現狀 + JWT 授權**是正確選擇。multi-cluster 的維運成本（憑證輪替、跨 cluster 除錯、istiod 版本必須同步升級）遠高於它解決的問題，除非你真的需要跨 cluster failover。
+> **給你的實務建議**：以你目前「透過對方 VIP 打對方 VirtualService」的架構，**維持現狀 + JWT 授權**是正確選擇。multi-cluster 的維運成本（憑證輪替、跨 cluster 除錯、control plane／data plane 的版本差要遵守官方支援規則）遠高於它解決的問題，除非你真的需要跨 cluster failover。
+
+### 參考來源
+
+- istio.io — security-policy-examples：https://istio.io/latest/docs/ops/configuration/security/security-policy-examples/
+- istio.io — network-topologies：https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/
+- istio.io — deployment-models：https://istio.io/latest/docs/ops/deployment/deployment-models/
+- istio.io — destination-rule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- istio.io — service-entry：https://istio.io/latest/docs/reference/config/networking/service-entry/
+- istio.io — sidecar：https://istio.io/latest/docs/reference/config/networking/sidecar/
+- istio.io — virtual-service：https://istio.io/latest/docs/reference/config/networking/virtual-service/
+- istio.io — authorization-policy：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- istio.io — conditions：https://istio.io/latest/docs/reference/config/security/conditions/
+- istio.io — request_authentication：https://istio.io/latest/docs/reference/config/security/request_authentication/
+- istio.io — before-you-begin：https://istio.io/latest/docs/setup/install/multicluster/before-you-begin/
+- istio.io — multi-primary：https://istio.io/latest/docs/setup/install/multicluster/multi-primary/
+- istio.io — multi-primary_multi-network：https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
+- istio.io — primary-remote：https://istio.io/latest/docs/setup/install/multicluster/primary-remote/
+- istio.io — access-log：https://istio.io/latest/docs/tasks/observability/logs/access-log/
+- istio.io — egress-tls-origination：https://istio.io/latest/docs/tasks/traffic-management/egress/egress-tls-origination/
+- istio.io — ingress-sni-passthrough：https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-sni-passthrough/
+- istio.io — failover：https://istio.io/latest/docs/tasks/traffic-management/locality-load-balancing/failover/
+- kubernetes.io — network-policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
+- www.keycloak.org — migrating-to-quarkus：https://www.keycloak.org/migration/migrating-to-quarkus
+- www.keycloak.org — oidc-layers：https://www.keycloak.org/securing-apps/oidc-layers
 
 ---
 
