@@ -465,3 +465,9 @@ Started: (not yet run)
 - Review round 1：Standards 0 發現；Spec（WebFetch 全部來源，引文都找得到）0 發現。備註：P06-205 的 ObjectMeta 引文只直接支持 uid，其餘欄位屬一般知識（非發現）。
 - Learnings: 改 guide 時 node 字串裡的 `\.` 會被吃掉，改完 grep 確認（patterns 已有）。
 ---
+## 2026-11-01 - US-035
+- 修正 guide 6.3 踩雷兩條：P06-206（ConfigMap 不存在時 Pod 起不來；volume 通常 ContainerCreating／FailedMount，env 通常 CreateContainerConfigError，官方未列出）、P06-207（未加引號的 1.10 是 YAML 浮點數，同樣被拒絕；Helm 等工具重新序列化才會變 1.1）。
+- Files changed: k8s-ecosystem-guide.md（2 行）
+- Review rounds: 1 輪。Standards 0 硬性違規（3 個判斷題：2715 偏長且重複「官方未列出」、2717 一句兩點、「同樣會被拒絕」無引文）；Spec 0 發現（兩段引文皆在官方頁找到；P06-207 的「被拒絕」與 Helm 說法只有帳本推論支撐，屬帳本品質備註）。未改措辭，以免偏離帳本建議改法。
+- Learnings: 無新增可重用慣例。
+---
