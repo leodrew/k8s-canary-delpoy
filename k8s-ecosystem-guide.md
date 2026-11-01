@@ -2752,6 +2752,10 @@ spec:
   suspend: false                     # 設 true 暫停排程，不影響已在跑的
 
   jobTemplate:
+    metadata:
+      labels:
+        app: pmc-form-daily-sync     # 讓 kubectl get jobs -l app=pmc-form-daily-sync 只列出這個 CronJob 的 Job
+                                     # （job-name 是每個 Job 都有的 label，只寫 key 會列出整個 namespace 的 Job）
     spec:
       # ---------- 失敗重試 ----------
       backoffLimit: 3                # Pod 失敗後最多重試 3 次（指數退避：10s, 20s, 40s...）
@@ -2762,6 +2766,8 @@ spec:
       completions: 1                 # 需要成功幾次才算完成
       parallelism: 1                 # 同時跑幾個 Pod
 
+      # 官方：要用 .spec.podFailurePolicy，Job 的 pod template 必須把 restartPolicy 設成 Never，
+      # 否則 API 會拒絕這份 YAML（重試改由 Job controller 重建 Pod）。
       podFailurePolicy:              # K8s 1.31+ GA：依 exit code 決定要不要重試
         rules:
           - action: FailJob          # 遇到這個 exit code 直接失敗，不浪費時間重試
@@ -2772,11 +2778,13 @@ spec:
 
       template:
         metadata:
-          annotations:
+          labels:
             # 【Istio 必看】選項 A：這個 job 不需要 mesh，直接不注入 sidecar
+            # 官方建議用 label 形式；annotation 形式的 sidecar.istio.io/inject 已 deprecated
             sidecar.istio.io/inject: "false"
         spec:
-          restartPolicy: OnFailure   # Job 只能用 OnFailure 或 Never，不能用 Always
+          restartPolicy: Never       # Job 只能用 OnFailure 或 Never，不能用 Always；
+                                     # 用了 podFailurePolicy 就必須是 Never（OnFailure 會被 API 拒絕）
           serviceAccountName: pmc-form-sync
 
           containers:
@@ -2831,9 +2839,9 @@ spec:
 kubectl get cronjob -n ea-pmc
 
 # 看這個 CronJob 產生的所有 Job
-kubectl get jobs -n ea-pmc -l job-name --sort-by=.metadata.creationTimestamp
+kubectl get jobs -n ea-pmc -l app=pmc-form-daily-sync --sort-by=.metadata.creationTimestamp
 
-# 看某次執行的 log（Job 的 Pod 跑完不會消失，除非設了 ttl）
+# 看某次執行的 log（Job 的 Pod 跑完不會馬上消失，除非被 ttlSecondsAfterFinished 或 CronJob 的歷史上限 successfulJobsHistoryLimit／failedJobsHistoryLimit 清掉）
 kubectl logs -n ea-pmc job/pmc-form-daily-sync-28912345
 
 # 為什麼沒跑？看 controller 的事件
@@ -2846,7 +2854,7 @@ kubectl create job --from=cronjob/pmc-form-daily-sync manual-test-1 -n ea-pmc
 | Job 狀態 | 意義 |
 |---|---|
 | `Complete` | 成功數達到 `completions` |
-| `Failed` | 重試超過 `backoffLimit`，或超過 `activeDeadlineSeconds` |
+| `Failed` | 重試超過 `backoffLimit`，或超過 `activeDeadlineSeconds`，或 Pod 命中 `podFailurePolicy` 裡 `FailJob` 動作的規則（本節範例就用了）；Indexed Job 另有 `backoffLimitPerIndex`／`maxFailedIndexes` |
 | `Active` 一直不變 | 卡住了。**Istio 環境九成是 sidecar 沒結束**（見下） |
 
 #### 踩雷 1：`startingDeadlineSeconds` 不設的後果
@@ -2875,7 +2883,7 @@ spec:
     spec:
       template:
         metadata:
-          annotations:
+          labels:                  # 官方建議用 label；annotation 形式已 deprecated
             sidecar.istio.io/inject: "false"
 ```
 
