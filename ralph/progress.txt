@@ -607,3 +607,9 @@ Started: (not yet run)
 - Review round 1: Standards — 標題／表格殘留 502（已修）、其餘為風格建議（未改；Part 8 來源段落本來就沒有導言行）；Spec — 無阻擋發現，WebFetch 確認 Deployment 頁的 rounding down/up 與 Envoy 的 "in addition to 503 response code"。第 2 輪未重跑（修正只是兩處用字一致性，validate.sh 綠）。
 - Learnings: 修內文結論時順便 grep 同小節標題／表格有沒有殘留舊結論（502）。
 ---
+## 2026-11-01 - US-055
+- 修正 Part 10.1（P10-001）：ingressgateway 示意輸出補上 15021 狀態埠，並在輸出下方加註「示意輸出、nodePort 隨機分配、現行預設開 15021/80/443、舊版 chart 才固定 31380/31390」。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（WebFetch 確認 istio.io IST0162 頁有 "only open on target ports 15021, 8080 and 8443"，Service port 80→8080、443→8443，與新說法一致）。
+- Learnings: 無新增通則。
+---
