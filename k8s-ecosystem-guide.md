@@ -1435,7 +1435,10 @@ istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json \
 ### 步驟 2：ea-epmm 側開授權
 
 ```yaml
-# 2a. 先確保 mTLS 開著，principals 才有值
+# 2a. STRICT：拒絕沒有 sidecar 的明文流量。
+#     principals 本身不需要它：沒有 PeerAuthentication 時是 PERMISSIVE ＋ auto-mTLS，
+#     兩端都有 sidecar 的連線照樣走 mTLS、principal 照樣有值（見 Part 0「表中三列的補充」的 PeerAuthentication 一條）。
+#     STRICT 的作用是讓沒有 sidecar 的 client 無法用明文繞過身分檢查。
 apiVersion: security.istio.io/v1
 kind: PeerAuthentication
 metadata:
@@ -1471,21 +1474,34 @@ spec:
     - from:
         - source:
             principals:
-              - "cluster.local/ns/istio-system/sa/istio-ingressgateway"
+              # 這個 SA 名稱要先查實際值再填，寫錯時規則 2 永遠不命中、外部流量全被拒：
+              #   istioctl / operator 預設裝法是 istio-ingressgateway-service-account；
+              #   Helm gateway chart 則等於 release 名稱。
+              #   查法：kubectl get pod -n istio-system -l istio=ingressgateway -o jsonpath='{..serviceAccountName}'
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
 
-    # 規則 3（OR）：health / metrics 任何人都能打，不然 probe 和 Prometheus 會死
+    # 規則 3（OR）：health / metrics 放行。注意它沒有 from，等於對「所有來源」開放這些 path。
+    #   預設情況下用不到：probe 預設被改寫到 sidecar 的 15020、Prometheus metrics 預設也合併後從 15020 抓，
+    #   都不經過 inbound AuthorizationPolicy。只有你關掉 probe 改寫或 metrics merge
+    #   （meshConfig.enablePrometheusMerge=false）時才需要這條；需要時 paths 也請縮到最小。
     - to:
         - operation:
             paths: ["/actuator/health*", "/metrics"]
 ```
 
-> **務必記得規則 2 和 3。** 90% 的「加了 AuthorizationPolicy 之後服務就掛了」都是漏了 ingressgateway 或 health check。
+> **務必記得規則 2。** 「加了 AuthorizationPolicy 之後服務就掛了」常見的原因就是漏了 ingressgateway。規則 3 只有在關掉 probe 改寫或 metrics merge 時才需要（見上面規則 3 的註解）。
 
-**上線前先用 AUDIT 跑一輪：**
+**上線前先用 dry-run 預演一輪（不要用 `AUDIT`）：**
+
+`AUDIT` 不影響放行／拒絕，記錄的是「命中規則」的請求，而且沒有另外設定並啟用稽核 plugin 就什麼都不會記，無法預演 `ALLOW` 會擋掉什麼。保留 `action: ALLOW`，改加 dry-run annotation（Alpha）：
 
 ```yaml
-  action: AUDIT      # 先設這個，跑幾天，確認 log 裡沒有該放行卻被記錄的來源
+metadata:
+  annotations:
+    istio.io/dry-run: "true"   # 只預演、不執行；跑幾天，確認沒有該放行卻被標成 shadow denied 的來源
 ```
+
+結果看 proxy 的 debug log 中的 `shadow denied`，或 `authz_dry_run_result` 指標；確認沒誤傷後把 annotation 拿掉才會真正生效。
 
 ### 步驟 3：ea-pmc 側的 Sidecar 要看得到對方
 
