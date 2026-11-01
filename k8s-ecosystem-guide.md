@@ -3092,7 +3092,8 @@ spec:
             host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
             subset: v1
             port: { number: 8080 }
-          weight: 90                            # 所有 weight 加起來必須 = 100
+          weight: 90                            # weight 是相對比例：拿到 weight ÷ 全部 weight 總和
+                                        # 習慣湊成 100 比較好讀，但現行版本不是硬性規定
         - destination:
             host: pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
             subset: v2
@@ -3102,8 +3103,9 @@ spec:
       # ---------- 逾時與重試 ----------
       timeout: 15s                              # Istio 預設「不設逾時」，強烈建議明確設定
       retries:
-        attempts: 3
-        perTryTimeout: 5s                       # 單次嘗試的逾時（x attempts 要小於 timeout）
+        attempts: 2                             # 重試次數，不含第一次呼叫：最多送出 1 + 2 = 3 次請求
+        perTryTimeout: 5s                       # 單次嘗試的逾時：(1 + attempts) x perTryTimeout 要 <= timeout
+                                        # 3 x 5s = 15s，剛好等於下面的 timeout: 15s；超過的話後面的重試會被總 timeout 截斷
         retryOn: "5xx,reset,connect-failure,refused-stream"
         retryRemoteLocalities: false
 
@@ -3150,19 +3152,9 @@ spec:
       mirrorPercentage: { value: 10.0 }        # 只鏡射 10%
       # 鏡射流量的回應會被丟棄，client 完全無感。測新版本最安全的方式
 
-    # ===== 規則 5：故障注入（混沌測試）=====
-    - name: fault-injection
-      match:
-        - headers: { x-chaos-test: { exact: "true" } }
-      fault:
-        delay:
-          percentage: { value: 50.0 }
-          fixedDelay: 5s
-        abort:
-          percentage: { value: 10.0 }
-          httpStatus: 503
-      route:
-        - destination: { host: epmm-api-svc.ea-epmm.svc.cluster.local }
+    # ===== 規則 5：故障注入（混沌測試）→ 拆到下方獨立的 VirtualService =====
+    # 官方 common-problems 寫明：Istio 目前不支援把 fault 跟 retries／timeout 放在同一個
+    # VirtualService，而規則 2 已經設了 timeout／retries，所以 fault 不能留在這裡
 
     # ===== 規則 6：重導向 =====
     - name: redirect-root
@@ -3180,6 +3172,39 @@ spec:
             port: { number: 8080 }
 ```
 
+#### 故障注入：要放在獨立的 VirtualService
+
+官方 common-problems 頁面寫明：「Currently, Istio does not support configuring fault injections and retry or timeout policies on the same `VirtualService`.」所以上面規則 2 的 timeout／retries 不能跟 fault 放在同一個 VirtualService。下面是拆出來的獨立版本，只在測試環境單獨套用：
+
+```yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: epmm-api-fault-test
+  namespace: ea-epmm
+spec:
+  hosts:
+    - epmm-api-svc.ea-epmm.svc.cluster.local
+  http:
+    # match 是由上而下第一個命中就停（"The first rule matching an incoming request is used."）
+    # 所以帶 x-chaos-test 的請求要由這條先接走；沒帶 header 的請求落到最後的預設路由
+    - name: fault-injection
+      match:
+        - headers: { x-chaos-test: { exact: "true" } }
+      fault:
+        delay:
+          percentage: { value: 50.0 }
+          fixedDelay: 5s
+        abort:
+          percentage: { value: 10.0 }
+          httpStatus: 503
+      route:
+        - destination: { host: epmm-api-svc.ea-epmm.svc.cluster.local }
+    - name: default
+      route:
+        - destination: { host: epmm-api-svc.ea-epmm.svc.cluster.local }
+```
+
 #### 常用 key 對照
 
 | Key | 說明 | 踩雷 |
@@ -3188,11 +3213,11 @@ spec:
 | `gateways` | 綁哪個 gateway | **不寫 = 預設只有 `mesh`**；寫了 gateway 就**不含 mesh**，要自己加 |
 | `http[].match` | 比對條件 | **first-match-wins**，順序決定一切 |
 | `match[].uri` | `exact` / `prefix` / `regex` | `prefix: /api` 也會命中 `/apixyz`，要寫 `/api/` |
-| `route[].weight` | 百分比 | 全部加起來**必須是 100** |
+| `route[].weight` | 相對比例 | 每個 destination 拿到 weight ÷ 全部 weight 總和的流量；只有一個 destination 時拿到全部。習慣湊成 100，但不是硬性規定 |
 | `route[].destination.subset` | DestinationRule 的 subset | subset 不存在 = **503**，且不會有明顯錯誤 |
 | `timeout` | 請求逾時 | **預設不逾時**，一定要設 |
-| `retries` | 重試 | `attempts x perTryTimeout` 要小於 `timeout` |
-| `rewrite.uri` | 改寫路徑 | 只能配 `prefix` match 使用 |
+| `retries` | 重試 | `attempts` 不含第一次呼叫，最多送 1 + `attempts` 次；(1 + `attempts`) x `perTryTimeout` 要 <= `timeout`，否則後面的重試會被總 timeout 截斷 |
+| `rewrite.uri` | 改寫路徑 | 配 `prefix` match 時只取代命中的那段前綴；配 `exact` 或 `regex` match 時會取代整段 path。要用 regex 改寫請用 `uriRegexRewrite` |
 | `mirror` | 流量鏡射 | 最安全的新版本驗證方式 |
 | `corsPolicy` | CORS | 跟 app 層的 CORS 會疊加，見下 |
 
