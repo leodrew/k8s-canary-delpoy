@@ -2861,8 +2861,8 @@ kubectl create job --from=cronjob/pmc-form-daily-sync manual-test-1 -n ea-pmc
 
 CronJob controller 掛掉或 cluster 維護一段時間後恢復，它會回頭檢查「錯過了哪些排程」：
 
-- **不設 `startingDeadlineSeconds`**：controller 從 `lastScheduleTime` 一路往現在數。如果錯過超過 **100 次**排程，現行 controller 會發一個 `TooManyMissedTimes` Warning 事件（訊息 "too many missed start times. Set or decrease .spec.startingDeadlineSeconds or check clock skew"）。官方概念頁說這次「不啟動 Job」，但原始碼仍會回傳最近一次排程時間，兩者並不一致，所以**不要依賴這個行為**；設了 `startingDeadlineSeconds` 就不會碰到它。（舊版 controller 會卡死、不再排程，現行版本不是這樣。）
-- controller 只會為「最近一次」錯過的排程建一個 Job，不會把錯過的排程一次補跑完。官方說法是 "the Jobs will always run at least once"，所以 Job 要能容忍重複執行。
+- **不設 `startingDeadlineSeconds`**：controller 從 `lastScheduleTime` 一路往現在數。如果錯過超過 **100 次**排程，現行 controller 會發一個 `TooManyMissedTimes` Warning 事件（訊息：too many missed start times. Set or decrease .spec.startingDeadlineSeconds or check clock skew）。官方概念頁寫的是「it does not start the Job and logs the error」，但原始碼仍會回傳最近一次排程時間，兩者並不一致，所以**不要依賴這個行為**；設了 `startingDeadlineSeconds` 就不會碰到它。（舊版 controller 會卡死、不再排程，現行版本不是這樣。）
+- controller 只會為最近一次錯過的排程建一個 Job，不會把錯過的排程一次補跑完。官方說法是「the Jobs will always run at least once」，所以 Job 要能容忍重複執行。
 
 **設了 `startingDeadlineSeconds: 300` 之後**：controller 只回頭看 300 秒內的排程，超過窗口的那次會被跳過（`MissSchedule` 事件）。這樣就不會觸發 >100 次的警告。
 
@@ -2894,8 +2894,9 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set +e               # 不要用 set -e：java 一失敗 shell 就直接退出，
-                                        # 下面的 RC=$? 和 curl 都不會執行，sidecar 沒被叫停，Job 正好在失敗時卡住
+                  # 不要加 set -e：有它的話 java 一失敗 shell 就直接退出，
+                  # 下面的 RC=$? 和 curl 都不會執行，sidecar 沒被叫停，Job 正好在失敗時卡住
+                  set +e
                   java -jar /app/sync.jar
                   RC=$?
                   # app image 裡要有 curl；這個端點只接受 localhost 的 POST，所以打 127.0.0.1
