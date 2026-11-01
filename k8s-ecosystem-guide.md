@@ -3232,11 +3232,11 @@ spec:
   gateways: [istio-system/my-gateway]
 ```
 
-**效果**：只有「從 my-gateway 進來的流量」會套用這些路由規則。`ea-pmc` 裡的另一個 Pod 直接呼叫 `pmc-epmmformquerygui-svc:8080` 時，**完全不會經過這條 VirtualService**——它會走預設的 round-robin 直連。
+**效果**：只有「從 my-gateway 進來的流量」會套用這些路由規則。`ea-pmc` 裡的另一個 Pod 直接呼叫 `pmc-epmmformquerygui-svc:8080` 時，**完全不會經過這條 VirtualService**——它仍然經過 sidecar，但套用的是預設路由：送到該 Service 的所有 endpoint，負載平衡演算法預設是 least request（Istio 官方：「By default, the Envoy proxies distribute traffic across each service’s load balancing pool using a least requests model.」）。
 
 **後果**：
 
-- **canary 權重對內部呼叫無效**（內部流量還是 50/50 打到所有 Pod）
+- **canary 權重對內部呼叫無效**（內部流量會依 endpoint 數量——v1、v2 各有幾個 Pod——用 least request 分配，跟 90/10 的設定無關；只有兩版 Pod 數量相同時才大約是 50/50）
 - 逾時、重試、header 改寫，內部呼叫通通吃不到
 
 **修法**：
@@ -3278,7 +3278,7 @@ spec:
 
 #### 踩雷 4：CORS 與 app 層重複
 
-你的 Spring Boot 已經有 `CorsConfig` 在處理 CORS（`spring_boot_fix_cors.md`）。如果 VirtualService 也設 `corsPolicy`，**兩邊都會加 `Access-Control-Allow-Origin` header**，瀏覽器看到重複的 header 會直接報錯：
+你的 Spring Boot 已經有 `CorsConfig` 在處理 CORS（`spring_boot_fix_cors.md`）。如果 VirtualService 也設 `corsPolicy`，**兩邊可能互相干擾**（header 重複或被覆寫；官方文件沒有說明 `corsPolicy` 與上游 CORS header 並存時是疊加還是覆寫，請實測確認），而且 origin 沒命中的 preflight 預設會被轉給 app（官方：「Default is forward to upstream.」）。若出現重複的 header，瀏覽器會報錯，例如：
 
 ```
 The 'Access-Control-Allow-Origin' header contains multiple values '*, *', but only one is allowed.
@@ -3295,6 +3295,43 @@ The 'Access-Control-Allow-Origin' header contains multiple values '*, *', but on
 istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
   | grep pmc-epmmformquerygui
 ```
+
+### 參考來源
+
+- kubernetes.io — pod-lifecycle：https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+- kubernetes.io — deployment：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- kubernetes.io — topology-spread-constraints：https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+- kubernetes.io — taint-and-toleration：https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
+- kubernetes.io — pod-priority-preemption：https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/
+- kubernetes.io — container-lifecycle-hooks：https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
+- github.com — kep.yaml：https://github.com/kubernetes/enhancements/blob/master/keps/sig-node/3960-pod-lifecycle-sleep-action/kep.yaml
+- kubernetes.io — probes：https://kubernetes.io/docs/concepts/workloads/pods/probes/
+- kubernetes.io — pod-qos：https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/
+- istio.io — protocol-selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+- kubernetes.io — service-v1：https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/
+- istio.io — application-requirements：https://istio.io/latest/docs/ops/deployment/application-requirements/
+- istio.io — destination-rule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- kubernetes.io — endpoint-slices：https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/
+- kubernetes.io — secret：https://kubernetes.io/docs/concepts/configuration/secret/
+- kubernetes.io — configure-pod-configmap：https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+- kubernetes.io — volume：https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/volume/
+- kubernetes.io — object-meta：https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-meta/
+- kubernetes.io — configmap：https://kubernetes.io/docs/concepts/configuration/configmap/
+- kubernetes.io — job：https://kubernetes.io/docs/concepts/workloads/controllers/job/
+- istio.io — annotations：https://istio.io/latest/docs/reference/config/annotations/
+- kubernetes.io — cron-jobs：https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+- raw.githubusercontent.com — utils.go：https://raw.githubusercontent.com/kubernetes/kubernetes/master/pkg/controller/cronjob/utils.go
+- pubs.opengroup.org — V3_chap02.html：https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html
+- istio.io — change-notes：https://istio.io/latest/news/releases/1.27.x/announcing-1.27/change-notes/
+- istio.io — istioctl-analyze：https://istio.io/latest/docs/ops/diagnostic-tools/istioctl-analyze/
+- istio.io — gateway：https://istio.io/latest/docs/reference/config/networking/gateway/
+- istio.io — secure-ingress：https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/
+- istio.io — network-issues：https://istio.io/latest/docs/ops/common-problems/network-issues/
+- istio.io — gateway：https://istio.io/latest/docs/setup/additional-setup/gateway/
+- istio.io — ist0161：https://istio.io/latest/docs/reference/config/analysis/ist0161/
+- istio.io — virtual-service：https://istio.io/latest/docs/reference/config/networking/virtual-service/
+- envoyproxy.io — router_filter：https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/router_filter
+- istio.io — traffic-management：https://istio.io/latest/docs/concepts/traffic-management/
 
 ---
 
