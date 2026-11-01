@@ -1531,7 +1531,7 @@ istioctl proxy-config cluster deploy/pmc-epmmformquerygui -n ea-pmc \
 
 ### 步驟 4：NetworkPolicy 版（底層防護）
 
-Istio policy 是由**被呼叫端自己的 sidecar** 執行的。攻擊者在自己的 Pod 裡能繞過的只有**自己**的 sidecar（官方：「the security boundary is that a client may not bypass _another_ pod's sidecar.」），所以直連 `epmm-api` 的 Pod IP 時，`epmm-api` 的 inbound 仍會被它自己的 sidecar 攔下。AuthorizationPolicy 管不到的是 sidecar 不處理的流量（UDP／ICMP 等非 TCP）與被排除在攔截之外的 port；NetworkPolicy 補的是 L3/L4 的縱深防禦，也防 sidecar 被拿掉或設錯。加上 NetworkPolicy：
+Istio policy 是由**被呼叫端自己的 sidecar** 執行的。攻擊者在自己的 Pod 裡能繞過的只有**自己**的 sidecar（官方：「the security boundary is that a client may not bypass _another_ pod's sidecar.」），所以 AuthorizationPolicy 管不到的是 sidecar 不處理的流量（UDP／ICMP 等非 TCP）與被排除在攔截之外的 port；NetworkPolicy 補的是 L3/L4 的縱深防禦，也防 sidecar 被拿掉或設錯。加上 NetworkPolicy：
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -1556,10 +1556,11 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
     # 必開：ingressgateway
-    # namespaceSelector 與 podSelector 寫在【同一個】from 元素裡 = 兩者要同時成立（AND）；
-    # 只寫 namespaceSelector 會放行 istio-system 的所有 Pod 打所有 port（官方範例：
-    # 「from any Pod in any namespace with the label user=alice」是同一種寫法的語意）。
-    # 少了 ports 同理：不限 port。這裡收斂到 ingressgateway 的 Pod 與 8080。
+    # 只寫 namespaceSelector（沒有 podSelector）會放行 istio-system 的【所有 Pod】
+    # （官方範例裡單獨一個 namespaceSelector 元素的語意是「from any Pod in any namespace with the label user=alice」）；
+    # 少了 ports 則不限 port。所以把 podSelector 寫進【同一個】from 元素 ——
+    # 官方：「A single to/from entry that specifies both namespaceSelector and podSelector selects particular Pods within particular namespaces.」
+    # 並限定 8080，收斂到 ingressgateway 的 Pod。
     - from:
         - namespaceSelector:
             matchLabels:
@@ -1578,8 +1579,10 @@ spec:
 | `ea-other` 的 Pod 打 `epmm-api:8080` | 可以 | 可以 |
 | `ea-pmc` 的**別的** Pod 打 `epmm-api` | 可以（podSelector 有比對） | 可以（principals 不同） |
 | `ea-pmc` 的 query GUI 打**不該打的** `DELETE /api/admin` | **不行**（只看 IP/port） | **可以**（L7） |
-| 攻擊者在 pod 裡直接連 Pod IP，繞過**自己**的 sidecar | **可以** | **可以**（`epmm-api` 自己的 sidecar 仍會執行；沒有 mTLS 憑證就沒有 principal，ALLOW 不命中，STRICT 下明文直接被拒） |
+| 攻擊者在 pod 裡直接連 Pod IP，繞過**自己**的 sidecar | **可以** | **可以**（見表下說明） |
 | 攻擊者偽造 `X-User-Id` header | 不行 | 不精確（見表下說明） |
+
+**直連 Pod IP 的補充：** 攻擊者直連 `epmm-api` 的 Pod IP 時，`epmm-api` 的 inbound 仍被它自己的 sidecar 攔下；沒有 mTLS 憑證就沒有 principal，ALLOW 不命中，STRICT 下明文直接被拒。
 
 **偽造 header 的補充：** `when: request.headers[...]` 只比對值，看不出 header 是不是偽造的（官方：`request.headers` 是「HTTP request headers.」）。要防偽造，用 RequestAuthentication 驗 JWT，再用 `request.auth.claims[...]`（官方：「Raw claims of the authenticated JWT token.」）或 `requestPrincipals` 授權；或在 ingress 端剝掉外部帶進來的 `X-User-Id`。
 
@@ -1593,7 +1596,7 @@ kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
   curl -sS -o /dev/null -w "%{http_code}\n" \
   http://epmm-api-svc.ea-epmm.svc.cluster.local:8080/api/v1/health
 
-# 2. 200 = 通；403 = 授權問題（Part 3，`RBAC: access denied`）；
+# 2. 200 = 通；403 = 授權問題（Part 3，RBAC: access denied）；
 #    503（Envoy 回應旗標 UF，「Upstream connection failure in addition to 503 response code」）= 多半是網路層
 #    （NetworkPolicy 擋掉時 Envoy 連上游失敗，通常要等到 connect timeout）或 mTLS 不一致；
 #    000 = 多半是 DNS 失敗（curl exit 6）或來源端沒有 sidecar。
