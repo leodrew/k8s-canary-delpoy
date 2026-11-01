@@ -444,3 +444,9 @@ Started: (not yet run)
 - Review round 1: Standards 3 項（引文改用「」、語氣、Envoy 用詞）已修；Spec 無發現（5 列來源引文皆在頁面上）。未動：liveness failureThreshold 仍為 3（帳本給的是二選一，已改 path）。
 - Learnings: 無新增通則。
 ---
+## 2026-11-01 - US-032
+- 修正 Part 6 6.2 Service（1/2）：P06-011（yaml 註解改成 appProtocol 優先、名稱擇一）、P06-012（表格改為自動偵測失敗才當 TCP）、P06-013（Local 改為 drop／timeout，補 healthCheckNodePort）、P06-014（刪 Redis，改 SMTP/MySQL/MongoDB，改成與自動偵測及 PERMISSIVE mTLS 不相容）、P06-015（DR cookie 改 istio-session-affinity + ttl，註解說明撞名原因）
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規；Spec 四個來源頁引文都查到、措辭一致，無發現。未改動的觀察：「Istio 用 port 名稱的前綴判斷」那句（表前一行）仍說只靠前綴，與 appProtocol 優先略有張力，不在 P06-011 行範圍，留給後續；其他 Part 的 JSESSIONID httpCookie 區塊屬別的帳本列。
+- Learnings: 無新增通用慣例
+---
