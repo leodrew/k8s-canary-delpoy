@@ -1356,8 +1356,11 @@ restTemplate.getForObject("http://epmm-api-svc/api/v1/forms", ...);
 // 可以：至少要帶 namespace
 "http://epmm-api-svc.ea-epmm/api/v1/forms"
 
-// 最好：完整 FQDN（少一次 search domain 嘗試，也不會被 ndots 影響）
+// 可讀性最好：完整 FQDN（但它只有 4 個點、少於 ndots:5，照樣會先跑 search domain，不會比上一行省查詢）
 "http://epmm-api-svc.ea-epmm.svc.cluster.local:8080/api/v1/forms"
+
+// 真的要省 DNS 查詢：FQDN 尾端加一個點（絕對名稱，不經過 search domain）
+"http://epmm-api-svc.ea-epmm.svc.cluster.local.:8080/api/v1/forms"
 ```
 
 原因：Pod 的 `/etc/resolv.conf` 是這樣的
@@ -1368,13 +1371,17 @@ nameserver 10.96.0.10
 options ndots:5
 ```
 
-短名 `epmm-api-svc` 會先被補成 `epmm-api-svc.ea-pmc.svc.cluster.local`（自己的 namespace）→ 找不到 → 再試下一個 search domain。**跨 namespace 時第一次一定會失敗**，而且 `ndots:5` 會讓每個少於 5 個點的名字都跑完整串 search domain，白白多出好幾次 DNS 查詢。
+短名 `epmm-api-svc` 會先被補成 `epmm-api-svc.ea-pmc.svc.cluster.local`（自己的 namespace）→ 找不到 → 再試下一個 search domain。**跨 namespace 時第一次一定會失敗**。`ndots:5` 的意思是：少於 5 個點的名字會**先**依序套 search domain、**命中就停**，全部都 miss 才查原名（resolv.conf(5)：「Resolver queries having fewer than ndots dots (default is 1) in them will be attempted using each component of the search path in turn until a match is found.」）。所以 `epmm-api-svc.ea-epmm` 第 2 次就命中；完整 FQDN `epmm-api-svc.ea-epmm.svc.cluster.local` 只有 4 個點，反而要先把前面的 search domain 全試完（都失敗）才查到原名，查詢次數更多。只有找不到的名字（例如外部網域）才會跑完整串。要真正繞過 search list，在 FQDN 尾端加點，或在 Pod 的 `dnsConfig.options` 調低 `ndots`。
 
 **驗證：**
 
 ```bash
-kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy -- \
+# 預設的 istio-proxy 映像只裝了 knot-dnsutils、沒有 nslookup（distroless 變體連 shell 都沒有），
+# 所以用臨時除錯容器來查
+kubectl debug -n ea-pmc deploy/pmc-epmmformquerygui -it --image=busybox:1.36 --target=app -- \
   nslookup epmm-api-svc.ea-epmm.svc.cluster.local
+# 確定是預設 proxyv2 映像時，也可以直接在 sidecar 裡用 kdig：
+#   kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy -- kdig epmm-api-svc.ea-epmm.svc.cluster.local
 ```
 
 ### 步驟 1：兩邊各給獨立 ServiceAccount（最重要的一步）
@@ -1412,12 +1419,15 @@ spec:
 
 > `automountServiceAccountToken: false` 是免費的安全強化——它只影響「呼叫 K8s API 的 token」，**不影響 Istio mTLS 身分**（Istio 用的是 SDS 下發的憑證）。除非你的 app 真的要打 K8s API，否則都應該關掉。
 
-**改完必須重啟才會拿到新身分：**
+**既有 Pod 的 SA 改不了，一定要換成新 Pod 才會拿到新身分**（K8s：「You cannot update the `.spec.serviceAccountName` field of a Pod that already exists.」）。但改 `spec.template.spec.serviceAccountName` 本身就是改 pod template，`kubectl apply` 會自動觸發滾動更新，不用另外 `rollout restart`（多跑只是再滾一輪）：
 
 ```bash
-kubectl rollout restart deploy/pmc-epmmformquerygui -n ea-pmc
-# 確認新身分
-istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json | grep -o 'spiffe://[^"]*'
+kubectl apply -f <含 serviceAccountName 的 Deployment>.yaml
+kubectl rollout status deploy/pmc-epmmformquerygui -n ea-pmc
+# 確認新身分：憑證是 base64 的 inlineBytes，直接 grep 找不到 spiffe://，要解碼後用 openssl 看 SAN（同步驟 2 的方法 2）
+istioctl proxy-config secret deploy/pmc-epmmformquerygui -n ea-pmc -o json \
+  | jq -r '[.dynamicActiveSecrets[] | select(.name == "default")][0].secret.tlsCertificate.certificateChain.inlineBytes' \
+  | base64 -d | openssl x509 -noout -text | grep -A1 'Subject Alternative Name'
 ```
 
 ### 步驟 2：ea-epmm 側開授權
