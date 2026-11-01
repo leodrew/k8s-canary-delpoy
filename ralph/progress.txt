@@ -438,3 +438,9 @@ Started: (not yet run)
 - 觀察（不在本故事範圍，未改）：line ~2389 表格「minReadySeconds … app 需要暖機時設 10~30」可能屬同一誤解，留意是否屬別的帳本列。
 - Learnings: none new for patterns.md.
 ---
+## 2026-11-01 - US-031
+- 修正 P06-006..P06-010（Part 6 / 6.1 Deployment 2/2）：terminationGracePeriod 含 preStop 起算、preStop 補 /bin/sh 與 sleep action(v1.30 beta/v1.34 GA)、liveness/readiness 分打 health group 並移除「3 倍」、Guaranteed QoS 條件、endpoint terminating 說明。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 3 項（引文改用「」、語氣、Envoy 用詞）已修；Spec 無發現（5 列來源引文皆在頁面上）。未動：liveness failureThreshold 仍為 3（帳本給的是二選一，已改 path）。
+- Learnings: 無新增通則。
+---
