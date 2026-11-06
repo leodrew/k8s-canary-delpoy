@@ -613,3 +613,18 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（WebFetch 確認 istio.io IST0162 頁有 "only open on target ports 15021, 8080 and 8443"，Service port 80→8080、443→8443，與新說法一致）。
 - Learnings: 無新增通則。
 ---
+## 2026-11-07 - US-056
+- 修正 Part 10 §10.4（1/2）：帳本 P10-003／004／005／006／007
+  - P10-003：刪掉「很多 K8s 發行版也拿它當 Pod / Service CIDR」，補 RFC 6598 §4 警告「are likely to experience problems」
+  - P10-004：§10.4 三處 metallb.universe.tf/address-pool → metallb.io/address-pool，註明 0.14.9 起（Part 11 兩處屬 P11-006，未動）
+  - P10-005：loadBalancerSourceRanges 註解註明是否生效取決於 LB 實作，不支援時被靜默忽略
+  - P10-006：第二組 Service／Deployment 的 namespace 行加指路註解；踩雷 2 下方新增 blockquote 引官方建議 gateway 與 control plane 分開 namespace（例 istio-ingress），憑證跟著搬
+  - P10-007：sidecar.istio.io/inject 改 "true"，引官方「Enable gateway injection.」，說明 false 時 image: auto 不會被替換
+- 檔案：k8s-ecosystem-guide.md
+- 註：feat commit（7e54617）由前一個 iteration 完成但沒跑 review；本輪以 BASE=4251e19 接手。
+- Review 第 1 輪：Standards — 「Enable gateway injection」未加「」（硬性）、「前多一個半形空白、兩處 MetalLB 註解措辭不同、踩雷 2 括號塞太多；
+  Spec — 四個 URL 引文全數找到；P10-006 部分完成（建議沒放在 manifest 旁）。另先修了 “” → 「」（8b7b1df）。
+  修正：ce2ba13 加「」、去空白、統一註解、namespace 行加註解、踩雷 2 拆成 blockquote。
+- Review 第 2 輪：Spec 無發現；Standards 無硬性違規，只剩判斷題（新註解欄位對齊差 4 欄、一行註解偏長）—— 依慣例收斂不再改。
+- Learnings：前一個 iteration 中斷在 feat 之後時，BASE 取 feat 的前一個 commit，直接從 review 接手。
+---
