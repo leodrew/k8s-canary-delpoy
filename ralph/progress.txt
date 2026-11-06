@@ -645,3 +645,18 @@ Started: (not yet run)
   註解重述 Part 13 規則；一句話含兩個條件。
 - Learnings：在註解裡引用 guide 的表格某一格時，先確認那格的「原因」跟你要說的一致，而且該節只有一張表。
 ---
+## 2026-11-07 - US-058
+- 修正 Part 10 的 10.5／10.6（帳本 P10-010、P10-012、P10-013、P10-014）：
+  - P10-010：internal-gw-baseline 的 DENY paths 從 "/actuator/*"（前綴比對，打不中 /gui_epmmFormQuery/actuator/...）
+    改成 "/{*}/actuator/{**}" ＋ "/actuator/{**}"，註解說明 {*}／{**} 語意、{**} 必須最後、最低 Istio 版本官方未寫。
+  - P10-012：istioctl proxy-config listener 的 --port 443 → 8443，註解說明 listener 綁 targetPort（0.0.0.0_8443）。
+  - P10-013：「應該要 404，不是 200」→ 000 或 404 都正常、只有 200 有問題；000 = SNI 對不到 filter chain、TLS 握手失敗（curl exit 35）。
+  - P10-014：kubectl get endpoints → kubectl get endpointslices -l kubernetes.io/service-name=istio-ingressgateway-internal。
+  - Part 10 結尾加 `### 參考來源`（P10-001～014 已修各列的 9 個官方 URL，去重），"Part 10" 加進 VERIFIED_PARTS。
+- 檔案：k8s-ecosystem-guide.md、scripts/validate.sh
+- Review 第 1 輪：Spec 0 項（四個來源頁引文皆找到）；Standards 0 項硬性違規，1 項判斷題被採納：
+  「access log 的 NR」只掛在 404 那行，但 Envoy 的 NR 也涵蓋 no matching filter chain（000 那種）→ 改成兩種都記成 NR。
+  其餘（443→8443 說明與 P10-001 重複、版本未驗證的 caveat、path template 規則是轉述）記為觀察，不改。
+- Review 第 2 輪：兩軸皆 0 項。
+- Learnings：無新的可重用慣例。
+---
