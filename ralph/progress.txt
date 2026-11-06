@@ -628,3 +628,20 @@ Started: (not yet run)
 - Review 第 2 輪：Spec 無發現；Standards 無硬性違規，只剩判斷題（新註解欄位對齊差 4 欄、一行註解偏長）—— 依慣例收斂不再改。
 - Learnings：前一個 iteration 中斷在 feat 之後時，BASE 取 feat 的前一個 commit，直接從 review 接手。
 ---
+## 2026-11-07 - US-057
+- 修正 Part 10「10.4 雙 VIP 架構」（2/2），帳本 P10-008、P10-009。
+  - P10-008：internal gateway Deployment 的 nodeSelector／toleration 從 routable 改成 `network: non-routable`
+    placeholder（key 沿用 Part 13 的 network），註解說明為何是 non-routable、要用 13.5 查實際 label，
+    以及 non-routable node 沒 label 時 nodeSelector 要拿掉（否則永遠 Pending）、沒 taint 時 toleration 要拿掉。
+  - P10-009：「要換入口，只要改 VS 的 gateways 那一行」改成 hosts 也要符合新 Gateway server 的 hosts，
+    引 Istio Gateway 參考原句，舉 internal-api.example.com 與 404 / NR 為例。
+- Files changed: k8s-ecosystem-guide.md
+- Review 第 1 輪：Spec 無發現（WebFetch 確認引文逐字存在於 Server.hosts 說明）。Standards：nodeSelector 缺少
+  「沒 label 就拿掉」的逃生口（會永遠 Pending）、「照抄第一組」指不到東西（Part 10 沒有第一組 Deployment）
+  → 改指 13.4、「跟 Part 13 一樣」只對 key 成立 → 改寫、段落結尾重複 hosts 那句 → 刪掉。
+  順手把原本引用 13.2 右上格的說法拿掉（那格的 Pending 是 taint 造成，不是缺 label）。
+- Review 第 2 輪：Spec 無發現。Standards 無硬性違規，只有判斷題（未改，上限後不改）：
+  「13.2 表格右下那格」13.2 有兩張表，可寫明是四象限那張；`NR` 前提是 access log 有開（guide 別處有說）；
+  註解重述 Part 13 規則；一句話含兩個條件。
+- Learnings：在註解裡引用 guide 的表格某一格時，先確認那格的「原因」跟你要說的一致，而且該節只有一張表。
+---
