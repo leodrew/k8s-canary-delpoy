@@ -4345,7 +4345,7 @@ kubectl get deploy,svc -n istio-system -l istio=ingressgateway
 | `10.0.0.0/8` | RFC 1918（私有位址） | **公司內網可路由**——其他機房、其他系統、使用者的 PC 都連得到 |
 | `100.64.0.0/10` | RFC 6598（Shared Address Space，原本給 CGNAT 用） | **不可路由**——通常只在這座 cluster 或這個機房內有效，公司骨幹網路不會轉發 |
 
-> **為什麼企業愛用 `100.64.0.0/10` 當內部網段**：它不是 RFC 1918，所以**不會跟公司既有的 10.x / 172.16.x / 192.168.x 網段撞號**。（RFC 6598 第 4 節也警告：不是 CGN 用途的使用者 “are likely to experience problems”，所以挪作他用前要先確認不會跟 ISP／上游的 CGN 位址衝突。）
+> **為什麼企業愛用 `100.64.0.0/10` 當內部網段**：它不是 RFC 1918，所以**不會跟公司既有的 10.x / 172.16.x / 192.168.x 網段撞號**。（RFC 6598 第 4 節也警告：不是 CGN 用途的使用者 「are likely to experience problems」，所以挪作他用前要先確認不會跟 ISP／上游的 CGN 位址衝突。）
 >
 > **要注意**：`100.64.0.0/10` 是否「不可路由」是**公司網路政策決定的，不是協定規定的**。務必跟網路組確認你們的實際規則。
 
@@ -4626,7 +4626,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 
 #### 踩雷 2：憑證放在錯的 namespace
 
-`credentialName` 指向的 secret 必須在 **gateway Pod 所在的 namespace**（通常 `istio-system`；不過 Istio 官方建議 “As a security best practice, it is recommended to deploy the gateway in a different namespace from the control plane”，也就是把 gateway 放到獨立的 namespace，例如官方 Helm 範例的 `istio-ingress`，上面第二組的 manifest 為了簡化仍寫 `istio-system`，改放別處時 Service、Deployment 與相關指令的 namespace 要一起換）。兩組 gateway 如果在同一個 namespace，兩份憑證都放那裡；如果你把第二組裝到別的 namespace，憑證也要跟著搬。
+`credentialName` 指向的 secret 必須在 **gateway Pod 所在的 namespace**（通常 `istio-system`；不過 Istio 官方建議 「As a security best practice, it is recommended to deploy the gateway in a different namespace from the control plane」，也就是把 gateway 放到獨立的 namespace，例如官方 Helm 範例的 `istio-ingress`，上面第二組的 manifest 為了簡化仍寫 `istio-system`，改放別處時 Service、Deployment 與相關指令的 namespace 要一起換）。兩組 gateway 如果在同一個 namespace，兩份憑證都放那裡；如果你把第二組裝到別的 namespace，憑證也要跟著搬。
 
 #### 踩雷 3：只改了 Service 沒改 Deployment 的 label
 
