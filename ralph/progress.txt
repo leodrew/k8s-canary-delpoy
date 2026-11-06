@@ -672,3 +672,16 @@ Started: (not yet run)
 - Review 第 2 輪：只剩 11.6 表格「DR 軟性黏著」與同表「FZ2 是 DR（災難備援）」縮寫撞名 → 上限後改成 DestinationRule（單字替換，未再 review）
 - Learnings：Part 11 裡「DR」已被定義為災難備援，提到 DestinationRule 時要寫全名
 ---
+## 2026-11-07 - US-060
+- 修 Part 11 §11.4（P11-005～P11-008）：
+  - P11-005：「兩邊相同」區塊的 VS 加註解，說明它是簡化範例、與 track-a 03-virtualservice.yaml 同 namespace／name，照抄會蓋掉它（pilot-run 消失；沒 subset → Service 只比對 app，stable／canary pod 都分到正式流量）；段落改成 Gateway 用上面那份、VS 兩邊都 apply track-a 那份。
+  - P11-006：metallb.universe.tf → metallb.io（0.14.9 起，沿用 Part 10 的註解措辭），註明 LB／位址池屬環境特定。
+  - P11-007：targetPort 依安裝方式（istioctl 8443／`istio/gateway` Helm chart 443）；註明示意 Service 少了 status-port 15021／http2，直接 apply 可能蓋掉，位址池應走安裝工具 values。
+  - P11-008：GSLB 健康檢查改成 SNI＋Host 兩行；blockquote 改寫並引用 istio network-issues 兩句原文，附 curl --resolve 範例。
+- 連動修改：區塊標頭「FZ1 與 FZ2 內容一字不差，兩邊都要 apply」改成只叫人 apply Gateway（否則與 P11-005 的警告矛盾）。
+- Files: k8s-ecosystem-guide.md
+- Review 第 1 輪：Standards 4 項（標頭與新註解矛盾、說明重複、FZ2 targetPort 註解重複、chart 名稱不一致）；Spec 1 項（段落只提 VS、漏了 Gateway），來源引文全部查到。已修（4d3003e）。
+- Review 第 2 輪：Spec clean；Standards 1 項（標頭仍叫人 apply 整個區塊）。上限後修掉（b96486b），未 review → 寫進 notes、passes 維持 false。
+- Learnings：在 yaml 區塊裡加「不要照抄 apply」警告時，同一區塊的標頭／標題若寫著「都要 apply」要一起改，reviewer 會抓矛盾。
+- 觀察（不在本故事範圍）：Part 10 建議用 istio/gateway helm chart 裝第二組，但示意 Service 仍是 targetPort 8443；track-a 03-virtualservice.yaml 仍有 CLAUDE.md 列的已知未修項。
+---
