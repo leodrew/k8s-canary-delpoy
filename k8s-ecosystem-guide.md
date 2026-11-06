@@ -4731,14 +4731,16 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 | 身分 | 轉到 FZ2 的流量，身分鏈在 FZ1 的 gateway 就斷了（Part 5） |
 | 憑證 | 只需要一份，放在 FZ1 的 `istio-system` |
 | 設定同步 | **簡單**——Gateway / VirtualService 只有 FZ1 要維護 |
-| session | 沒問題（流量不會在兩座 cluster 間跳） |
+| session | 沒有**跨 cluster** 的 session 問題（流量不會在兩座 cluster 間跳）；FZ1 內跨 pod 的問題仍在（見表下說明） |
+
+> **「沒有跨 cluster 的 session 問題」不等於「session 沒問題」。** FZ1 內的 stable 本身就有 2 個 replica（`canary-manual/CANARY-COMPLETE.md` 3.6 的 `replicas: 2`），pilot 期間再加上 canary pod；而 `HttpSession`、in-flight 的 OAuth2 `state`、authorized-client token 全部在 pod 記憶體裡（同一份文件 3.7），請求跳到另一個 pod 一樣會被登出。把使用者黏在同一個 pod 上靠的是 DestinationRule 的 `consistentHash`（cookie `epmm-affinity`，同一份文件 3.3），而那只是**軟性黏著**——pod 重啟或滾動更新時，黏著的那個 pod 不在了，session 照樣會掉。
 
 **什麼時候模式 A 是正確選擇：**
 
 - FZ2 是**災難備援（DR）**，平時不收流量
 - FZ2 只跑**內部批次 / 資料同步**，沒有對外服務
 - 服務本身可用性要求不高，能接受 FZ1 維護時的停機視窗
-- **你的 app 還在用 in-memory session**（見 11.4）
+- **你的 app 還在用 in-memory session**——模式 A 至少不會再多一層跨 cluster 的跳轉（見 11.5）；FZ1 內跨 pod 的登出風險仍在，見上一段
 
 ### 11.3 模式 B：兩座 cluster 各自建 ingressgateway
 
@@ -4765,7 +4767,7 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 
 **需要準備什麼（缺一不可）：**
 
-1. **GSLB 或健康檢查型 DNS**——單純的 DNS round-robin **不夠**，因為它不知道某一邊掛了。必須要有主動健康檢查，且要檢查到「真的能提供服務」的深度（打 `/gui_epmmFormQuery/actuator/health`，不是只 ping VIP）
+1. **GSLB 或健康檢查型 DNS**——單純的 DNS round-robin **不夠**，因為它不知道某一邊掛了。必須要有主動健康檢查，且要檢查到「真的能提供服務」的深度（打 `/gui_epmmFormQuery/actuator/health`，不是只 ping VIP）——但後端補上 permitAll 之前，這條路徑回 302 而不是 200，在那之前不能拿它當深度檢查（見 11.4「GSLB 的健康檢查要打對地方」）
 2. **憑證要放兩份**——同一個 host 的憑證，兩個 cluster 的 `istio-system` 各放一份 secret（可以是同一張憑證的兩份副本）
 3. **Gateway + VirtualService 兩邊都要有**——而且內容必須一致，否則會出現「同一個網址，看到的行為不一樣」
 4. **image registry 兩邊都拉得到**
@@ -4775,7 +4777,7 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 
 | 面向 | 影響 |
 |---|---|
-| 故障域 | **隔離**。FZ1 整座掛掉，GSLB 幾十秒內把流量切到 FZ2 |
+| 故障域 | **隔離**。FZ1 整座掛掉，GSLB 判定不健康後把流量切到 FZ2；使用者實際感受到的切換時間 ≈ 健康檢查判定時間 ＋ DNS TTL ＋ 用戶端快取，秒～分鐘級（見 11.10 踩雷 4） |
 | 延遲 | 沒有跨 cluster hop，使用者打到哪邊就在那邊處理完 |
 | 身分 | 沒有跨 cluster 身分問題（各自 cluster 內部完整） |
 | 憑證 | **兩份**，且要一起輪替（過期時間要對齊） |
@@ -4897,8 +4899,10 @@ done
 ✅ 檢查到「真的能提供服務」的深度
    → GET https://<VIP>/gui_epmmFormQuery/actuator/health
       Host: myapp.example.com          ← 必須帶 Host header，否則 Gateway 的 hosts 比對不到會 404
-      期望：200
+      期望：200（⚠ 後端補上 permitAll 之前實際回 302，見下方說明）
 ```
+
+> **⚠ 這條路徑目前回 302，不是 200。** 後端 `SecurityConfig` 的 permitAll 清單裡只有**沒有前綴**的 `/actuator/health`、`/actuator/health/**`，但 ConfigMap 的 `management.endpoints.web.base-path` 把 actuator 搬到了 `/gui_epmmFormQuery/actuator`，前綴路徑落在 `anyRequest().authenticated()` → 回 302（`canary-manual/CANARY-COMPLETE.md` 3.6）。所以 GSLB 若期望 200，兩邊都會被判定不健康；若 GSLB 把 3xx 也算成功，就成了不管後端死活都亮綠燈的假檢查。**在後端補上前綴路徑的 permitAll（PRD 階段 1）之前，不要拿這條路徑當 GSLB 的深度檢查。**
 
 > **⚠ 這個 Host header 很容易漏掉。** 你的 Gateway 設定 `hosts: ["myapp.example.com"]`，如果 GSLB 直接對 VIP 發健康檢查而沒帶 Host header，Gateway 會回 404，GSLB 就以為這邊掛了——結果兩邊都被判定不健康。
 
@@ -4937,7 +4941,7 @@ done
 | Gateway / VirtualService | 只有 FZ1 | **兩邊都要，且必須一致** |
 | 設定漂移風險 | 低 | **高**（主要維運成本） |
 | 需要 GitOps | 不一定 | **幾乎必要** |
-| in-memory session | 沒問題 | **會被登出** |
+| in-memory session | 沒有跨 cluster 的問題（FZ1 內跨 pod 仍只靠 DR 軟性黏著，見 11.2） | **會被登出** |
 | 跨 cluster 身分問題 | 轉發時會遇到（Part 5） | 不會 |
 | 適合 | FZ2 是 DR / 只跑批次 | 真正需要高可用，且 session 已外部化 |
 
@@ -4947,7 +4951,7 @@ done
 |---|---|
 | FZ2 是 DR，平時不收流量 | **模式 A**，接受 CD 預設把 DNS 建在 FZ1 |
 | FZ2 只跑內部批次 / 資料同步 | **模式 A** |
-| 還在用 in-memory session | **模式 A**（先解 session 再談） |
+| 還在用 in-memory session | **模式 A**（先解 session 再談；模式 A 只是沒有跨 cluster 的跳轉，FZ1 內跨 pod 的登出風險見 11.2） |
 | 服務可以接受幾十分鐘的停機視窗 | **模式 A** |
 | 有明確的 SLA 要求（例如 99.9% 以上） | **模式 B**，但要先備齊 GitOps 與 session 外部化 |
 | 兩座 cluster 分屬不同機房且都有使用者 | **模式 B**（就近服務可省延遲） |
