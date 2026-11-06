@@ -4791,7 +4791,7 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 #### 兩座 cluster 完全相同的部分
 
 ```yaml
-# ===== FZ1 與 FZ2 內容一字不差，兩邊都要 apply =====
+# ===== FZ1 與 FZ2 內容一字不差，兩邊都要 apply（VirtualService 是簡化範例，見下方註解）=====
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
@@ -4814,7 +4814,6 @@ spec:
 #   canary-manual/track-a/base/03-virtualservice.yaml 一樣，照抄 apply 會整份蓋掉那一份：
 #   canary 路由消失；而且 destination 沒有 subset 時，Service（selector 只比對 app）
 #   背後的 stable 與 canary pod 都會分到正式流量。
-#   兩座 cluster 實際要 apply 的是 track-a 那一份，不是這份。
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -4839,7 +4838,7 @@ spec:
       timeout: 15s
 ```
 
-**兩座 cluster 上的這兩份必須逐字相同。** 上面的 VirtualService 是簡化範例；兩邊要一致的對象是 track-a 的 `canary-manual/track-a/base/03-virtualservice.yaml`（`pilot-run`、`primary`、`default` 三條規則，destination 都帶 subset），以它為準。只要有一邊漏了某條 `match`，使用者就會遇到「同一個網址，重整一次行為就不一樣」——而且極難重現，因為要看 GSLB 那次把你導去哪邊。
+**兩座 cluster 上的這兩份必須逐字相同**——Gateway 是上面那份，VirtualService 則是兩邊都 apply track-a 的 `canary-manual/track-a/base/03-virtualservice.yaml`（`pilot-run`、`primary`、`default` 三條規則，destination 都帶 subset），不是上面的簡化版。只要有一邊漏了某條 `match`，使用者就會遇到「同一個網址，重整一次行為就不一樣」——而且極難重現，因為要看 GSLB 那次把你導去哪邊。
 
 > **這就是為什麼模式 B 幾乎一定要搭 GitOps**：同一份 Git 來源產生兩邊的設定，人工 `kubectl apply` 兩次遲早會漂移。
 
@@ -4848,7 +4847,7 @@ spec:
 ```yaml
 # ===== FZ1 =====
 # ⚠ 這份只示意「兩邊哪裡不同」，不是可以直接 apply 的完整 Service：
-#   安裝工具（istioctl／Helm `gateway` chart）產生的 Service 還有 status-port 15021、
+#   安裝工具（istioctl／`istio/gateway` Helm chart）產生的 Service 還有 status-port 15021、
 #   http2 等 port；直接 apply 這份可能把那些 port 蓋掉。位址池應透過安裝工具的
 #   values（Service annotations）設定，而不是另外 apply 一份 Service。
 apiVersion: v1
@@ -4864,7 +4863,7 @@ spec:
   type: LoadBalancer
   selector: { istio: ingressgateway }
   ports:
-    # targetPort 依安裝方式而異：istioctl 安裝的是 8443，Helm `gateway` chart 是 443。
+    # targetPort 依安裝方式而異：istioctl 安裝的是 8443，`istio/gateway` Helm chart 是 443。
     # 要填 gateway pod 實際在聽的那個 port，照你們實際的安裝方式確認。
     - { name: https, port: 443, targetPort: 8443 }
 ```
@@ -4884,8 +4883,7 @@ spec:
   type: LoadBalancer
   selector: { istio: ingressgateway }
   ports:
-    # targetPort 依安裝方式而異：istioctl 安裝的是 8443，Helm `gateway` chart 是 443。
-    # 要填 gateway pod 實際在聽的那個 port，照你們實際的安裝方式確認。
+    # targetPort 的說明同 FZ1
     - { name: https, port: 443, targetPort: 8443 }
 ```
 
