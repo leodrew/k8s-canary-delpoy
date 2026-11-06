@@ -4431,9 +4431,12 @@ spec:
         inject.istio.io/templates: gateway
     spec:
       # 見 Part 13：gateway 通常要排到特定網段的 node。這一組是對內（non-routable，100.x）的，
-      # 所以要排到 non-routable 那群 node —— 不是照抄第一組的 routable。
-      # ⚠ label／taint 的 key、value 都是環境特定的 placeholder（跟 Part 13 一樣用 network=...），
-      #   用 13.5 的指令查你們 cluster 裡 non-routable node 實際掛的是什麼
+      # 所以要排到 non-routable 那群 node —— 不是照抄 13.4 那個 routable 的範例。
+      # ⚠ label／taint 的 key、value 都是環境特定的 placeholder（key 沿用 Part 13 的 network，
+      #   value non-routable 是這裡假設的），用 13.5 的指令查你們 cluster 裡 non-routable node 實際掛的是什麼。
+      #   如果 non-routable node 根本沒有 label（只是一般 node），nodeSelector 也要整段拿掉，
+      #   否則沒有任何 node 符合、Pod 永遠 Pending；不寫 toleration 時，routable node 的 taint
+      #   本來就會把這組擋在外面（13.2 表格右下那格）
       nodeSelector:
         network: non-routable
       tolerations:                        # 只有 non-routable node 也打了 taint 時才需要；沒有 taint 就整段拿掉
@@ -4515,7 +4518,7 @@ spec:
   (100.64.5.10 內部)
 ```
 
-**要換入口，改的是 VirtualService，不只 `gateways` 那一行：`hosts` 也要對得上新 Gateway 的 hosts。** Istio 官方的 Gateway 參考說「A VirtualService must be bound to the gateway and must have one or more hosts that match the hosts specified in a server.」——上面的 `app-routing` 若只把 `gateways` 改成 `istio-system/internal-gateway`，`hosts` 裡沒有 `internal-api.example.com`，請求進得了 internal 那組 gateway 卻對不到任何路由，回 404（access log 的 response flag 是 `NR`）。所以要同時把 `hosts` 改成（或加上）新 Gateway server 的 host。服務本身（Deployment／Service）完全不用動。
+**要換入口，改的是 VirtualService，不只 `gateways` 那一行：`hosts` 也要對得上新 Gateway 的 hosts。** Istio 官方的 Gateway 參考說「A VirtualService must be bound to the gateway and must have one or more hosts that match the hosts specified in a server.」——上面的 `app-routing` 若只把 `gateways` 改成 `istio-system/internal-gateway`，`hosts` 裡沒有 `internal-api.example.com`，請求進得了 internal 那組 gateway 卻對不到任何路由，回 404（access log 的 response flag 是 `NR`）。服務本身（Deployment／Service）完全不用動。
 
 #### VIP 怎麼指定：這一段必須跟網路組確認
 
