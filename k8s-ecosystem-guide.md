@@ -4941,7 +4941,7 @@ done
 | Gateway / VirtualService | 只有 FZ1 | **兩邊都要，且必須一致** |
 | 設定漂移風險 | 低 | **高**（主要維運成本） |
 | 需要 GitOps | 不一定 | **幾乎必要** |
-| in-memory session | 沒有跨 cluster 的問題（FZ1 內跨 pod 仍只靠 DR 軟性黏著，見 11.2） | **會被登出** |
+| in-memory session | 沒有跨 cluster 的問題（FZ1 內跨 pod 仍只靠 DestinationRule 軟性黏著，見 11.2） | **會被登出** |
 | 跨 cluster 身分問題 | 轉發時會遇到（Part 5） | 不會 |
 | 適合 | FZ2 是 DR / 只跑批次 | 真正需要高可用，且 session 已外部化 |
 
