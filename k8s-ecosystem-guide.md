@@ -4594,7 +4594,16 @@ spec:
   rules:
     - to:
         - operation:
-            paths: ["/actuator/*"]        # 管理端點不對外，即使是內部入口
+            # 管理端點不對外，即使是內部入口。
+            # 本專案的 actuator 在 /gui_epmmFormQuery/actuator/...（前面有 context path），
+            # 寫成 "/actuator/*" 是前綴比對，只打得中 /actuator 開頭的路徑 —— 這條 DENY
+            # 會完全沒作用，而且不會有任何錯誤訊息。
+            # {*} 比對單一路徑段（不跨 /），{**} 比對零或多段、而且必須是最後一個 operator。
+            # 用 path template 時，同一段裡不能再有 * 或其他字元。
+            # path template 從哪一版 Istio 開始支援，官方頁沒寫，舊版叢集要先自己確認。
+            paths:
+              - "/{*}/actuator/{**}"      # /<context-path>/actuator/...
+              - "/actuator/{**}"          # 沒有 context path 的服務
 ```
 
 **兩組的 `numTrustedProxies` 可能不一樣**——routable 那組前面有 F5（1 層），內部那組可能直連（0 層）。這個值設錯會導致 `remoteIpBlocks` 比對到錯的 IP（Part 1 關鍵觀念二）。
@@ -4620,14 +4629,21 @@ spec:
 kubectl get pods -n istio-system -L istio | grep -i gateway
 
 # 2. 確認某個 Gateway 實際下發到哪些 Pod
-istioctl proxy-config listener deploy/istio-ingressgateway -n istio-system --port 443
-istioctl proxy-config listener deploy/istio-ingressgateway-internal -n istio-system --port 443
+#    listener 綁在 Pod 的 targetPort，不是 Service 的 port：標準安裝的 ingress gateway
+#    Service 是 443 → 8443（80 → 8080），所以 listener 叫 0.0.0.0_8443，
+#    用 --port 443 可能什麼都篩不出來。不確定 targetPort 時就不加 --port，直接 grep host。
+istioctl proxy-config listener deploy/istio-ingressgateway -n istio-system --port 8443
+istioctl proxy-config listener deploy/istio-ingressgateway-internal -n istio-system --port 8443
 # 內部服務的 host 不該出現在第一條的輸出裡
 
 # 3. 最直接的驗證：從公司網路 curl routable VIP，確認內部服務打不到
 curl -sS -o /dev/null -w "%{http_code}\n" \
   --resolve internal-api.example.com:443:10.20.30.40 \
-  https://internal-api.example.com/     # 應該要 404，不是 200
+  https://internal-api.example.com/
+# 000 或 404 都算正常，只有 200 才代表內部服務漏到 routable VIP 上：
+#   000 —— HTTPS 的 SNI 對不到任何 filter chain，TLS 握手就失敗（curl exit 35），
+#          根本沒有 HTTP 回應，-w 印出來就是 000。這是最常見的「正常」結果。
+#   404 —— TLS 過了（例如有萬用憑證）但沒有 route 符合這個 host（access log 的 NR）。
 ```
 
 #### 踩雷 2：憑證放在錯的 namespace
@@ -4643,7 +4659,8 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 ```bash
 # 一次檢查四者是否對齊
 kubectl get svc -n istio-system istio-ingressgateway-internal -o jsonpath='{.spec.selector}{"\n"}'
-kubectl get endpoints -n istio-system istio-ingressgateway-internal
+# 看 Service 實際選到哪些 Pod：用 EndpointSlice（Endpoints API 自 v1.33 起 deprecated）
+kubectl get endpointslices -n istio-system -l kubernetes.io/service-name=istio-ingressgateway-internal
 ```
 
 #### 踩雷 4：gateway Pod 排不到對的 node
@@ -4651,6 +4668,19 @@ kubectl get endpoints -n istio-system istio-ingressgateway-internal
 routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是 `nodeSelector` / `tolerations` 的用途——見 **Part 13**。
 
 > **延伸閱讀**：入口鏈的完整逐跳說明見 [Part 1](#part-1流量入口鏈-vip-到-pod)；gateway Pod 的 node 排程見 [Part 13](#part-13node-排程與-routable-網段)。
+
+### 參考來源
+
+- istio.io — IST0162（ingress gateway 的預設 port）：https://istio.io/latest/docs/reference/config/analysis/ist0162/
+- rfc-editor.org — RFC 6598（Shared Address Space）：https://www.rfc-editor.org/rfc/rfc6598
+- metallb.io — release notes（annotation prefix）：https://metallb.io/release-notes/
+- kubernetes.io — Service API（loadBalancerSourceRanges）：https://kubernetes.io/docs/reference/kubernetes-api/service-resources/service-v1/
+- istio.io — 安裝 gateway：https://istio.io/latest/docs/setup/additional-setup/gateway/
+- istio.io — Gateway：https://istio.io/latest/docs/reference/config/networking/gateway/
+- istio.io — AuthorizationPolicy：https://istio.io/latest/docs/reference/config/security/authorization-policy/
+- envoyproxy.io — substitution_formatter（response flags）：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
+- kubernetes.io — Service（Endpoints deprecated）：https://kubernetes.io/docs/concepts/services-networking/service/
+
 ---
 
 ## Part 11：FZ1 與 FZ2 雙 cluster 的入口設計（DNS record 放哪）
