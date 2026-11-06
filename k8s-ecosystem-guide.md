@@ -4791,7 +4791,7 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 #### 兩座 cluster 完全相同的部分
 
 ```yaml
-# ===== FZ1 與 FZ2 內容一字不差，兩邊都要 apply（VirtualService 是簡化範例，見下方註解）=====
+# ===== FZ1 與 FZ2 內容一字不差：Gateway 兩邊都要 apply；VirtualService 是簡化範例，不要 apply（見下方註解）=====
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
