@@ -4643,7 +4643,8 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 # 000 或 404 都算正常，只有 200 才代表內部服務漏到 routable VIP 上：
 #   000 —— HTTPS 的 SNI 對不到任何 filter chain，TLS 握手就失敗（curl exit 35），
 #          根本沒有 HTTP 回應，-w 印出來就是 000。這是最常見的「正常」結果。
-#   404 —— TLS 過了（例如有萬用憑證）但沒有 route 符合這個 host（access log 的 NR）。
+#   404 —— TLS 過了（例如有萬用憑證）但沒有 route 符合這個 host。
+# 兩種在 gateway 的 access log 裡都記成 NR（no route／no matching filter chain）。
 ```
 
 #### 踩雷 2：憑證放在錯的 namespace
