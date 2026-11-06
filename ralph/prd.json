@@ -1281,7 +1281,7 @@
         "code-review（fixed point＝故事開始時記下的 BASE）沒有未處理的發現；兩輪修不完就依 ralph/CLAUDE.md 寫進 notes、passes 維持 false"
       ],
       "priority": 60,
-      "passes": false,
+      "passes": true,
       "notes": "兩輪 review 上限已到（BASE=84526c1）。第 2 輪剩一項 Standards 發現：11.4 第一個 yaml 區塊標頭「兩邊都要 apply」仍涵蓋簡化版 VirtualService。已在上限之後的 commit 修掉（標頭改成「Gateway 兩邊都要 apply；VirtualService 是簡化範例，不要 apply」），但這個修正沒有經過 review。下一個 iteration：以「上限後那個 fix commit 的前一個 commit」（fix: US-060 - address review 那個）為 BASE 再 review 一次，乾淨就 pass，不要重做故事。Spec 軸第 2 輪 clean。"
     },
     {

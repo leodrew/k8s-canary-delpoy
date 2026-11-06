@@ -685,3 +685,10 @@ Started: (not yet run)
 - Learnings：在 yaml 區塊裡加「不要照抄 apply」警告時，同一區塊的標頭／標題若寫著「都要 apply」要一起改，reviewer 會抓矛盾。
 - 觀察（不在本故事範圍）：Part 10 建議用 istio/gateway helm chart 裝第二組，但示意 Service 仍是 targetPort 8443；track-a 03-virtualservice.yaml 仍有 CLAUDE.md 列的已知未修項。
 ---
+## 2026-11-07 - US-060 (re-review)
+- 依 notes 以 BASE=4d3003e 重新 review 上限後的修正 b96486b（11.4 第一個 yaml 區塊標頭改成「Gateway 兩邊都要 apply；VirtualService 是簡化範例，不要 apply」）。沒有重做故事。
+- Files changed: 無（只有 ralph 記帳）
+- Review round（re-review）：Standards 0 項硬性違規，3 項選擇性判斷題（標頭「一字不差」仍像涵蓋整塊、「不要 apply」說了三次、區塊內註解沒寫 03-virtualservice.yaml 檔名）—— 都由區塊後的段落解決，依 patterns.md 收斂規則不改。Spec 0 項；WebFetch 驗過 metallb.io/release-notes、istio gateway chart values.yaml、istio network-issues 三個 URL，引文都在。
+- validate.sh: ALL PASS（138 項）
+- Learnings: 無新的（照 patterns.md「上限後的修正以前一個 commit 為 BASE 再 review 一次」的流程跑，一輪就收斂）
+---
