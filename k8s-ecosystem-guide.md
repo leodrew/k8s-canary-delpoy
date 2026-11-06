@@ -4808,6 +4808,13 @@ spec:
       hosts:
         - "myapp.example.com"              # ⚠ 同一個 host，兩邊都收
 ---
+# ⚠ 下面這份 VirtualService 是【簡化範例】，只示意「兩邊相同」的骨架：
+#   沒有 subset，也沒有 pilot-run（cookie → canary）規則。
+#   它的 namespace／name（ea-pmc/app-routing）跟 track-a 的
+#   canary-manual/track-a/base/03-virtualservice.yaml 一樣，照抄 apply 會整份蓋掉那一份：
+#   canary 路由消失；而且 destination 沒有 subset 時，Service（selector 只比對 app）
+#   背後的 stable 與 canary pod 都會分到正式流量。
+#   兩座 cluster 實際要 apply 的是 track-a 那一份，不是這份。
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -4832,7 +4839,7 @@ spec:
       timeout: 15s
 ```
 
-**這兩份必須逐字相同。** 只要有一邊漏了某條 `match`，使用者就會遇到「同一個網址，重整一次行為就不一樣」——而且極難重現，因為要看 GSLB 那次把你導去哪邊。
+**兩座 cluster 上的這兩份必須逐字相同。** 上面的 VirtualService 是簡化範例；兩邊要一致的對象是 track-a 的 `canary-manual/track-a/base/03-virtualservice.yaml`（`pilot-run`、`primary`、`default` 三條規則，destination 都帶 subset），以它為準。只要有一邊漏了某條 `match`，使用者就會遇到「同一個網址，重整一次行為就不一樣」——而且極難重現，因為要看 GSLB 那次把你導去哪邊。
 
 > **這就是為什麼模式 B 幾乎一定要搭 GitOps**：同一份 Git 來源產生兩邊的設定，人工 `kubectl apply` 兩次遲早會漂移。
 
@@ -4840,33 +4847,45 @@ spec:
 
 ```yaml
 # ===== FZ1 =====
+# ⚠ 這份只示意「兩邊哪裡不同」，不是可以直接 apply 的完整 Service：
+#   安裝工具（istioctl／Helm `gateway` chart）產生的 Service 還有 status-port 15021、
+#   http2 等 port；直接 apply 這份可能把那些 port 蓋掉。位址池應透過安裝工具的
+#   values（Service annotations）設定，而不是另外 apply 一份 Service。
 apiVersion: v1
 kind: Service
 metadata:
   name: istio-ingressgateway
   namespace: istio-system
   annotations:
-    metallb.universe.tf/address-pool: fz1-routable    # ← 不同
+    # 是否用 MetalLB、位址池叫什麼，都屬環境特定（依你們的 LB 實作而異）。
+    # MetalLB 0.14.9 起新前綴是 metallb.io；舊的 metallb.universe.tf 已 deprecated
+    metallb.io/address-pool: fz1-routable    # ← 不同
 spec:
   type: LoadBalancer
   selector: { istio: ingressgateway }
   ports:
+    # targetPort 依安裝方式而異：istioctl 安裝的是 8443，Helm `gateway` chart 是 443。
+    # 要填 gateway pod 實際在聽的那個 port，照你們實際的安裝方式確認。
     - { name: https, port: 443, targetPort: 8443 }
 ```
 
 ```yaml
 # ===== FZ2 =====
+# ⚠ 同 FZ1：只示意差異，不是完整 Service，位址池應透過安裝工具的 values 設定。
 apiVersion: v1
 kind: Service
 metadata:
   name: istio-ingressgateway
   namespace: istio-system
   annotations:
-    metallb.universe.tf/address-pool: fz2-routable    # ← 不同的位址池 → 不同 VIP
+    # 前綴、環境特定的說明同 FZ1
+    metallb.io/address-pool: fz2-routable    # ← 不同的位址池 → 不同 VIP
 spec:
   type: LoadBalancer
   selector: { istio: ingressgateway }
   ports:
+    # targetPort 依安裝方式而異：istioctl 安裝的是 8443，Helm `gateway` chart 是 443。
+    # 要填 gateway pod 實際在聽的那個 port，照你們實際的安裝方式確認。
     - { name: https, port: 443, targetPort: 8443 }
 ```
 
@@ -4898,13 +4917,20 @@ done
 
 ✅ 檢查到「真的能提供服務」的深度
    → GET https://<VIP>/gui_epmmFormQuery/actuator/health
-      Host: myapp.example.com          ← 必須帶 Host header，否則 Gateway 的 hosts 比對不到會 404
+      SNI:  myapp.example.com          ← 必須帶 SNI，否則 TLS 握手就失敗，走不到 Host 比對
+      Host: myapp.example.com          ← 握手成功之後，Host 不符 Gateway 的 hosts 才會回 404
       期望：200（⚠ 後端補上 permitAll 之前實際回 302，見下方說明）
 ```
 
 > **⚠ 這條路徑目前回 302，不是 200。** 後端 `SecurityConfig` 的 permitAll 清單裡只有**沒有前綴**的 `/actuator/health`、`/actuator/health/**`，但 ConfigMap 的 `management.endpoints.web.base-path` 把 actuator 搬到了 `/gui_epmmFormQuery/actuator`，前綴路徑落在 `anyRequest().authenticated()` → 回 302（`canary-manual/CANARY-COMPLETE.md` 3.6）。所以 GSLB 若期望 200，兩邊都會被判定不健康；若 GSLB 把 3xx 也算成功，就成了不管後端死活都亮綠燈的假檢查。**在後端補上前綴路徑的 permitAll（Spring 後端那一側的修正，PRD 階段 1）之前，不要拿這條路徑當 GSLB 的深度檢查。**
 
-> **⚠ 這個 Host header 很容易漏掉。** 你的 Gateway 設定 `hosts: ["myapp.example.com"]`，如果 GSLB 直接對 VIP 發健康檢查而沒帶 Host header，Gateway 會回 404，GSLB 就以為這邊掛了——結果兩邊都被判定不健康。
+> **⚠ SNI 和 Host header 都很容易漏掉。** 你的 Gateway 是 HTTPS 而且設了 `hosts: ["myapp.example.com"]`，官方說明這種 Gateway 會對進來的請求做 SNI 比對（「An HTTPS Gateway that specifies the hosts field will perform an SNI match on incoming requests.」）。GSLB 直接對 `https://<VIP>` 發健康檢查時，用 IP 連線不會送出 SNI（「…no SNI will be set, causing the request to fail.」），請求會先在 TLS 握手就失敗，根本走不到 Host 比對；Host 不符回 404 這一點，只在 TLS 握手成功之後才成立。所以健康檢查要**同時**設 SNI＝`myapp.example.com` 和 Host header，否則 GSLB 會以為這邊掛了——結果兩邊都被判定不健康。手動驗證時可以用 curl 的 `--resolve` 讓 SNI 與 Host 都帶上主機名，同時連到指定的 VIP：
+>
+> ```bash
+> curl -sS -o /dev/null -w '%{http_code}\n' \
+>   --resolve myapp.example.com:443:<VIP> \
+>   https://myapp.example.com/gui_epmmFormQuery/actuator/health
+> ```
 
 ### 11.5 session 的致命細節（直接關係到你的架構）
 
