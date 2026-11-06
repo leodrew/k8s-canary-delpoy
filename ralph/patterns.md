@@ -168,6 +168,7 @@
   中文段落裡的裸 URL 後面常接全形標點，寫 URL regex 時字元類別要排除它們。
 - **WebFetch 預設只讀前 100000 字。** kubernetes.io 的 Service 頁、Pod API 頁都超過；Endpoints deprecated、
   EndpointSlice 建議、containerPort 那句都在 offset 100000 之後。查不到引文前先用 offset 讀後段。
+- **縮寫撞名**：Part 11 的「DR」是災難備援，講 DestinationRule 時寫全名。
 - **guide 裡的「Gateway」有兩種**：Istio 的 `networking.istio.io` Gateway 與 Gateway API 的
   `gateway.networking.k8s.io` Gateway。Istio 官方頁講 `targetRefs` 時指的是後者，引用時要寫明。
 - **ASCII 圖改字之後要重新對齊**：用 node 量寬度（CJK 算 2）再調空白，不量會歪。

@@ -660,3 +660,15 @@ Started: (not yet run)
 - Review 第 2 輪：兩軸皆 0 項。
 - Learnings：無新的可重用慣例。
 ---
+
+## 2026-11-07 - US-059
+- 修正 Part 11 帳本 P11-002、P11-003、P11-004（k8s-ecosystem-guide.md）
+  - P11-002：11.2 表格 session 列改「沒有跨 cluster 的 session 問題」＋表下說明（stable replicas: 2 ＋ canary pod、狀態在 pod 記憶體、DR consistentHash 的 epmm-affinity 是目標設定且只是軟性黏著）；11.2「何時選 A」bullet、11.6 對照表、11.7 選擇表同步改說法
+  - P11-003：11.3 故障域列改成「切換時間 ≈ 健康檢查判定時間 ＋ DNS TTL ＋ 用戶端快取」，指向 11.10 踩雷 4
+  - P11-004：11.3 第 1 點與 11.4 健康檢查區塊加註：後端補 permitAll（PRD 階段 1）前該路徑回 302；期望 200 → 兩邊不健康，3xx 算成功 → 假綠燈
+- 連動修改：11.2 bullet 原本「（見 11.4）」指錯小節（session 在 11.5），因為同一行整句重寫，順手改成 11.5。11.3 表格 session 列的「見 11.4」同樣指錯，但不在本故事帳本列，未動（留給之後處理）
+- Files: k8s-ecosystem-guide.md
+- Review 第 1 輪：Standards 5 項判斷題（11.3 的「秒～分鐘級」與 11.6 不一致、cross-pod 說明重複 4 次但都指回 11.2（接受）、「見上一段」不精確、「PRD 階段 1」未解釋、epmm-affinity 是目標狀態非現況）；Spec 同指出秒～分鐘級與 epmm-affinity 現況問題、§9.1 未引用。修：刪掉區間改指 11.10、改「見上方表下說明」、加「目標設定」、加註 Spring 後端修正
+- Review 第 2 輪：只剩 11.6 表格「DR 軟性黏著」與同表「FZ2 是 DR（災難備援）」縮寫撞名 → 上限後改成 DestinationRule（單字替換，未再 review）
+- Learnings：Part 11 裡「DR」已被定義為災難備援，提到 DestinationRule 時要寫全名
+---
