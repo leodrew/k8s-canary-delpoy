@@ -7097,9 +7097,9 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | | Track A | Track B |
 |---|---|---|
 | 誰管理 pod | 兩個 **Deployment** controller | 一個 **Rollout** controller |
-| 同時存在會怎樣 | **兩個 controller 互相搶 pod** —— Deployment 想維持自己的 ReplicaSet，Rollout 也想，結果 pod 反覆被建立和刪除 | |
+| 同時存在會怎樣 | 兩個 controller 各自透過 ownerReference 管理**自己的** ReplicaSet，不會互相接管對方的 pod（官方：「The Rollout won't try to manage existing Deployment Pods.」）。本 repo 的 track-a 與 track-b 之所以互斥，是因為兩邊共用同一個 `app` label 與同一份 VirtualService，同時 apply 會讓流量與 Service endpoint 混在一起 | |
 
-切換 track 要「刪掉 Deployment、建立 Rollout」（或反過來），這中間有**服務中斷的風險**，不是可以每週來一次的操作。
+如果切換時直接「刪掉 Deployment、建立 Rollout」（或反過來），中間有**服務中斷的風險**，不是可以每週來一次的操作。官方的遷移建議是讓兩者並存一段時間：「When migrating a Deployment which is already serving live production traffic, a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment.」做法是 Rollout 用 `workloadRef` 引用既有 Deployment，並以 `scaleDown`（`never`／`onsuccess`／`progressively`）決定原 Deployment 何時縮減，說明見 Part 7 的 `workloadRef` 段落。
 
 **所以「看情況選」要換個方式達成 —— 見下一節。**
 
@@ -7119,9 +7119,11 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 各自獨立，互不影響。缺點是團隊要維護兩套 SOP。
 
-#### 做法二：同一個服務用 Track B，靠 steps 設計出兩種節奏（推薦）
+#### 做法二：同一個服務用 Track B，靠 steps 設計出兩種節奏（未來選項，目前不支援）
 
-**這是唯一能對同一個服務「看情況選」的做法。**
+> ⚠ **本 repo 現況只支援 Track A。** `CANARY-COMPLETE.md` §0：「Track B（Argo Rollouts）目前**沒有跟上自動分流**」；§10 #11：「自動分流在 Track B 跑不起來。**要嘛補齊，要嘛把 track-b 標成不維護**」。下面的做法二是 Track B 補齊之後才成立的設計，不是現在就能照做的建議。
+
+**這是對同一個服務「看情況選」的做法（需要 Track B 補齊之後）。**
 
 關鍵洞察：Argo Rollouts 的閘門是寫在 `steps` 裡的，而**同一個 Rollout 可以同時具備人工閘門和自動判斷**——差別只在「你怎麼推進它」：
 
@@ -7147,12 +7149,12 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | 情境 | 你怎麼做 | 實際發生什麼 |
 |---|---|---|
 | **平常（要 pilot run）** | 等 pilot 使用者簽核 → `promote` | 機器先驗指標，人再驗功能，兩關都過才上 |
-| **緊急修補（沒時間等人）** | 直接 `promote --full` | 跳過所有剩餘 step，指標仍然跑過了 |
+| **緊急修補（沒時間等人）** | 直接 `promote --full` | 跳過所有剩餘 step（含 analysis 與 pause） |
 | **夜間 / 週末（沒人在）** | 把 `pause: {}` 那行拿掉再 apply | 全自動，失敗自動回滾 |
 
-**`promote --full` 是關鍵**：它跳過所有剩餘的 step 直接全量，但**前面已經跑完的 analysis 仍然生效**——所以你不是「完全沒驗證」，只是「跳過人工那一關」。
+**`promote --full` 是關鍵**，但要看清楚它的範圍。官方說明：「Perform a full promotion, skipping analysis, pauses, and steps」。所以只有 Rollout **已經跑完 analysis、停在其後的 `pause: {}`** 時下 `--full`，才等於「指標已經驗過、只跳過人工那一關」；如果 analysis 還在跑就下 `--full`，analysis 會被直接跳過，等於完全沒有驗證。
 
-> **建議**：如果你確定未來要走自動化（Part 12.7 的四階段），**直接上 Track B 並保留 `pause: {}`**。這樣基礎設施一次到位，之後要放寬只是拿掉一行，不用再做一次 track 切換。
+> **未來選項**：如果未來要走自動化（Part 12.7 的四階段），方向是把 Track B 補齊後再切過去並保留 `pause: {}`，之後要放寬只是拿掉一行。**在補齊之前，本 repo 請繼續用 Track A。**
 
 ---
 
