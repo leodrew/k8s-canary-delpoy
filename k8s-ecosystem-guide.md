@@ -5129,7 +5129,7 @@ spec:
               - primary                  # ⚠ VirtualService 裡的 http route 必須有 name: primary
         # 【必要】steps 用了 setHeaderRoute，就必須在這裡宣告它的名字。沒寫 managedRoutes，
         # Rollout 驗證直接失敗（"Rollout has missing field 'spec.strategy.canary.trafficRouting.managedRoutes'"）；
-        # 寫了但漏列某個 route，也會失敗（"Steps define a route that does not exist in ...managedRoutes"）。
+        # 寫了但漏列某個 route，也會失敗（Steps define a route that does not exist，指的就是 managedRoutes 裡沒有這個名字）。
         # 這份骨架的步驟 1 用 canary-test，下面 cookie 版本用 canary-testers，所以兩個都列；列的順序就是優先序。
         managedRoutes:
           - name: canary-test
@@ -5179,7 +5179,7 @@ spec:
 | 方式 | 寫法 | 適合誰 |
 |---|---|---|
 | **header** | `setHeaderRoute` + `headerName: x-canary` | **自動化測試**（測試程式自己加 header） |
-| **cookie** | `setHeaderRoute` 比對 `cookie` header 的 regex | **真人測試者**（種一次 cookie，之後整個 session 都黏在 v2） |
+| **cookie** | `setHeaderRoute` 比對 `cookie` header 的 regex | **真人測試者**（種一次 cookie，在 header route 存在的那幾個 step 內都走 v2；見下方說明） |
 | **權重** | `setWeight: 5` | **正式流量**的漸進放量 |
 
 **給真人測試者用的 cookie 版本**（如果你們短期內還想保留人工驗證，這個很好用）：
@@ -5193,7 +5193,7 @@ spec:
                   regex: ".*canary-user=true.*"
 ```
 
-測試者在瀏覽器 console 執行一次 `document.cookie="canary-user=true;path=/"`，**在 header route 存在的那幾個 step 裡，他的操作都固定走 v2**——Argo 會在 rollout 結束或 abort 時移除 managedRoutes 裡的所有 route（12.2 骨架的步驟 3 也會主動把它關掉），所以它不是永久黏住。這比你們現在「使用者 pilot run 但不確定他打到哪個 Pod」還要可靠。
+測試者在瀏覽器 console 執行一次 `document.cookie="canary-user=true;path=/"`，**在 header route 存在的那幾個 step 裡，他的操作都固定走 v2**——Argo 會在 rollout 結束或 abort 時移除 managedRoutes 裡的所有 route（要提早關掉，就像步驟 3 對 `canary-test` 做的那樣，用同名、不帶 match 的 `setHeaderRoute` 關閉它），所以它不是永久黏住。這比你們現在「使用者 pilot run 但不確定他打到哪個 Pod」還要可靠。
 
 > **⚠ 前置條件（Part 9 發現 3）**：你現在的 `app-routing` 沒有 `mesh`，而且 route 沒有 `name`。要用 Argo Rollouts 必須先補：
 > ```yaml
