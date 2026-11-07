@@ -6988,7 +6988,11 @@ istioctl x describe pod -n ea-pmc <pod-name>
             x-app-track: "canary"      # ← 使用者在 F12 Network 分頁看得到
 ```
 
+> **這段只示範 response header 的寫法，不是完整的 pilot 規則**：上面的 `match` 只比對 cookie，沒有 `uri` 條件。完整的目標規則（含 `uri: prefix: /gui_epmmFormQuery`）見 `CANARY-COMPLETE.md` §3.4 的【修正】；`track-a/base/03-virtualservice.yaml` 目前也還沒改成那樣。
+
 stable 那條路由也設 `x-app-track: "stable"`，這樣兩種狀態都有明確訊號，而不是「有 header = canary、沒 header = 不確定」。
+
+**但 `x-app-track` 只證明 pod，不證明 bytes**：header 是 VirtualService 加的，只說明請求被路由到哪一軌；header 對了，畫面仍可能是舊的（瀏覽器快取）。要同時看 `index.html` 的 `ETag`，見 `CANARY-COMPLETE.md` §6.4。
 
 ### 14.8 cookie 的比對要精準
 
@@ -7012,13 +7016,17 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 |---|---|---|
 | 需要安裝 | **不用** | Argo Rollouts controller + CLI |
 | 人工閘門 | **天生就是**（沒人執行 promote 就不會前進） | `pause: {}` + `promote` 指令 |
-| 流量切換 | 你自己 `kubectl` | Argo 自動改 VirtualService |
-| promote | 把 stable 的 image 改成 canary 的 | `kubectl argo rollouts promote` |
+| 流量切換 | 改 YAML → commit → pipeline apply；正式流量的 canary 權重不調整（pilot 使用者靠 cookie） | Argo 自動改 VirtualService |
+| promote | 分兩個 commit（見表下說明） | `kubectl argo rollouts promote` |
 | 之後要加自動化 | 要重寫 | **直接加 `analysis` step 即可** |
+
+**Track A 的 promote 不是只換 image**：① canary ConfigMap 的 `data` 複製進 stable ConfigMap、stable 的 `image` 改成 canary 那一版、canary 設 `APP_CANARY_ENABLED=false` 且 `replicas` **維持 1**；② 等持有 cookie 的人排空後才把 canary 縮到 0（細節見 14.3 與 `CANARY-COMPLETE.md` §5 步驟 4a）。
 
 **建議先用 Track A。** 它零安裝，而且「人工閘門」是天然的——沒有人做事，就永遠不會有正式使用者看到新版本。這比任何機制都可靠。
 
-**⚠ 兩軌互斥**：Rollout 會自己管理 ReplicaSet，同時存在 Deployment 的話兩個 controller 會互搶 pod。切換前必須先刪掉 Track A 的兩個 Deployment。
+**⚠ 兩軌互斥**：不是因為兩個 controller 會搶同一批 pod——官方說「The Rollout won't try to manage existing Deployment Pods.」。本 repo 互斥的原因是兩軌共用 `app` label 與 VirtualService `app-routing`，同時存在會互相干擾流量。切換時**不要先刪 Deployment**：官方建議「a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment」，不照這個順序可能造成中斷（downtime）。
+
+參考：https://argo-rollouts.readthedocs.io/en/stable/migrating/
 
 #### Track B 的兩個容易漏掉的設定
 
