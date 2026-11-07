@@ -7424,46 +7424,27 @@ ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 re
 
 ### 15.13 Azure Pipeline 的設定建議
 
-> 我不知道你們 pipeline 的實際設定，這一節是「建議的形狀」與「該去問什麼」。
+**這一節不再保留完整的 pipeline 設定建議**，因為副本會跟 `canary-manual/CANARY-COMPLETE.md` 分歧；以該文件第 2 章（檔案分層與命名規則）與 4.1（首次上線的前置檢查）為準。
 
-#### 建議切成三個 stage
+- 摘要：`base/` 和 `release/` 分成不同 stage，`base/` 那個 stage 額外加核准關卡（它改錯會影響全體使用者）。
+- validate stage 用 `kubectl apply --dry-run=server`（做法見 CANARY-COMPLETE.md 4.1）。
+- 實際用哪個 Azure Pipelines task 要去問平台團隊；`KubernetesManifest@1` 的 promote／reject 是該 task 自己的 baseline／canary 機制，跟 Argo Rollouts 的 promote 或本 repo 的 stable／canary 無關。
+- 就算問完發現有權限跑任意指令，也不要回頭用 15.4／15.5 的舊 SOP 做回滾或關 canary；回滾規則以 CANARY-COMPLETE.md 第 8 章為準（見 15.11）。
 
-| Stage | 何時跑 | apply 什麼 | 誰核准 |
-|---|---|---|---|
-| **validate** | 每次 PR | `--dry-run=server -f release/` | 自動 |
-| **deploy-release** | 每次發布 | `release/` | 發布負責人 |
-| **deploy-base** | **手動觸發**，很少跑 | `base/` | 需要多一層核准 |
+---
 
-`deploy-base` 一定要跟 `deploy-release` 分開，而且加上額外核准 —— 它會動到 VirtualService 這種「改錯就全體使用者受影響」的資源。
+### 參考來源
 
-#### validate stage 很值得加
-
-`--dry-run=server` 也是 apply 指令的一部分，通常 pipeline 都做得到：
-
-```bash
-kubectl apply --dry-run=server -f release/
-```
-
-它會把 YAML 送到 API server 做完整驗證（含 admission webhook），但**不真的建立資源**。可以在 PR 階段就抓出：
-
-- YAML 語法錯誤
-- 欄位名稱打錯
-- `ports` 寫成數字而不是字串這類型別錯誤
-- CRD 沒安裝
-
-#### 該去問平台團隊的三件事
-
-1. **pipeline 用的是哪個 task？**
-   - 如果是 `KubernetesManifest@1`，它其實支援 `deploy` / `promote` / `reject` / `scale` / `patch` / `delete` 等 action —— 你可能不只有 apply
-   - 如果是 `Kubernetes@1`，可以跑任意 kubectl 指令
-   - 問清楚才知道能不能簡化流程
-
-2. **能不能加一個 `--dry-run=server` 的 validate stage？**
-
-3. **能不能把 `base/` 跟 `release/` 拆成兩個 stage，並給 `base/` 額外的核准關卡？**
-
-> **如果問完發現其實可以跑指令**，就回頭用 15.4 / 15.5 那兩份 SOP，操作會簡單很多。
-> 這一節（15.8–15.13）是「最壞情況下也能運作」的版本。
+- Argo Rollouts — Traffic Management：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/
+- Argo Rollouts — Istio：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/
+- Argo Rollouts — Analysis：https://argo-rollouts.readthedocs.io/en/stable/features/analysis/
+- Argo Rollouts — Specification：https://argo-rollouts.readthedocs.io/en/stable/features/specification/
+- Argo Rollouts — kubectl argo rollouts promote：https://argo-rollouts.readthedocs.io/en/stable/generated/kubectl-argo-rollouts/kubectl-argo-rollouts_promote/
+- Argo Rollouts — Migrating to Rollouts：https://argo-rollouts.readthedocs.io/en/stable/migrating/
+- Kubernetes — Horizontal Pod Autoscaling：https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/
+- Kubernetes — Configure a Pod to Use a ConfigMap：https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+- Kubernetes — Declarative Management of Kubernetes Objects：https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/
+- Microsoft Learn — KubernetesManifest@1：https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/kubernetes-manifest-v1
 
 ---
 
