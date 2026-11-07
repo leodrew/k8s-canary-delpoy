@@ -825,3 +825,9 @@ Started: (not yet run)
 - Review: 1 round, Standards/Spec 皆無發現（引文逐一對照 CANARY-COMPLETE.md；實數 track-a 4+4+1、track-b 7）。
 - Learnings: 帳本引用本地檔時，直接讀該檔取代 WebFetch。
 ---
+## 2026-11-07 - US-080
+- 修正 15.3「同樣的部分」：ConfigMap 不能直接複製（P15-010：track-b 缺 APP_TRACK/APP_CANARY_ENABLED/名單掛載、ADDITIONAL vs LOCATION 語意不同）、pod template 改成「寫法可參考、非整段複製」；canary 1 replica 理由補上 OAuth2 state（P15-011）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 無發現（引文與 CANARY-COMPLETE.md §10 #11 / §3.7 相符）；Standards 指出小節標題「可以直接沿用，不用改」與新內文矛盾、兩條 bullet 重複列 env。連動修改：標題改為「兩個 track 共通的部分（有些可以沿用，ConfigMap 與 pod template 不行）」，pod template bullet 的重複 env 清單改成「上一條列的 env」。無其他帳本列受影響。
+- Learnings: 改掉小節內的結論時，順手檢查該小節標題是否仍成立。
+---
