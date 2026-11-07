@@ -700,3 +700,11 @@ Started: (not yet run)
 - Review: 第 1 輪 Standards 0 硬性違規（5 個判斷題）、Spec 1 項（帳本 P11-014 引文與 Alibaba 頁面字句不完全一致，頁面語意相同，guide 未引用該句；帳本問題，未改）＋ F5 列有 2 句帳本沒有的推論 → 刪掉；「跳邊」改「被切到另一邊」。第 2 輪只做刪減，未重跑完整 review。
 - Learnings: 帳本引文可能是意譯，WebFetch 對不上逐字時先看語意與建議改法是否被頁面支持。
 ---
+## 2026-11-07 - US-062
+- Part 12 (12.2/12.3): P12-001 added managedRoutes (canary-test, canary-testers) to the 12.2 skeleton + v1.3 note + note that 12.5-12.7 route names must be listed; P12-002 cookie no longer "sticks for the whole session" (table row + paragraph); P12-004 Job sidecar.istio.io/inject moved from annotations to labels.
+- Linked edits: 12.2 table cookie row (same claim as P12-002, two lines earlier).
+- Not done: Istio 1.27 native sidecar remark (ledger says already confirmed in prior batch).
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards no hard violations (quoted elision, wrong "step 3 closes cookie route" claim -> fixed); Spec: all ledger quotes verified on pages, leftover table claim -> fixed. Round 2: only minor canary-testers comment clarity -> fixed.
+- Learnings: ledger line numbers drift; grep by text. Same wrong claim often appears twice (table + paragraph).
+---
