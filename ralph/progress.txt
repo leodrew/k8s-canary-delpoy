@@ -787,3 +787,9 @@ Started: (not yet run)
 - 未改動：14.5 結尾「這就是 Part 9 發現 4 為什麼要修」、line 5577 的「Istio 可能用 L4 處理」屬其他帳本列範圍，留給對應故事。CANARY §4.1 同樣過強的說法不在本故事範圍。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-07 - US-074
+- 修正 Part 14 14.6（P14-008..011）：round-robin 改 least request（圖 ⑤、方法說明、一句話總結連動），「約三分之一」註明近似值；retries 列改為「不行（但仍套用 Istio 預設重試）」＋表下說明；刪除 Prometheus 呼叫方一列（P14-010 保守刪除）；方法 2 註明先確認測試 pod 為 2/2。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec — 引文皆在頁面上；多餘的「實際比例依 least request 即時負載」已刪。retryOn 清單在 virtual-service 參考頁而非帳本引的 concepts 頁（內容為真，未新增來源，依帳本）。Standards — 無硬性違規；retries 儲存格改成「不行（…）」與鄰列一致。未處理：方法 2 callout 內含 native sidecar 說明（來自帳本，保留）。
+- Learnings: 無新增通用慣例。
+---
