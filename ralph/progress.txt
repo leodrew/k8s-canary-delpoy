@@ -692,3 +692,11 @@ Started: (not yet run)
 - validate.sh: ALL PASS（138 項）
 - Learnings: 無新的（照 patterns.md「上限後的修正以前一個 commit 為 BASE 再 review 一次」的流程跑，一輪就收斂）
 ---
+## 2026-11-07 - US-061
+- 修正 Part 11：11.5（P11-009 SSO 重新認證而非直接登入頁、P11-010 多分頁改「不同瀏覽器／裝置」、P11-011 補第四種 F5 cookie persistence）、11.10（P11-014 kubectl 用全名避免 Gateway 撞名、P11-015 切換時間 = 健康檢查＋TTL＋用戶端快取，刪掉未驗證的 30~60 秒與「忽略短 TTL」）。
+- 連動修改：11.10 踩雷 1 的 for 迴圈四個資源都改全名（同一行，一致性）。
+- 加 Part 11 `### 參考來源`（5 個 URL），"Part 11" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review: 第 1 輪 Standards 0 硬性違規（5 個判斷題）、Spec 1 項（帳本 P11-014 引文與 Alibaba 頁面字句不完全一致，頁面語意相同，guide 未引用該句；帳本問題，未改）＋ F5 列有 2 句帳本沒有的推論 → 刪掉；「跳邊」改「被切到另一邊」。第 2 輪只做刪減，未重跑完整 review。
+- Learnings: 帳本引文可能是意譯，WebFetch 對不上逐字時先看語意與建議改法是否被頁面支持。
+---
