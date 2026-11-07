@@ -7690,11 +7690,20 @@ spec:
     - address: 10.20.31.40          # FZ2 ingressgateway 的 VIP
   ports:
     - { number: 443, name: https, protocol: HTTPS }
-  exportTo: ["."]
+  # 必須讓 istio-system 也看得到：這個 ServiceEntry 是給 istio-system 的 ingressgateway
+  # 用的（VS 的 destination 由 gateway 解析）。只寫 "."（= 只有 ea-pmc）的話，
+  # gateway 看不到這個 host，VS 指向一個 gateway 沒有的 cluster，request 以 503 NC 收場。
+  # 官方：「The value "." is reserved and defines an export to the same namespace that
+  # the service is declared in.」；不寫 exportTo 則預設匯出給所有 namespace（"*"）
+  exportTo: [".", "istio-system"]
 ---
 # 2. DestinationRule：ingressgateway 打 FZ2 時升級成 TLS
-#    sni 要填 myapp.example.com —— FZ2 的 Gateway 是靠 SNI 選憑證、選 server 的，
-#    填成 relay 的名字會在 FZ2 那邊 handshake 失敗。
+#    sni 寫 myapp.example.com 是「明確化」，不是必要：官方說沒填時，SIMPLE／MUTUAL 會
+#    依 downstream 的 HTTP host/authority 自動設 SNI，而 Host 原樣帶過去就是 myapp.example.com。
+#    FZ2 的 Gateway 是靠 SNI 選憑證、選 server 的；若 SNI 變成 relay 的名字，
+#    要看 FZ2 Gateway 的 hosts 對不對得上（例如是 `*` 就仍對得到 server），對不上才會 handshake 失敗。
+#    ⚠ 沒給 caCertificates 時，proxy 用 OS 的 CA 憑證驗 FZ2 的憑證；FZ2 的憑證如果是公司內部 CA
+#    簽的，要用 credentialName 或 caCertificates 指定 CA，否則上游 TLS 驗證失敗（預期是 503）。
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
@@ -7748,20 +7757,20 @@ spec:
  資料路徑：
    Client → FZ1 VIP → FZ1 ingressgateway（Gateway → VS → DR）
      │ endpoint 是「FZ2 east-west gateway:15443」（因為 FZ2 的 Pod IP 在另一個網路，FZ1 連不到）
-     │ mTLS，SNI = outbound_.8080_._.pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
+     │ mTLS，SNI = outbound_.8080_.stable_.pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
      ▼
    FZ2 east-west gateway（tls.mode: AUTO_PASSTHROUGH —— 只看 SNI 轉發，不解密）
      ▼
    FZ2 Pod 的 sidecar（mTLS 從 FZ1 ingressgateway 一路到這裡才終止）→ app
 ```
 
-**前提（缺一不可，全部是平台組的事）：**
+**前提（1～4 缺一不可，全部是平台組的事）：**
 
 1. **共用 root CA** —— 兩邊 istiod 用同一張 root 簽發（`cacerts` secret），否則 FZ2 的 sidecar 不信任 FZ1 送來的憑證
 2. **istiod 讀得到對方 API server** —— `istioctl create-remote-secret` 產生的 secret，且網路上 FZ1 → FZ2 API server 要通
 3. **east-west gateway** —— 跟 ingressgateway 分開的另一組 gateway，專收跨 cluster 流量（15443）
-4. **network label** —— 每座 cluster 標 `topology.istio.io/network`，istiod 才知道「這個 Pod IP 我直接連不到，要走對方的 east-west gateway」
-5. **兩邊 istiod 版本要一起升級**
+4. **network label** —— 每座 cluster 的 `istio-system` namespace 標 `topology.istio.io/network`（安裝時另設 `global.meshID`、`global.multiCluster.clusterName`、`global.network`），istiod 才知道「這個 Pod IP 我直接連不到，要走對方的 east-west gateway」
+5. （建議，非官方前提）兩邊 istiod 版本同步升級、遵守 Istio 的版本差政策，以平台組實測為準
 
 **AP 團隊在 FZ1 要放什麼：**
 
