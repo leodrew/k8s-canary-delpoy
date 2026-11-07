@@ -940,3 +940,9 @@ Started: (not yet run)
 - Review: R1 Standards 4 judgement（jsonpath 重複等）、Spec 缺 P02-009/P10-011/P04-015 原處註與杜撰的「問誰」→全修；R2 殘留 545/674 註、UTC 問誰不一致、P15-023 列措辭→已修（R2 後的修正未再 review）。URL 引文 P04-005/P10-011 已確認。
 - Learnings: 帳本的「問誰」欄空白時，表格「問誰」寫「自己查」，不要編造團隊。
 ---
+## 2026-11-07 - US-096
+- retro 寫進 tasks/retro-k8s-guide-verification.md；CLAUDE.md 修正 X-002（互斥原因改為共用 app label + 同一條 VirtualService，引 Argo 原句），新增改 guide 前的導覽（帳本、PRD、VERIFIED_PARTS 指路）。
+- Files: CLAUDE.md, tasks/retro-k8s-guide-verification.md
+- Review round 1: Spec 0 findings（Argo 原句與並存說法已 WebFetch 確認）；Standards 數項（重複的 VERIFIED_PARTS 說明、缺帳本路徑、run 專屬行未標示、「別拿搶 pod…」流水帳）→ 全部精簡／補上；Argo 引文因驗收條件要求而保留。第 1 輪後收斂，未做第 2 輪。
+- Learnings: 無新增可重用慣例。
+---
