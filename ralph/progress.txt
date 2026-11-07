@@ -920,3 +920,10 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（判斷題：stable_ 說明、expose-services）；Spec 無發現（5 個 URL 引文皆驗證）。修了 expose-services 與 stable_ 備註。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-07 - US-093
+- 修正 P16-014：16.6「附帶好處」locality failover 那句。改成：mesh 預設已開 locality LB（`localityLbSetting.enabled: true`），所以 localityLbSetting 不是必填；DestinationRule 只要有 outlierDetection 就會啟動 failover；repo 的 02-destinationrule.yaml 已有 outlierDetection，接上 multi-cluster 後自動生效；關閉用 `localityLbSetting.enabled: false`。
+- Files changed: k8s-ecosystem-guide.md（只有該行）
+- Review round 1: Spec 無發現（兩段官方引文在 istio.io DestinationRule 頁都逐字找到，新措辭一致）。Standards：新增的兩處「DR」改寫成 DestinationRule（Part 11 的 DR 是災難備援）；其餘（bullet 偏長、粗體句與前句語意相反）是判斷題，粗體句是帳本認定正確的原句，故保留。
+- 觀察（不在 P16-014 範圍，未改）：guide 約 2120–2121 行的 yaml 註解仍寫「需要時再加 localityLbSetting／failover」，與新說法（localityLbSetting 非必填）略有出入，應屬別的帳本列或後續故事。
+- Learnings: 無新增的可重用慣例。
+---
