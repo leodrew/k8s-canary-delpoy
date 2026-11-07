@@ -7043,37 +7043,9 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 ### 14.10 完整流程速查
 
-```bash
-NS=ea-pmc
+完整的發布流程不在這裡重複一份：所有動作都只是「改 YAML + apply」，順序是開分支 → 在同一個 commit 改 canary 的 ConfigMap、Deployment（image、replicas 維持 1）並跑 `sync-config-hash.sh` → 驗證 cookie 路由有效（6.1）→ 交給 pilot 使用者驗收 → 兩段式 promote → 發現問題時用 git revert 加 apply 回滾。
 
-# 【1】新版部署到 canary（正式流量完全不受影響）
-kubectl -n $NS set image deploy/pmc-epmmformquerygui-canary \
-  app=your-registry/pmc-epmmformquerygui:1.3.0
-kubectl -n $NS scale deploy/pmc-epmmformquerygui-canary --replicas=1
-kubectl -n $NS rollout status deploy/pmc-epmmformquerygui-canary
-
-# 【2】驗證 cookie 路由有效（別跳過）
-kubectl -n $NS run t --rm -i --restart=Never --image=curlimages/curl:8.5.0 -- \
-  curl -sS -o /dev/null -D - -H "Cookie: canary=always" \
-  http://pmc-epmmformquerygui-svc.ea-pmc:8080/gui_epmmFormQuery/actuator/health | grep -i x-app-track
-# 期望看到 x-app-track: canary
-
-# 【3】把 pilot-run-guide.md 發給驗證人員，等簽核
-
-# 【4-a】通過 → promote
-kubectl -n $NS set image deploy/pmc-epmmformquerygui-stable \
-  app=your-registry/pmc-epmmformquerygui:1.3.0
-kubectl -n $NS rollout status deploy/pmc-epmmformquerygui-stable
-kubectl -n $NS scale deploy/pmc-epmmformquerygui-canary --replicas=0
-
-# 【4-b】不通過 → 關掉 canary（使用者完全無感）
-kubectl -n $NS scale deploy/pmc-epmmformquerygui-canary --replicas=0
-
-# 【5】promote 後才發現問題 → 回退
-kubectl -n $NS rollout undo deploy/pmc-epmmformquerygui-stable
-```
-
-`canary-manual/scripts/canary.sh` 把這些包成 `deploy` / `verify` / `status` / `promote` / `rollback` / `undo` 六個指令。
+每一步的指令與理由以 `canary-manual/CANARY-COMPLETE.md` 為準：第 5 章「每次發布」、第 6.1 節「路由還活著嗎」、第 8.1 節「三張牌」、第 8.4 節「回滾」。
 
 ### 14.11 這套流程未來怎麼演進
 
