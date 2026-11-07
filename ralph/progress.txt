@@ -800,3 +800,8 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（4 項 judgement call，只處理行內 URL 重複：移除，改留 patterns.md 提醒）；Spec 無發現，官方兩段引文皆在頁面上。
 - 未處理的 judgement call：表格儲存格偏長、「base/03 還沒改」句子日後可能過時（帳本建議改法本身要求這句）。
 ---
+## 2026-11-07 - US-076
+- 14.10 換成摘要＋指標（指向 CANARY-COMPLETE.md 第 5、6.1、8.1、8.4 節）。P14-030 摘要、P14-031～035 隨整段 bash 區塊與 canary 腳本句一起移除。
+- Files: k8s-ecosystem-guide.md（只動 14.10；該區塊無 skip-yaml 標記，無連動修改）
+- Review: 1 輪。Standards／Spec 皆無發現（diff 內被禁字串只出現在刪除行；章節標題已對照 CANARY-COMPLETE.md）。
+---
