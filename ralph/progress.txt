@@ -736,3 +736,9 @@ Started: (not yet run)
 - Files: k8s-ecosystem-guide.md
 - Review：1 輪（BASE=95dc186），Standards／Spec 皆無發現；來源為 repo 檔案，已直接對照 CANARY-COMPLETE.md 與 track-b/*。
 ---
+## 2026-11-07 - US-067
+- 修正 Part 12.11（2/2）：P12-019 managedRoutes 註解（驗證失敗而非不生效）、P12-020 兩份 DR cookie 改 epmm-affinity、P12-022 retryOn 改 reset,connect-failure,refused-stream、P12-023 套用順序改為先建 Rollout、確認健康再刪 Deployment（&& 串接）、P12-024 檔名改 base/、release/ 實際路徑、補 ServiceAccount、dry-run 移最前。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 3 hard（引用已刪字樣、未附來源的斷言、delete 沒擋在 status 後）＋smells；Spec 1（「selector 不能重疊」官方頁沒寫）。全修：改成不加引號敘述、刪掉 selector 推論、delete 用 && 串在 status 後、第二份 DR 註解改「同上」。第 2 輪未重跑 review（只剩小修，validate.sh exit 0）。
+- 未動（帳本其他列範圍）：其餘 JSESSIONID／retryOn 5xx 出現在 Part 14 等處；track-b 實際 DR 檔還沒改 epmm-affinity（track-b 未補齊，已知）。
+---
