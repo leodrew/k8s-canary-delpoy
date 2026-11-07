@@ -7197,13 +7197,13 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 #### 同樣的部分（可以直接沿用，不用改）
 
-- **ConfigMap 的內容**：完全一樣
-- **pod template 的內容**：probe、resources、securityContext、preStop、volumes 完全一樣，可以整段複製
+- **ConfigMap 的內容**：**不能**直接複製。Track B 的 `20-rollout.yaml` 沒有 `APP_TRACK` / `APP_CANARY_ENABLED` / 名單掛載，`10-configmap` 也還沒依附錄 C 補齊（`CANARY-COMPLETE.md` §10 #11）；而且 Track B 的 Rollout 仍是 `SPRING_CONFIG_ADDITIONAL_LOCATION`（merge），Track A 的 Deployment 是 `SPRING_CONFIG_LOCATION`（replace），整段複製會把兩種語意搞混
+- **pod template 的內容**：probe、resources、securityContext、preStop、volumes 的**寫法**可以參考 Track A，但不是整段複製 —— 上一條說的 env（`APP_TRACK`、`APP_CANARY_ENABLED`、`SPRING_CONFIG_*`）與名單掛載在 Track B 要自己補
 - **ServiceAccount**：同一個
 - **Secret**：同一個
 - **cookie 的名稱與 regex**：`canary=always` 與 `^(.*;\\s*)?canary=always(\\s*;.*)?$`
 - **VirtualService 的 `hosts` 與 `gateways`**（含 `mesh`）
-- **`canary` 只開 1 個 replica 的理由**：in-memory session（見 14.5 前提 1）
+- **`canary` 只開 1 個 replica 的理由**：in-flight 的 OAuth2 `state`、`HttpSession`、authorized-client token 全部在 pod 記憶體裡（見 14.5 前提 1）；2 個 pod 會讓使用者隨機拿到 `authorization_request_not_found` 並被踢回 Keycloak
 
 ---
 
