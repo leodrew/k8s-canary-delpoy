@@ -5890,7 +5890,7 @@ spec:
 
       trafficRouting:
         managedRoutes:
-          # 【必要】steps 用了 setHeaderRoute，就必須宣告它的名字。沒宣告的話不是「不生效」，
+          # 【必要】steps 用了 setHeaderRoute，就必須宣告它的名字。沒宣告並不是默默略過這個 step，
           # 而是整個 Rollout 驗證失敗（InvalidSpec），根本不會往下推進。
           - name: pilot-run
         istio:
@@ -6021,9 +6021,7 @@ spec:
     loadBalancer:
       consistentHash:
         httpCookie:
-          # 不要用 JSESSIONID：設了 ttl 之後，請求沒帶這個 cookie 時 Envoy 會自己產生一個同名 cookie
-          # （Envoy 文件："a cookie with the TTL will be generated if the cookie is not present"），
-          # 和 Spring 的 session cookie 同名會互相覆寫，黏著反而被破壞，所以改用專屬名稱。
+          # 不要用 JSESSIONID，理由同上一份 stable-dr。
           name: epmm-affinity
           ttl: 10800s
     connectionPool:
@@ -6101,7 +6099,7 @@ kubectl -n $NS apply --dry-run=server -f base/ -f release/
 # ⚠ 如果原本是 Track A：不要先刪 Deployment。Argo 文件說 Rollout 不會去管理既有 Deployment 的 Pod，
 # 且「a Rollout should run next to the Deployment before deleting the Deployment」，
 # 不照這個順序可能停機。所以先建 Rollout、確認健康，最後才刪舊 Deployment。
-# 兩者同時存在時 selector 不能重疊（否則兩邊都會認領同一批 Pod），不確定就改用 workloadRef + scaleDown: onsuccess。
+# 也可以改用 workloadRef 搭配 scaleDown: onsuccess，讓 Rollout 健康後才縮掉舊 Deployment。
 kubectl -n $NS apply -f base/00-serviceaccount.yaml    # 缺了它 Rollout 的 pod 建不起來（serviceAccountName）
 kubectl -n $NS apply -f release/10-configmap-1.2.3.yaml
 kubectl -n $NS apply -f base/01-services.yaml
@@ -6110,8 +6108,9 @@ kubectl -n $NS apply -f base/03-virtualservice.yaml
 kubectl -n $NS apply -f base/04-analysistemplate.yaml
 kubectl -n $NS apply -f release/20-rollout.yaml        # Rollout 最後套，前面的都要先就位
 
-kubectl argo rollouts status pmc-epmmformquerygui -n $NS   # 確認健康後
-kubectl -n $NS delete deploy pmc-epmmformquerygui-stable pmc-epmmformquerygui-canary
+# status 回報 Healthy（指令 exit 0）才會往下刪；失敗就停在這裡，舊 Deployment 繼續服務
+kubectl argo rollouts status pmc-epmmformquerygui -n $NS && \
+  kubectl -n $NS delete deploy pmc-epmmformquerygui-stable pmc-epmmformquerygui-canary
 ```
 
 ---
