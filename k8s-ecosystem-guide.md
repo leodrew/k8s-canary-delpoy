@@ -5308,57 +5308,72 @@ metadata:
   name: success-rate
   namespace: ea-pmc
 spec:
+  args:
+    # 要量哪個 Service。由 Rollout 的 analysis step 用 args 傳入（例如 pmc-epmmformquerygui-canary）。
+    # 不要寫死 destination_workload="pmc-epmmformquerygui"：Istio 對 Rollout 的 stable 與 canary
+    # 兩組 ReplicaSet 回報的是同一個 workload 名，那樣量到的是兩者的合計，不是 canary。
+    - name: service-name
   metrics:
-    # ===== 指標 1：成功率 =====
+    # ===== 指標 1：成功率（內含最低樣本數檢查）=====
     - name: success-rate
       interval: 1m                       # 每分鐘測一次
       count: 5                           # 共測 5 次
-      successCondition: result[0] >= 0.99
-      failureLimit: 1                    # 允許失敗 1 次；第 2 次失敗就 abort
+      # 成功與失敗各寫一個條件，中間留一段空隙（0.95 ~ 0.99）：
+      # 落在空隙、或沒有資料時，結果是 Inconclusive（暫停等人），而不是 Failed。
+      # 只寫 successCondition 的話，「不符合」一律算 Failed。
+      successCondition: len(result) > 0 && result[0] >= 0.99
+      failureCondition: len(result) > 0 && result[0] < 0.95
+      failureLimit: 1                    # 允許失敗 1 次；第 2 次失敗就 abort（預設是 0）
+      inconclusiveLimit: 2               # 允許 2 次 Inconclusive 量測，再多就把整個指標判 Inconclusive
       provider:
         prometheus:
           address: http://prometheus.istio-system.svc.cluster.local:9090
+          # reporter="destination"：只算 server 端 sidecar 回報的那一份。
+          # 沒有這條，經過 gateway 的請求會被 gateway 與 server 各報一次，計數變兩倍。
           query: |
-            sum(rate(istio_requests_total{
-              destination_workload="pmc-epmmformquerygui",
-              destination_workload_namespace="ea-pmc",
-              response_code!~"5.."
-            }[2m]))
-            /
-            sum(rate(istio_requests_total{
-              destination_workload="pmc-epmmformquerygui",
-              destination_workload_namespace="ea-pmc"
-            }[2m]))
+            (
+              sum(rate(istio_requests_total{
+                reporter="destination",
+                destination_service_name="{{args.service-name}}",
+                destination_service_namespace="ea-pmc",
+                response_code!~"5.."
+              }[2m]))
+              /
+              sum(rate(istio_requests_total{
+                reporter="destination",
+                destination_service_name="{{args.service-name}}",
+                destination_service_namespace="ea-pmc"
+              }[2m]))
+            )
+            # 最低樣本數：近 2 分鐘不到 20 個請求就整條回傳空向量（-> len(result) == 0 -> Inconclusive）。
+            # 不要另開一個 enough-traffic 指標：failureLimit 預設是 0，樣本不足會讓那個指標 Failed，
+            # 而整個 AnalysisRun 取各指標中最糟的結果，Rollout 就 abort 了——跟「不下結論」正好相反。
+            and on() (
+              sum(increase(istio_requests_total{
+                reporter="destination",
+                destination_service_name="{{args.service-name}}",
+                destination_service_namespace="ea-pmc"
+              }[2m])) >= 20
+            )
 
     # ===== 指標 2：P99 延遲 =====
     - name: latency-p99
       interval: 1m
       count: 5
-      successCondition: result[0] <= 1000       # 毫秒
+      successCondition: len(result) > 0 && result[0] <= 1000    # 毫秒
+      failureCondition: len(result) > 0 && result[0] > 1500     # 1000~1500 ms 之間 = Inconclusive
       failureLimit: 1
+      inconclusiveLimit: 2
       provider:
         prometheus:
           address: http://prometheus.istio-system.svc.cluster.local:9090
           query: |
             histogram_quantile(0.99,
               sum(rate(istio_request_duration_milliseconds_bucket{
-                destination_workload="pmc-epmmformquerygui",
-                destination_workload_namespace="ea-pmc"
+                reporter="destination",
+                destination_service_name="{{args.service-name}}",
+                destination_service_namespace="ea-pmc"
               }[2m])) by (le))
-
-    # ===== 指標 3：最低樣本數（見下方警告）=====
-    - name: enough-traffic
-      interval: 1m
-      count: 5
-      successCondition: result[0] >= 20         # 至少要有 20 個請求才算數
-      provider:
-        prometheus:
-          address: http://prometheus.istio-system.svc.cluster.local:9090
-          query: |
-            sum(increase(istio_requests_total{
-              destination_workload="pmc-epmmformquerygui",
-              destination_workload_namespace="ea-pmc"
-            }[2m]))
 ```
 
 #### ⚠ 最重要的警告：小流量時指標會騙你
@@ -5367,19 +5382,25 @@ canary 初期只有 5% 流量。如果那段時間總共只進來 3 個請求，
 
 三個防護：
 
-1. **加最低樣本數指標**（上面的 `enough-traffic`），流量不夠就不下結論
+1. **把最低樣本數檢查併進同一條 query**（上面 `success-rate` 裡的 `and on() (... >= 20)`），流量不夠時 query 回傳空結果，落到 Inconclusive，而不是 Failed。不要拆成獨立的 `enough-traffic` 指標：它的 `failureLimit` 預設是 0，只要有一次樣本低於 20 就 Failed，整個 AnalysisRun 跟著 Failed（取最糟的結果），Rollout abort——跟「不下結論」相反
 2. **`failureLimit` 不要設 0**——給它一次容錯機會
-3. **`interval` 拉長**（2~5 分鐘），讓每次取樣涵蓋足夠的請求
+3. **query 裡的 range（`[2m]`）拉長**（例如 `[5m]`），讓每次取樣涵蓋足夠的請求。`interval` 只決定多久測一次，不決定每次涵蓋多少請求
 
-#### `successCondition` 與三種結果
+#### `successCondition` / `failureCondition` 與三種結果
 
 | 結果 | 意義 | Rollout 行為 |
 |---|---|---|
 | **Successful** | 條件滿足 | 繼續下一個 step |
 | **Failed** | 失敗次數超過 `failureLimit` | **自動 abort 並回滾到 stable** |
-| **Inconclusive** | 查詢沒有資料 / 無法判斷 | **暫停等人**（不會自動繼續，也不會回滾） |
+| **Inconclusive** | 成功與失敗兩個條件都寫了，但量到的值兩邊都不符合 | **暫停等人**（不會自動繼續，也不會回滾） |
 
-`Inconclusive` 是刻意設計的安全網：**寧可停下來等人看，也不要在沒有資料的情況下自動放行。**
+「沒有資料」不會自動等於 Inconclusive，要看你怎麼寫條件：
+
+- **只寫 `successCondition`**：條件不符合就是 Failed。例如 `0/0` 得到 NaN，`NaN >= 0.99` 為 false，直接 Failed。
+- **query 回傳空陣列**：`result[0]` 取不到值，這次量測算 Error，連續錯誤超過 `consecutiveErrorLimit`（預設 4）整個指標就變 Error。Argo 把 Error 和 Failed 一樣當成 abort。要處理空陣列，條件裡要用 `len(result)`（如上面的 `len(result) > 0 && ...`）。
+- **要「停下來等人」**：同時寫 `successCondition` 和 `failureCondition`，讓兩者之間留一段空隙，並視需要設 `inconclusiveLimit`。上面的範例就是這樣設計的。
+
+`Inconclusive` 是刻意設計的安全網：**寧可停下來等人看，也不要在沒有資料的情況下自動放行。**但它要靠上面的條件寫法才會觸發，不是「沒資料」的預設結果。
 
 ### 12.5 路線三：mirror 影子流量（零風險預熱）
 
