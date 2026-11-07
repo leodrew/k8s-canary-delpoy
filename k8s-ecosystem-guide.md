@@ -6775,7 +6775,7 @@ cookie 比對是 **L7 功能**。Service 的 port 沒有 `name: http` / `appProt
 
 #### 前提 3：VirtualService 必須含 `mesh`，且 `hosts` 要包含內部 FQDN
 
-沒有 `mesh` 的話，cluster 內部呼叫會繞過整條 VirtualService，在 stable 和 canary 的 pod 之間**隨機分配**——以 stable 2 個 pod、canary 1 個 pod 計算，**約三分之一的內部流量會打到未經驗證的 canary**，而且這個比例不會出現在任何權重設定裡。
+沒有 `mesh` 的話，cluster 內部呼叫會繞過整條 VirtualService，在 stable 和 canary 的 pod 之間**隨機分配**——以 stable 2 個 pod、canary 1 個 pod 計算，**約三分之一（近似值，實際比例依 least request 的即時負載而定）的內部流量會打到未經驗證的 canary**，而且這個比例不會出現在任何權重設定裡。
 
 **機制與完整說明見下一節 14.6**（這是本章最容易被忽略、後果也最嚴重的一項），對應 Part 9 發現 3。
 
@@ -6818,7 +6818,7 @@ spec:
         ↓
   ④ 退回該 Service 的「預設路由」
         ↓
-  ⑤ 對這個 Service 的【所有 endpoint】做 round-robin
+  ⑤ 對這個 Service 的【所有 endpoint】做負載平衡（Istio 預設 least request）
         ↓
      而 Service 的 selector 是 app: pmc-epmmformquerygui
      ——它同時選中了 stable 和 canary 的 pod
@@ -6826,7 +6826,7 @@ spec:
   ⑥ 內部流量隨機打到 canary
 ```
 
-關鍵在第 ⑤ 步：**沒有 VirtualService 告訴 sidecar 要選哪個 subset，它就把整個 Service 的 endpoint 當成一個池子平均分配。** DestinationRule 定義了 subset，但「要用哪個 subset」是 VirtualService 的職責——沒有 VirtualService，subset 等於不存在。
+關鍵在第 ⑤ 步：**沒有 VirtualService 告訴 sidecar 要選哪個 subset，它就把整個 Service 的 endpoint 當成一個池子，用預設的 least request 演算法分配（官方：「Without virtual services, Envoy distributes traffic using least requests load balancing」）。** DestinationRule 定義了 subset，但「要用哪個 subset」是 VirtualService 的職責——沒有 VirtualService，subset 等於不存在。
 
 #### 三、對這套 canary 設計是致命的
 
@@ -6882,12 +6882,14 @@ spec:
 |---|:---:|
 | `route` 的 subset 選擇與 `weight` | 不行 |
 | `timeout` | 不行（退回 Istio 預設：不逾時） |
-| `retries` | 不行 |
+| `retries` | VS 的 `retries` 不生效，但仍套用 Istio 預設重試（見表下說明） |
 | `headers`（請求/回應改寫） | 不行 |
 | `rewrite` / `redirect` | 不行 |
 | `fault`（故障注入） | 不行 |
 | `mirror`（流量鏡射） | 不行 |
 | `corsPolicy` | 不行 |
+
+**關於 `retries`**：官方說明「The default retry behavior for HTTP requests is to retry twice before returning the error.」，所以沒有 `mesh` 時內部呼叫仍會套用 Istio 預設重試（attempts 2，`retryOn` 為 connect-failure,refused-stream,unavailable,cancelled），只是你在 VS 裡設的 `retries` 不會生效。
 
 所以如果你發現「明明設了 15 秒逾時，內部呼叫卻掛了好幾分鐘」，第一個要檢查的就是 `gateways` 有沒有 `mesh`。
 
@@ -6910,7 +6912,6 @@ spec:
 對照你的環境，這些都會受影響：
 
 - `ea-pmc` 裡的另外兩個 GUI 服務（FormEdit / FormRender），如果它們會互相呼叫
-- **Prometheus 抓 metrics**（如果 Prometheus 有 sidecar）
 - CronJob / 批次任務
 - `ea-epmm` 或其他 namespace 打過來的服務
 - 你自己 `kubectl exec` 進某個有 sidecar 的 pod 做的測試 ← **這一點很重要**：你在 cluster 內部 curl 測試 canary，測到的結果可能跟真實外部流量完全不同
@@ -6950,17 +6951,18 @@ kubectl -n ea-pmc run t --rm -i --restart=Never --image=curlimages/curl:8.5.0 --
   http://pmc-epmmformquerygui-svc.ea-pmc:8080/gui_epmmFormQuery/actuator/health \
   | grep -i x-app-track
 # 有 x-app-track: stable = mesh 生效（因為那個 header 是 VirtualService 加的）
-# 完全沒有這個 header  = 沒生效，內部流量繞過了 VirtualService
+# 完全沒有這個 header  = 可能沒生效；但先確認測試 pod 有注入 sidecar（2/2），
+# 因為 mesh 規則是在「呼叫端」的 sidecar 執行，沒有 sidecar 的 pod 一樣拿不到 header
 
 # 【方法 3】看這個 pod 適用哪些 VirtualService
 istioctl x describe pod -n ea-pmc <pod-name>
 ```
 
-> **方法 2 是最快的自我檢查**：那個 `x-app-track` header 只有 VirtualService 會加。內部 curl 拿不到它，就代表內部流量根本沒經過這條 VirtualService。
+> **方法 2 是最快的自我檢查**：那個 `x-app-track` header 只有 VirtualService 會加。內部 curl 拿不到它，才需要懷疑內部流量沒經過這條 VirtualService —— 但先用 `kubectl get pod t` 確認測試 pod 是 2/2：`kubectl run` 的臨時 pod 若沒注入 sidecar，沒有 header 不代表 VS 缺 `mesh`。另外舊式 sidecar（非 native sidecar）會讓 `--rm -i` 的 pod 在 curl 結束後不會自行結束，需要手動刪除。
 
 #### 十、一句話總結
 
-> **`gateways` 列了 gateway 就會踢掉預設的 `mesh`；沒有 `mesh`，內部流量會繞過所有路由規則，直接對 Service 的全部 endpoint 做 round-robin —— 包含你正在測試的 canary。**
+> **`gateways` 列了 gateway 就會踢掉預設的 `mesh`；沒有 `mesh`，內部流量會繞過所有路由規則，直接對 Service 的全部 endpoint 做負載平衡（預設 least request）—— 包含你正在測試的 canary。**
 >
 > 而且 `hosts` 必須同時包含內部的 FQDN，兩者缺一不可。
 
