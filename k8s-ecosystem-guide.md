@@ -5475,9 +5475,12 @@ canary 初期只有 5% 流量。如果那段時間總共只進來 3 個請求，
             name: canary-test
             match: [{ headerName: x-canary, headerValue: { exact: "true" } }]
         - analysis: { templates: [{ templateName: smoke-test }] }   # 機器先跑
-        - setHeaderRoute: { name: canary-test }
         - setWeight: 5
         - pause: {}                      # ⚠ 無 duration = 無限期等待人工 promote
+                                         # 放在關閉 header route 之前：人工 pilot run 期間
+                                         # header 規則還開著，pilot 使用者才能穩定打到 v2；
+                                         # 若先關掉，只剩 5% 隨機權重，正是 12.2 批評的「碰運氣」
+        - setHeaderRoute: { name: canary-test }   # 只帶 name、不帶 match = 關閉這條 header route
 ```
 
 `pause: {}` 會一直等，直到有人執行：
@@ -5506,7 +5509,13 @@ kubectl argo rollouts promote pmc-epmmformquerygui -n ea-pmc
 
 ```yaml
       steps:
+        # smoke-test 要打 x-canary header：沒有 setHeaderRoute 的話，header 不會被路由到 canary
+        # （此時 canary 權重是 0），測到的會是 v1，所以開啟和關閉兩步都要保留
+        - setHeaderRoute:
+            name: canary-test
+            match: [{ headerName: x-canary, headerValue: { exact: "true" } }]
         - analysis: { templates: [{ templateName: smoke-test }] }
+        - setHeaderRoute: { name: canary-test }
         - setWeight: 5
         - pause: { duration: 10m }       # ← 改成有時限，時間到自動繼續
         - analysis: { templates: [{ templateName: success-rate }] }
@@ -5515,7 +5524,7 @@ kubectl argo rollouts promote pmc-epmmformquerygui -n ea-pmc
         - setWeight: 100
 ```
 
-失敗時 Argo 會自動 abort 回滾，並發通知。**人從「每次都要看」變成「只有出事才要看」。**
+失敗時 Argo 會自動 abort 回滾；要「發通知」還得先設好 `argo-rollouts-notification-configmap`（官方：「Both triggers and templates are configured in the `argo-rollouts-notification-configmap` ConfigMap.」），並在 Rollout 上加訂閱 annotation（見 12.8）。**人從「每次都要看」變成「只有出事才要看」。**
 
 #### 階段 4：全自動 + 保留緊急煞車
 
@@ -5532,16 +5541,19 @@ kubectl argo rollouts promote  pmc-epmmformquerygui -n ea-pmc --full       # 跳
 
 ```yaml
 spec:
-  progressDeadlineSeconds: 1800          # 30 分鐘還沒完成 = 判定失敗
-  progressDeadlineAbort: true            # 逾時就自動 abort（不設的話只是標記失敗但卡住）
+  progressDeadlineSeconds: 1800          # 連續 1800 秒沒有進展 = 判定失敗（pause 期間不計）
+  progressDeadlineAbort: true            # 逾時就自動 abort（預設 false：不設的話 controller 照常繼續處理，只是 status 標上 ProgressDeadlineExceeded）
 
   strategy:
     canary:
       abortScaleDownDelaySeconds: 30     # abort 後多久縮掉 canary Pod
-      analysis:                          # 【背景分析】整個 rollout 期間持續監控，
+      analysis:                          # 【背景分析】在 rollout 期間持續監控，
         templates:                       # 不只在特定 step 檢查
-          - templateName: success-rate
-        startingStep: 2                  # 從第 2 個 step 開始跑
+          # ⚠ 本 Part 前面那份 success-rate 有 count: 5，跑完 5 次就結束，不會持續整個 rollout。
+          #   背景分析要另寫一份「不設 count」的 AnalysisTemplate（官方：count 為 0 /
+          #   不設 = 背景分析會跑到 Rollout 結束），這裡用名稱 success-rate-bg 示意
+          - templateName: success-rate-bg
+        startingStep: 2                  # 從 0 起算：2 = 第 3 個 step，延到該 step 才開始分析
 ```
 
 **失敗通知**（Argo Rollouts 的 notification）：
@@ -5759,8 +5771,8 @@ metadata:
 spec:
   replicas: 2
   revisionHistoryLimit: 5
-  progressDeadlineSeconds: 1800      # 30 分鐘還沒完成就判定失敗
-  progressDeadlineAbort: true        # 逾時自動 abort（不設的話只標記失敗但會卡住）
+  progressDeadlineSeconds: 1800      # 連續 1800 秒沒有進展就判定失敗（pause 期間不計）
+  progressDeadlineAbort: true        # 逾時自動 abort（預設 false：不設的話 controller 照常繼續處理，只是 status 標上 ProgressDeadlineExceeded）
 
   selector:
     matchLabels:
