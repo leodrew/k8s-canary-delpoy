@@ -4936,16 +4936,17 @@ done
 
 原因：GSLB 是 **DNS 層級**的導流，它的粒度是「一次 DNS 查詢」，不是「一個使用者的一整段連線」。實務上會發生：
 
-- 使用者的 DNS 快取過期 → 重新查詢 → GSLB 這次回 FZ2 的 IP → **使用者的 session 在 FZ1，FZ2 不認得他 → 被踢回 Keycloak 登入頁**
+- 使用者的 DNS 快取過期 → 重新查詢 → GSLB 這次回 FZ2 的 IP → **使用者的 session 在 FZ1，FZ2 不認得他 → 被要求重新認證**。Keycloak 的 SSO session 還在時，這是不用輸入帳密的重新認證，但正在送出的表單或 POST 會遺失；登入流程進行到一半就跳邊，還會出現 `authorization_request_not_found`。只有 SSO session 也過期時，才真的看到登入頁
 - 使用者換網路（有線換 Wi-Fi、VPN 重連）→ 重新解析 → 可能落到另一邊
-- 瀏覽器開了多個分頁、各自解析 → 有機會分散到兩邊
+- 使用者換用不同的瀏覽器或不同的裝置 → 各自解析、各有各的 DNS 快取 → 有機會分散到兩邊
 
-**三種處理方式：**
+**四種處理方式：**
 
 | 方式 | 做法 | 評價 |
 |---|---|---|
 | GSLB source-IP affinity | 讓 GSLB 記住「這個來源 IP 上次給了哪邊」 | **脆弱**。使用者換網路就失效；公司 NAT 後大量使用者共用同一個出口 IP，反而會全部擠到同一邊 |
 | 兩邊 session 互相複寫 | Redis 跨 cluster replication | 跨機房延遲高，且複寫延遲期間仍可能讀不到 |
+| GSLB／LB 前端的 cookie persistence | 前面若是 L7 的 F5 LTM（在 F5 終結 TLS、兩個 VIP 都是 pool member），用 HTTP cookie 把使用者黏在同一個 cluster（F5 文件：「Cookie persistence directs session requests to the same server based on HTTP cookies…」） | 比 source-IP 可靠，不受換網路與 NAT 影響；**但需要在 F5 終結 TLS**才讀得到 cookie，且 cluster 掛掉時黏住的使用者仍會落到另一邊、session 照樣遺失 |
 | **session 外部化 + 固定一邊** | Spring Session + Redis，Redis 只放一邊（或用主從） | **實務上最可行**。但要接受「Redis 那邊掛了兩座 cluster 都受影響」 |
 
 > **結論**：**在解決 session 之前，不要開 active-active。** 你會用「偶爾被登出」換到「故障時自動切換」，而前者天天發生、後者一年一次。
@@ -5017,7 +5018,8 @@ CD 工具實際做了什麼，決定了後續你要自己補什麼。**這四題
 **定期比對兩邊（建議排進 CI）：**
 
 ```bash
-for R in gateway virtualservice destinationrule authorizationpolicy; do
+# Gateway 要寫全名：Gateway API 的 gateway.networking.k8s.io 也有 Gateway，kubectl 分不出來
+for R in gateways.networking.istio.io virtualservices.networking.istio.io destinationrules.networking.istio.io authorizationpolicies.security.istio.io; do
   echo "=== $R ==="
   diff \
     <(kubectl --context=fz1 get $R -A -o yaml | grep -v 'resourceVersion\|uid:\|creationTimestamp\|generation:') \
@@ -5036,9 +5038,9 @@ Gateway 的 `hosts` 比對不到就回 404，GSLB 會把健康的 cluster 誤判
 
 #### 踩雷 4：DNS TTL 設太長
 
-模式 B 的自動切換速度上限就是 DNS TTL。TTL 設 3600 秒，FZ1 掛掉後最久要等一小時使用者才會被導到 FZ2——**這樣就失去了做模式 B 的意義**。
+模式 B 的自動切換速度上限就是 DNS TTL。實際切換時間 ≈ 健康檢查判定時間 ＋ DNS TTL ＋ 用戶端自己的快取（例如 JVM、瀏覽器），TTL 只是其中一項。TTL 設太長（例如 3600 秒）時，這個時間可以拖到一小時以上——**這樣就失去了做模式 B 的意義**。
 
-一般建議 30~60 秒。但要注意有些企業 DNS 或作業系統會忽略過短的 TTL，實際切換時間要**實測**，不能只看設定值。
+TTL 要設多短請依你的 GSLB 與健康檢查間隔決定；實際切換時間要**實測**（含用戶端快取），不能只看設定值。
 
 #### 踩雷 5：以為 active-active 就等於高可用
 
@@ -5055,6 +5057,15 @@ Gateway 的 `hosts` 比對不到就回 404，GSLB 會把健康的 cluster 誤判
 **先找出真正的單點在哪，再決定要不要投資在入口層的高可用。**
 
 > **延伸閱讀**：跨 cluster 呼叫時的身分斷裂與補救見 [Part 5](#part-5獨立-cluster-互打走對方-vip-與-virtualservice)；session 問題的根源見 [Part 9](#part-9你目前環境的具體發現) 發現 2；DNS 是 active/standby（只回 active zone）時「FZ2 部好了卻 404」見 [Part 16](#part-16active-zone-dns-下-request-落在哪fz2-部好卻-404用-mesh-送到-fz2)。
+
+### 參考來源
+
+- istio.io — 常見網路問題（HTTPS Gateway 的 SNI 比對）：https://istio.io/latest/docs/ops/common-problems/network-issues/
+- github.com/istio — gateway chart 的 values.yaml（targetPort）：https://github.com/istio/istio/blob/master/manifests/charts/gateway/values.yaml
+- metallb.io — release notes（annotation prefix）：https://metallb.io/release-notes/
+- F5 techdocs — Cookie persistence（廠商文件）：https://techdocs.f5.com/kb/en-us/products/big-ip_ltm/manuals/product/big-ip-local-traffic-manager-implementations-14-0-0/12.html
+- Alibaba Cloud ASM — Istio Gateway 與 Gateway API Gateway 同名（廠商文件）：https://www.alibabacloud.com/help/en/asm/support/why-are-no-gateways-or-non-istio-gateways-returned-when-i-run-the-kubectl-command-to-query-gateways
+
 ---
 
 ## Part 12：用 Argo Rollouts 取代人工 pilot run
