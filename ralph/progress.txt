@@ -864,3 +864,10 @@ Started: (not yet run)
 - 連動修改：無。
 - Learnings: 無新增（沿用 15.5 的 stub 形式）。
 ---
+## 2026-11-07 - US-085
+- 修正 Part 15 的 15.8：P15-029（replicas 開關：開＝1；關＝APP_CANARY_ENABLED=false＋image 改回，排空後才設 0，新增「canary 的關」段落）、P15-030（刪 kubectl delete 一列）、P15-031（promote 列改成保守寫法：官方文件未說明，先驗證，見 15.12）、P15-032（補 edit-last-applied 遷移步驟與官方「one-time degradation」引文）。
+- 連動修改（同小節一致性）：標題「四件做不到的事」→「三件」（因 P15-030 刪一列）；stable/canary 表格 canary 格「一定要寫（靠它開關 0 / 1）」→「要寫（開＝1；關＝0，但只能在確認排空後才設 0）」（P15-029 的原文摘錄之一）；edit-last-applied 補一句需要有編輯權限的人手動做（apply-only 前提）。
+- Files: k8s-ecosystem-guide.md
+- Review: 第 1 輪 Standards 2 項軟性（格子與段落重複、「見表下說明」指標落空）、Spec 2 項小提醒（edit-last-applied 權限、連動修改需記錄）→ 全部修掉；第 2 輪無發現。
+- 觀察（不屬本故事）：15.11 的「ConfigMap 累積怎麼辦」（約 7606 行）可能是已刪 P15-030 列的對應處，留給負責的故事。
+---
