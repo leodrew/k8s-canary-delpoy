@@ -5612,11 +5612,18 @@ kubectl get pods -n argocd
 ### 12.11 完整 manifest
 
 Part 14.4 給了 Track A（兩個 Deployment）的完整 manifest，這裡是 Track B（Argo Rollouts）的。
-**內容與 `canary-manual/track-b/` 的檔案相同**，改動時請兩邊一起改。
+**⚠ 這份是教學用的示意版，不是可以直接 apply 的完整版，也不是 `canary-manual/track-b/` 的逐字副本。**
+repo 裡實際的檔案是 `track-b/base/00-serviceaccount.yaml`～`04-analysistemplate.yaml` 與 `track-b/release/10-configmap-1.2.3.yaml`、`release/20-rollout.yaml`，跟下面這份有這些差異：
 
-前面 12.2 的 Rollout 是精簡版（省略了 probe / resources / securityContext），下面這份才是可以直接 apply 的完整版。
+- repo 的 Rollout 步驟 3 是人工閘門 `pause: {}`，這裡寫的是 `analysis`（自動版）。
+- repo 的 image 與 ConfigMap 都是 `1.2.3`，沒有 `1.3.0`。
+- repo 的 `user-name-attribute` 是 `sub`，也沒有下面已刪掉的 `app.cors`／`app.sso` 區塊。
+- repo 多一個 `pmc-epmmformquerygui-svc` Service 和一個 ServiceAccount。
+- 下面 Rollout 的 `SPRING_CONFIG_ADDITIONAL_LOCATION` 是未完成的寫法：image 本身的 `SPRING_CONFIG_LOCATION=file:/config/application.yaml` 還在，路徑不存在時 pod 會 CrashLoopBackOff（Spring Boot 2.4+ 對非 `optional:` 且找不到的 `spring.config.location` 會丟 `ConfigDataLocationNotFoundException`）。要等 track-b 的 ConfigMap 依 `CANARY-COMPLETE.md` 附錄 C 補齊後，才能改成 `SPRING_CONFIG_LOCATION`；在那之前請當成示意，不要直接 apply。
 
-#### 六份資源的關係
+前面 12.2 的 Rollout 是精簡版（省略了 probe / resources / securityContext），下面這份補上了這些欄位，但照上面所說，仍不能直接 apply。
+
+#### 資源的關係（含 ServiceAccount 與 `-svc` Service 共八份）
 
 ```
   ① ConfigMap（版本化，兩份）
@@ -5631,6 +5638,7 @@ Part 14.4 給了 Track A（兩個 Deployment）的完整 manifest，這裡是 Tr
         │                       │
   ③ Service ×2（Argo 動態填 rollouts-pod-template-hash 到 selector）
      pmc-epmmformquerygui-stable   pmc-epmmformquerygui-canary
+     （repo 另有第三個 pmc-epmmformquerygui-svc，是 VirtualService 的 mesh host，見下方 5.）
         │                       │
   ④ DestinationRule ×2（各綁一個 Service，只放 trafficPolicy，不用 subset）
         │                       │
@@ -5638,6 +5646,9 @@ Part 14.4 給了 Track A（兩個 Deployment）的完整 manifest，這裡是 Tr
         └───────────┬───────────┘
                     │
   ⑥ AnalysisTemplate（指標判斷，失敗自動 abort）
+
+  ⑦ ServiceAccount pmc-epmmformquerygui（Rollout 用 serviceAccountName 引用，下方未重印；內容見 repo）
+  ⑧ Service pmc-epmmformquerygui-svc（第三個 Service，見 3.）
 ```
 
 **跟 Track A 最大的結構差異**：Track A 用「一個 Service + DestinationRule subset」分兩軌；Track B 用「兩個 Service」分兩軌，**不需要 subset**。完整差異見 Part 15。
@@ -5691,20 +5702,15 @@ data:
             provider:
               keycloak:
                 issuer-uri: ${KEYCLOAK_ISSUER_URI}
-                user-name-attribute: preferred_username
+                # 必須是 sub：寫成 preferred_username 是已知的錯誤（CANARY-COMPLETE.md 附錄 C）
+                user-name-attribute: sub
 
     app:
       context-prefix: /gui_epmmFormQuery
-      cors:
-        allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
-        allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,PATCH,OPTIONS}
-        allowed-headers: ${CORS_ALLOWED_HEADERS:*}
-        allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
-        max-age: ${CORS_MAX_AGE:3600}
-      sso:
-        custom-logout-url: ${SSO_LOGOUT_URL:}
-        post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI}
-        logout-redirect-param-name: ${SSO_LOGOUT_REDIRECT_PARAM:redirectUri}
+      # app.cors.*、app.sso.* 已刪除：沒有任何程式讀它們（附錄 C、§10 #13），寫了只會讓人以為設定生效。
+      # CORS 靠 CORS_ALLOWED_ORIGINS 環境變數；登出後導回的 key 是 app.post-logout-redirect-uri（§3.5），
+      # 沒有預設值，少了它啟動時會 Could not resolve placeholder。
+      post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI}
       privilege:
         enabled: ${PRIVILEGE_CHECK_ENABLED:false}
       frontend:
@@ -5757,7 +5763,7 @@ data:
         com.example.export: DEBUG          # canary 期間把新功能的 log 開細一點
 ```
 
-> 完整內容見 `canary-manual/track-b/00-configmap.yaml`。
+> 實際檔案見 `canary-manual/track-b/release/10-configmap-1.2.3.yaml`（內容與上面不同，差異見 12.11 開頭）。
 
 ---
 
@@ -5819,6 +5825,7 @@ spec:
             - secretRef:
                 name: pmc-epmmformquery-secret
           env:
+            # ⚠ 未完成：image 內建的 SPRING_CONFIG_LOCATION 還在，這個寫法依賴 track-b ConfigMap 已補齊（見 12.11 開頭）
             - name: SPRING_CONFIG_ADDITIONAL_LOCATION
               value: "file:/app/config/application.yml"
             - name: POD_NAME
@@ -5925,7 +5932,9 @@ spec:
 
 ---
 
-#### 3. Service ×2
+#### 3. Service ×2（repo 實際有 ×3）
+
+repo 的 `track-b/base/01-services.yaml` 另有第三個 `pmc-epmmformquerygui-svc`：下面 VirtualService 的 `hosts` 列了 `pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local`（mesh 內部流量），這個 host 要有對應的 Service；這裡省略沒印，請看 repo 的檔案。
 
 ```yaml
 apiVersion: v1
@@ -6185,7 +6194,7 @@ canary 初期只有 5% 流量。如果那 2 分鐘總共只進來 **3 個請求*
             }[2m]))
 ```
 
-> 正式環境建議直接用這個兩指標版本（`canary-manual/track-b/05-analysistemplate.yaml` 裡的 `success-rate-safe`），而不是單指標版。多寫 12 行，省掉很多假警報。
+> 正式環境建議直接用這個兩指標版本（`canary-manual/track-b/base/04-analysistemplate.yaml` 裡的 `success-rate-safe`），而不是單指標版。多寫 12 行，省掉很多假警報。
 
 #### 想再加 P99 延遲的話
 
