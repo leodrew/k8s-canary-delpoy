@@ -7313,11 +7313,13 @@ canary-manual/
 │   │   ├── 01-service.yaml
 │   │   ├── 02-destinationrule.yaml
 │   │   └── 03-virtualservice.yaml
-│   └── release/                     每次發布都要改、都要 apply
-│       ├── 10-configmap-1.2.3.yaml      ← 舊版，保留（回滾要用）
-│       ├── 10-configmap-1.3.0.yaml      ← 每次發布「新增」一個檔
-│       ├── 20-deployment-stable.yaml
-│       └── 21-deployment-canary.yaml
+│   ├── release/                     每次發布都要改、都要 apply
+│   │   ├── 10-configmap-stable.yaml     ← 檔名固定（不帶版本號），每次發布直接改內容
+│   │   ├── 11-configmap-canary.yaml     ← 同上，canary 那一軌的設定
+│   │   ├── 20-deployment-stable.yaml
+│   │   └── 21-deployment-canary.yaml
+│   └── runtime/                     pilot 期間一天改數次，不經過發布流程
+│       └── 05-configmap-canary-pilot.yaml
 └── track-b/
     ├── base/
     │   ├── 00-serviceaccount.yaml
@@ -7336,17 +7338,18 @@ canary-manual/
 |---|---|
 | **避免誤觸網路設定** | 每次發布都 apply VirtualService，一個手滑就改到路由規則，影響所有使用者 |
 | **pipeline 設定更單純** | release stage 的檔案清單固定就是 `release/`，不用維護一長串路徑 |
-| **Track B 是硬性要求** | Argo 會動態改 VirtualService 的 weight 並插入 `pilot-run` route。**發布途中 apply 它會把權重打回 100/0，直接中斷 canary** |
+| **Track B 是硬性要求** | Argo 會動態改 VirtualService 的 weight 並插入 `pilot-run` route。**發布途中 apply 它，controller 會立刻把權重改回它該有的值，但權重會短暫跳動**；VirtualService 仍然要放在 base/，若用 Argo CD 同步，要對這些欄位設 ignoreDifferences |
 
 #### 檔名編號的意義
 
 | 編號 | 意義 |
 |---|---|
 | `00-` ~ `09-` | base：身分、網路 |
-| `10-` | release：ConfigMap（每版一個檔） |
+| `05-` | runtime：pilot 名單 ConfigMap（`runtime/`，pilot 期間常改，不跟著發布） |
+| `10-` ~ `11-` | release：ConfigMap（`10-` stable、`11-` canary，各一份、檔名固定） |
 | `20-` ~ `29-` | release：workload（Deployment / Rollout） |
 
-`kubectl apply -f release/` 會按檔名排序套用，所以 **ConfigMap（10-）一定在 workload（20-）之前**建立 —— 這個順序是必要的，否則 Pod 會因為找不到 ConfigMap 而卡在 `ContainerCreating`。
+`kubectl apply -f release/` 走目錄時，實務上是按檔名順序套用，所以 **ConfigMap（10-／11-）一定在 workload（20-／21-）之前**建立；但這是 kubectl 走目錄的實作行為，官方文件只說 `-f <directory>` 會建立目錄內所有物件，沒有保證順序（CANARY-COMPLETE.md §2 也依賴這個行為）。順序重要的理由有官方依據：「If you reference a ConfigMap that doesn't exist and you don't mark the reference as `optional`, the Pod won't start.」
 
 ---
 
