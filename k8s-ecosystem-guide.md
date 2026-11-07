@@ -7252,94 +7252,12 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 ### 15.7 兩種 track 之間的切換
 
-#### Track A 遷移到 Track B
-
-**前置**：Argo Rollouts 已安裝，且 Track B 的所有 manifest 都準備好了。
-
-```bash
-NS=ea-pmc
-
-# 【1】先記錄現在跑的是什麼版本（切換出問題時要用）
-kubectl -n $NS get deploy pmc-epmmformquerygui-stable \
-  -o custom-columns='IMAGE:.spec.template.spec.containers[0].image,CONFIG:.spec.template.spec.volumes[0].configMap.name'
-
-# 【2】先建立 Track B 需要的新資源（此時還不影響任何流量）
-kubectl -n $NS apply -f track-b/00-configmap.yaml
-kubectl -n $NS apply -f track-b/02-services.yaml
-kubectl -n $NS apply -f track-b/04-destinationrule.yaml
-kubectl -n $NS apply -f track-b/05-analysistemplate.yaml
-
-# 【3】把 VirtualService 換成 Track B 版本
-#     此時 destination 指向 -stable Service，但那個 Service 還沒有 endpoint
-#     ⚠ 這一步會造成短暫的 503，所以要在低流量時段做
-kubectl -n $NS apply -f track-b/03-virtualservice.yaml
-
-# 【4】立刻建立 Rollout（越快越好，讓 -stable Service 有 endpoint）
-kubectl -n $NS apply -f track-b/01-rollout.yaml
-kubectl -n $NS argo rollouts get rollout pmc-epmmformquerygui --watch
-
-# 【5】確認 Rollout 的 pod 起來、Service 有 endpoint 了
-kubectl -n $NS get endpoints pmc-epmmformquerygui-stable
-
-# 【6】最後才刪掉舊的 Deployment
-kubectl -n $NS delete deploy pmc-epmmformquerygui-stable pmc-epmmformquerygui-canary
-```
-
-> **⚠ 步驟 3~5 之間會有服務中斷**（VirtualService 已經指向新 Service，但 Rollout 的 pod 還沒起來）。
+> **這一節不再維護 Track A ⇄ Track B 的切換 SOP。** 本 repo 的兩條 track 是**互斥**的，而且只維護 Track A；Track B（Argo Rollouts）沒有跟上自動分流。兩者同時存在時，Deployment 與 Rollout 這兩個 controller 會搶 pod，所以不提供「並存再切換」的步驟。唯一的真實來源是 `canary-manual/CANARY-COMPLETE.md`：
 >
-> **想避免中斷的做法**：把步驟 4 提前到步驟 3 之前 —— 先讓 Rollout 把 pod 跑起來（此時新舊 pod 並存，但 VirtualService 還指著舊的），確認 `-stable` Service 有 endpoint 之後，再切 VirtualService。代價是短時間內 pod 數量翻倍，要確認資源夠。
+> - 兩條 track 的現況與適用範圍（「Track A（純 Deployment + Istio）。Track B（Argo Rollouts）目前**沒有跟上自動分流**」）→ §0、§10 第 11 項
+> - 檔案分層（`track-*/base/`、`release/`、`runtime/` 底下的編號檔）→ §2
+> - 真的要遷移到 Argo Rollouts 時，以 Argo 官方的 migrating 文件（`workloadRef`）為準：https://argo-rollouts.readthedocs.io/en/stable/migrating/
 
-**切換後的驗證清單：**
-
-```bash
-# 1. Rollout 是 Healthy
-kubectl -n $NS argo rollouts status pmc-epmmformquerygui
-
-# 2. 兩個 Service 都有 endpoint（canary 在非發布期間可以是空的）
-kubectl -n $NS get endpoints pmc-epmmformquerygui-stable pmc-epmmformquerygui-canary
-
-# 3. 從外部打得通
-curl -sS -o /dev/null -w "%{http_code}\n" https://myapp.example.com/gui_epmmFormQuery/
-
-# 4. 舊的 Deployment 真的沒了
-kubectl -n $NS get deploy -l app=pmc-epmmformquerygui
-```
-
-#### Track B 退回 Track A
-
-如果 Argo Rollouts 用不順手要退回去，把上面的順序反過來：
-
-```bash
-# 【1】先建 Deployment（用 Rollout 目前跑的 image 和 ConfigMap）
-kubectl -n $NS apply -f track-a/01-deployment-stable.yaml
-kubectl -n $NS apply -f track-a/02-deployment-canary.yaml
-kubectl -n $NS scale deploy/pmc-epmmformquerygui-canary --replicas=0
-
-# 【2】等 stable Deployment 的 pod 就緒
-kubectl -n $NS rollout status deploy/pmc-epmmformquerygui-stable
-
-# 【3】建 Track A 的 Service 與 DestinationRule
-kubectl -n $NS apply -f track-a/03-service.yaml
-kubectl -n $NS apply -f track-a/04-destinationrule.yaml
-
-# 【4】切 VirtualService
-kubectl -n $NS apply -f track-a/05-virtualservice.yaml
-
-# 【5】最後刪 Rollout
-kubectl -n $NS delete rollout pmc-epmmformquerygui
-```
-
-> **這個方向比較安全**，因為步驟 1~2 先讓新 pod 就緒，切 VirtualService 時後端已經備妥。
-
-#### 切換時最容易出錯的三件事
-
-| 錯誤 | 症狀 | 預防 |
-|---|---|---|
-| Deployment 與 Rollout 並存 | 兩邊各管各的 ReplicaSet（不會互搶 pod），但共用 `app` label 與 VirtualService，流量與 Service endpoint 混在一起 | **一定要刪乾淨再建**，用 `kubectl get deploy,rollout -l app=...` 確認 |
-| VirtualService 指向還沒有 endpoint 的 Service | 503 `UH` | 先讓 pod 就緒，再切 VS |
-| ConfigMap 引用漏改 | 新版程式配舊版設定 | 切換前先確認 `configMap.name` 對得上 |
-
-> **延伸閱讀**：Track A 的完整 manifest 見 [Part 14](#part-14保留人工-pilot-run-的-canary-發布) 的 14.4；Track B 的見 [Part 12](#part-12用-argo-rollouts-取代人工-pilot-run) 的 12.11；`mesh` 為什麼必要見 14.6。
 ---
 
 ### 15.8 CD 只能 apply 時的限制對照
