@@ -399,7 +399,7 @@ selector:
 
 | 情境 | ingressgateway 看到的 source IP | 真實 client IP 在哪 |
 |---|---|---|
-| VIP 做 SNAT（多數 F5 預設；你們的 VIP 是否 SNAT 要問網路組，見文末「需向他人確認」） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
+| VIP 做 SNAT（多數 F5 預設） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
 | Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | 通常**完全遺失**，除非更前面的 L7 proxy 先寫進 `X-Forwarded-For`（見表下說明） |
 | Service `externalTrafficPolicy: Local` | 保留真實 client IP 到 gateway | gateway 會把它寫進 `X-Forwarded-For` |
 
@@ -452,7 +452,7 @@ meshConfig:
 
 沒有它，Envoy 收到一個連線時**完全不知道對方是誰**。你可以用 IP 猜，但 Pod IP 每次重啟都會變，而且同一個 node 上的 Pod 可能共用出口。
 
-mTLS 解決的是：Istio 的 CA（istiod）幫每個 workload 簽發一張憑證，憑證的 SAN 欄位寫著 `spiffe://cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui`。連線時雙方交換憑證，**Envoy 就能拿到一個密碼學上可信的身分**，而不是靠 IP 猜。
+mTLS 解決的是：Istio 的 CA（istiod）幫每個 workload 簽發一張憑證，憑證的 SAN 欄位寫著 `spiffe://cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui`（前提：已依 Part 4 建立同名 SA；目前環境是 `sa/default`）。連線時雙方交換憑證，**Envoy 就能拿到一個密碼學上可信的身分**，而不是靠 IP 猜。
 
 **身分欄位依賴 mTLS。** AuthorizationPolicy 的 `principals` / `namespaces` 這些欄位要有 mTLS 才比對得到東西（哪些欄位依賴 mTLS，見 Part 0「表中三列的補充」的 PeerAuthentication 一條；Part 3 成因 #3 也會用到）。前置條件是「mTLS」，不是「PeerAuthentication 物件」：兩端都有 sidecar 時，沒有 PeerAuthentication 也會自動升級成 mTLS（Istio：「For peer authentication, Istio automatically upgrades all traffic between two PEPs to mutual TLS.」）。真正的陷阱在 `PERMISSIVE`：明文請求沒有 principal，ALLOW 規則擋得掉明文，但 DENY 裡的 `principals` 規則會被明文繞過。所以官方強烈建議搭配 `STRICT`（Istio：「it is strongly recommended to always use these fields with strict mutual TLS mode」）。
 
@@ -590,7 +590,7 @@ CUSTOM  →  DENY  →  ALLOW
                         不是 app label、不是 Pod 名
 ```
 
-> **直接關係到你目前環境**：`spring_full_v4.md` 裡的 Deployment **沒有設 `serviceAccountName`**，所以所有 Pod 都跑在 `default` SA 下，身分是 `cluster.local/ns/ea-pmc/sa/default`（這是本環境的現況，用 `kubectl get pod -o jsonpath='{.spec.serviceAccountName}'` 自己確認）。這代表**你無法用 principals 區分 ea-pmc 裡的三個 GUI 服務**——它們身分完全一樣。要做細粒度授權，第一步就是給每個 Deployment 獨立 SA（Part 4 有完整做法）。
+> **直接關係到你目前環境**：`spring_full_v4.md` 裡的 Deployment **沒有設 `serviceAccountName`**，所以所有 Pod 都跑在 `default` SA 下，身分是 `cluster.local/ns/ea-pmc/sa/default`（本環境現況，確認指令見 Part 4 步驟 1）。這代表**你無法用 principals 區分 ea-pmc 裡的三個 GUI 服務**——它們身分完全一樣。要做細粒度授權，第一步就是給每個 Deployment 獨立 SA（Part 4 有完整做法）。
 
 #### 三種 IP 白名單寫法對照（Q1 的核心）
 
@@ -1591,7 +1591,7 @@ spec:
 ### 步驟 5：驗證整條路徑
 
 ```bash
-# 1. 從來源 pod 直接打（會經過完整的 sidecar 鏈路）
+# 1. 從來源 pod 直接打（會經過完整的 sidecar 鏈路；app 映像要有 curl，沒有就改用 kubectl debug --target=app --image=curlimages/curl，見文末「需向他人確認」）
 kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
   curl -sS -o /dev/null -w "%{http_code}\n" \
   http://epmm-api-svc.ea-epmm.svc.cluster.local:8080/api/v1/health
@@ -4608,7 +4608,7 @@ spec:
               - "/actuator/{**}"          # 沒有 context path 的服務
 ```
 
-**兩組的 `numTrustedProxies` 可能不一樣**——routable 那組前面有 F5（1 層），內部那組可能直連（0 層）。這個值設錯會導致 `remoteIpBlocks` 比對到錯的 IP（Part 1 關鍵觀念二）。
+**兩組的 `numTrustedProxies` 可能不一樣**——routable 那組前面有 F5（1 層；F5 若是 L4 virtual server 不會加 `X-Forwarded-For`，要改用 PROXY protocol，需向網路組確認 F5 的模式），內部那組可能直連（0 層）。這個值設錯會導致 `remoteIpBlocks` 比對到錯的 IP（Part 1 關鍵觀念二）。
 
 ### 10.6 踩雷
 
@@ -7901,16 +7901,16 @@ standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直�
 | VIP 位址池的指定語法（`loadBalancerIP` / MetalLB / F5 CIS annotation） | 網路組 / 平台組 | Part 10.4 |
 | `100.64.0.0/10` 在公司網路政策下是否真的不可路由 | 網路組 | Part 10.4 |
 | 各入口前面實際有幾層 proxy（決定 `numTrustedProxies`） | 網路組 | Part 1、Part 10.5 |
-| CD 建 ingressgateway 時：裝新的還是共用、VIP 從哪個池來、會不會一併建 Gateway/VirtualService、憑證誰管 | CD 團隊 | Part 11.7 |
+| CD 建 ingressgateway 時（含 A record 是否只指向 FZ1 的 VIP，Part 11.2）：裝新的還是共用、VIP 從哪個池來、會不會一併建 Gateway/VirtualService、憑證誰管 | CD 團隊 | Part 11.2、Part 11.7 |
 | node 的實際 label key / value 與 taint 內容 | 用 Part 13.5 的指令自己查 | Part 13.5 |
 | 環境有沒有 Prometheus / Argo Rollouts | 用 Part 12.10 的指令自己查 | Part 12.10 |
 | FZ1 / FZ2 有沒有做 Istio multi-cluster（共用 root CA、remote secret、east-west gateway） | 平台組 | Part 16.6 路線二 |
 | active zone 怎麼切換（誰觸發、自動還是人工）、DNS TTL 多長 | 網路組 | Part 16.1 |
 | VIP 前面的流量路徑（F5／硬體 LB／雲端 LB）、VIP 是否做 SNAT、F5 是 L4 還是 L7（L4 不會加 `X-Forwarded-For`，要改用 PROXY protocol）、Service port 設錯時外部 LB 的症狀（refused 或 timeout） | 網路組 | Part 1、Part 10.5 |
-| app 映像有沒有 `curl`（沒有就改用 `kubectl debug --target=app --image=curlimages/curl …`） | 看 Dockerfile／自己查 | Part 4 |
+| app 映像有沒有 `curl`（沒有就改用 `kubectl debug --target=app --image=curlimages/curl …`） | 自己查（看 Dockerfile） | Part 4 |
 | Deployment 現在用哪個 ServiceAccount（目前環境是 `default`；Part 3、4 的 `sa/pmc-epmmformquerygui` 範例以已依 Part 4 建立同名 SA 為前提） | 自己查（`kubectl get pod -o jsonpath='{.spec.serviceAccountName}'`） | Part 3、Part 4 |
-| CronJob controller 的時區是不是 UTC | 平台組 | Part 6 |
-| 實際的叢集現況：in-memory session 的影響、Spring Boot 啟動時間、有沒有 PDB／HPA、設定是不是還手動 apply | 自己查／AP 團隊 | Part 6、Part 9、Part 11.7、Part 12 |
+| CronJob controller 的時區是不是 UTC | 自己查 | Part 6 |
+| 實際的叢集現況：in-memory session 的影響、Spring Boot 啟動時間、有沒有 PDB／HPA、設定是不是還手動 apply | 自己查 | Part 6、Part 9、Part 11.7、Part 12 |
 | routable／non-routable 兩組 VIP 與 node 的分層（10.x／100.64.x）、routable node 的數量 | 網路組 / 平台組 | Part 10、Part 13 |
 | CD 只能 `kubectl apply` 的限制是否仍成立（決定能不能用 Track B 全自動） | CD 團隊 | Part 15 |
 | 公司 DNS 是不是 active/standby、FZ1 是否只有 CD 建的共用 Gateway、`--context` 名稱與 FZ2 VIP、16.7 表格的分工與切 zone 流程 | 網路組 / 平台組 | Part 16.1、16.5、16.6、16.7 |
