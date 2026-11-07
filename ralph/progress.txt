@@ -831,3 +831,13 @@ Started: (not yet run)
 - Review round 1: Spec 無發現（引文與 CANARY-COMPLETE.md §10 #11 / §3.7 相符）；Standards 指出小節標題「可以直接沿用，不用改」與新內文矛盾、兩條 bullet 重複列 env。連動修改：標題改為「兩個 track 共通的部分（有些可以沿用，ConfigMap 與 pod template 不行）」，pod template bullet 的重複 env 清單改成「上一條列的 env」。無其他帳本列受影響。
 - Learnings: 改掉小節內的結論時，順手檢查該小節標題是否仍成立。
 ---
+## 2026-11-07 - US-081
+- 15.4 整節內容換成摘要＋指標（CANARY-COMPLETE.md §4.1/§4.3/§5/§8/§9），標題保留；P15-012～020 隨取代一起解決。
+- 15.4 內沒有 validate:skip-yaml 標記。未連動修改其他句子。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 與 Spec 都確認 15.4 本身乾淨（無禁止操作、章節號存在、引文在 CANARY-COMPLETE.md）。
+  觀察（不在本故事帳本 ID 內，未改）：約 7087 行「15.4 / 15.5 是有完整 kubectl 權限時的版本」、
+  約 7464 行「前面 15.4 / 15.5 的 SOP 假設你可以下 kubectl scale…」現在與 15.4 變成指標不一致，帳本沒有對應列；
+  約 7922 行屬 P15-051。另：摘要含 §4.3、§9 兩個額外指標（超出 P15-012 的 §4.1/§5/§8）。
+- Learnings: 取代整節後，其他段落對該節的描述（「15.4 / 15.5 的 SOP」）會變過時；需另開帳本列處理。
+---
