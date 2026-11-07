@@ -7787,7 +7787,7 @@ spec:
 **附帶好處：**
 
 - **身分端到端保留** —— FZ2 Pod 看到的來源是 FZ1 ingressgateway 的 SPIFFE ID（但兩座共用 trust domain 時，`principals` 分不出是哪一座的 ingressgateway）
-- **locality failover** —— DR 加 `localityLbSetting` ＋ `outlierDetection`，平常走本 zone，本 zone 的 Pod 掛了才自動送去另一座。**沒有 `outlierDetection` 就不會 failover**，這是最常見的漏設
+- **locality failover** —— Istio 預設的 mesh 設定已開啟 locality load balancing（`localityLbSetting.enabled: true`），所以 `localityLbSetting` 不是必填；DR 只要設了 `outlierDetection` 就會啟動 locality-aware failover，平常走本 zone，本 zone 的 Pod 掛了才自動送去另一座。**沒有 `outlierDetection` 就不會 failover**，這是最常見的漏設。本 repo 的 `canary-manual/track-a/base/02-destinationrule.yaml` 已經有 `outlierDetection`，接上 multi-cluster 後 locality failover 會自動生效；不想要的話，在 DR 設 `localityLbSetting.enabled: false` 關閉
 
 **這不是 AP 團隊能自己開的東西**，而且 Part 5 附錄講的「mesh 打通 = 信任邊界打通」在這裡一樣成立。先問平台組有沒有（列在文末「需向他人確認」）。
 
