@@ -5127,6 +5127,13 @@ spec:
             name: app-routing            # 它會自動改這個 VirtualService
             routes:
               - primary                  # ⚠ VirtualService 裡的 http route 必須有 name: primary
+        # 【必要】steps 用了 setHeaderRoute，就必須在這裡宣告它的名字。沒寫 managedRoutes，
+        # Rollout 驗證直接失敗（"Rollout has missing field 'spec.strategy.canary.trafficRouting.managedRoutes'"）；
+        # 寫了但漏列某個 route，也會失敗（"Steps define a route that does not exist in ...managedRoutes"）。
+        # 這份骨架的步驟 1 用 canary-test，下面 cookie 版本用 canary-testers，所以兩個都列；列的順序就是優先序。
+        managedRoutes:
+          - name: canary-test
+          - name: canary-testers
 
       steps:
         # ===== 步驟 1：開一條 header 專用路由，正式流量仍 100% 在 v1 =====
@@ -5165,6 +5172,8 @@ spec:
         - setWeight: 100
 ```
 
+> **版本與宣告**：`setHeaderRoute`／`setMirrorRoute` 需要 Argo Rollouts v1.3 以上（release-1.2 的文件沒有這兩個功能，release-1.3 才有）。另外，後面 12.5～12.7 只貼了 `steps:` 片段，它們用到的 route 名稱（`mirror-to-canary`、`mirror`、`canary-test`）一樣都要列進 `trafficRouting.managedRoutes`，否則整個 Rollout 驗證失敗。
+
 #### 三種「指定誰走 v2」的方式
 
 | 方式 | 寫法 | 適合誰 |
@@ -5184,7 +5193,7 @@ spec:
                   regex: ".*canary-user=true.*"
 ```
 
-測試者在瀏覽器 console 執行一次 `document.cookie="canary-user=true;path=/"`，**之後所有操作都固定走 v2**——這比你們現在「使用者 pilot run 但不確定他打到哪個 Pod」還要可靠。
+測試者在瀏覽器 console 執行一次 `document.cookie="canary-user=true;path=/"`，**在 header route 存在的那幾個 step 裡，他的操作都固定走 v2**——Argo 會在 rollout 結束或 abort 時移除 managedRoutes 裡的所有 route（12.2 骨架的步驟 3 也會主動把它關掉），所以它不是永久黏住。這比你們現在「使用者 pilot run 但不確定他打到哪個 Pod」還要可靠。
 
 > **⚠ 前置條件（Part 9 發現 3）**：你現在的 `app-routing` 沒有 `mesh`，而且 route 沒有 `name`。要用 Argo Rollouts 必須先補：
 > ```yaml
@@ -5225,8 +5234,10 @@ spec:
             activeDeadlineSeconds: 600   # 10 分鐘跑不完就當失敗
             template:
               metadata:
-                annotations:
-                  sidecar.istio.io/inject: "false"   # Part 6.4 踩雷 2：Job 不要注入 sidecar
+                labels:
+                  # Part 6.4 踩雷 2：Job 不要注入 sidecar。Istio 官方已棄用同名 annotation，
+                  # 改用 label；放 annotations 在新版可能不被認，sidecar 照注入。
+                  sidecar.istio.io/inject: "false"
               spec:
                 restartPolicy: Never
                 containers:
