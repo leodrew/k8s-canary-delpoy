@@ -857,3 +857,10 @@ Started: (not yet run)
   WebFetch 確認官方頁真的有「To skip analysis, pauses and steps entirely, use '--full' to fully promote the rollout」。
 - Learnings: 指標到同一頁其他 Part 的說明時，先 grep 確認說明真的在哪一節（第一版我寫成 15.4，實際在 15.2）。
 ---
+## 2026-11-07 - US-084
+- 15.7 兩種 track 之間的切換：整段 SOP（Track A→B、B→A、三件易錯事、延伸閱讀）換成摘要＋指標（§0、§2、§10 第 11 項、Argo migrating 官方頁）。P15-024~028 隨取代解決。
+- Files: k8s-ecosystem-guide.md（+4/-86，只動 15.7）
+- Review round 1: Standards — 0 hard；judgement：標題可加「不維護」、與 15.5 開頭相似（不改，同 US-082 風格）。Spec — 0 findings（WebFetch 確認 "Not following this approach might result in downtime." 在官方頁；§0 引文逐字相符；禁用指令皆未出現）。「不會互搶 pod」舊說法已隨表格刪除，guide 內無殘留。
+- 連動修改：無。
+- Learnings: 無新增（沿用 15.5 的 stub 形式）。
+---
