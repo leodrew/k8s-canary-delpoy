@@ -714,3 +714,11 @@ Started: (not yet run)
 - 未動（屬其他故事）：12.12 的 enough-traffic（P12-025）、12.6 的 analysis step 沒傳 args（success-rate 現在有必填 arg service-name，12.6／12.11 的 Rollout 範例需要在其故事補 args）。
 - Review：round 1 Standards 0 硬性、2 observation（重複說明、args 示範）已修；Spec 0 阻擋，建議補 args 傳法，已修。
 ---
+
+## 2026-11-07 - US-064
+- 修正 Part 12 的 12.7（P12-009 階段 1 的 pause: {} 移到關閉 header route 之前；P12-010 階段 3 補回 setHeaderRoute 開/關；P12-011 通知要先設 argo-rollouts-notification-configmap 並加訂閱 annotation）與 12.8（P12-012 progressDeadline 語意＋progressDeadlineAbort 預設 false，同步改 12.11 的同句；P12-013 startingStep 從 0 起算、背景分析需拿掉 count 的另一份 template）。
+- Files: k8s-ecosystem-guide.md
+- 連動修改：12.11 Rollout 範例中 progressDeadlineSeconds／progressDeadlineAbort 的註解（帳本 P12-012 第二個位置 5105–5106 所指）。
+- Review round 1: Standards 抓到 1 處「碰運氣」引號落空（改成不加引號的敘述）、success-rate-bg 沒交代做法（補「複製 12.4、刪 count、改名」）；Spec 全部引文在官方頁找到，唯一提醒是「不設 count」官方只明寫 0（改為引官方 count 0 原句）。Round 2：只有上述小修，由我自行對照確認（未再開 sub-agent）。
+- Learnings: 註解裡用「」引 guide 自己的字樣要先 grep 確認存在。
+---
