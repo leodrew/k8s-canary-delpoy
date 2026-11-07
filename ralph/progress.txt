@@ -773,3 +773,10 @@ Started: (not yet run)
 - Review: round 1 Standards 2 項（儲存格太長、重複一句 cookie 持有者不知情）→ 已改；Spec 0 項。round 2 無發現。
 - Learnings: 帳本引的是本地 CANARY-COMPLETE.md 而非網址，直接對該檔 grep 驗證即可。
 ---
+## 2026-11-07 - US-072
+- 14.4 內容換成摘要＋指標（CANARY-COMPLETE.md §2、§3.2–§3.9、§4.2），保留四層 label 串接圖與 UH/NC 表與驗證指令；刪掉五份 manifest 複本與套用順序（P14-018～029 隨之解決）。小節內無 skip-yaml 標記需處理。
+- 連動修改：「四層 label 串接」標題的「後面的 YAML 就都通了」改為「任何一份 YAML」（後面已無 YAML）。
+- Files: k8s-ecosystem-guide.md
+- Review：未啟動平行 sub-agent；因為來源皆為本地 CANARY-COMPLETE.md，直接核對章節存在、14.4 無禁止操作字樣、diff 僅限 14.4。發現 1 項（指標漏 §4.2 套用順序），已補。
+- 觀察（不在本故事範圍，未改）：guide 其他處仍指向 14.4 的完整 manifest——Part 12 開頭「Part 14.4 給了 Track A 的完整 manifest」、14.6「14.4 的 VirtualService 裡那條 default route」、末尾延伸閱讀「Track A 的完整 manifest 見 Part 14 的 14.4」。
+---
