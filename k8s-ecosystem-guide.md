@@ -7826,9 +7826,27 @@ standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直�
 
 #### 踩雷 4：健康檢查沒帶 Host header
 
-不管是 DNS 切 zone 的判斷、還是你自己用 `curl` 打 VIP，沒帶 `Host: myapp.example.com`（或 `--resolve`）時 Gateway 的 hosts 比對不到，會回 404 —— 然後你會誤以為那一邊掛了。見 Part 11.4。
+不管是 DNS 切 zone 的判斷、還是你自己用 `curl` 打 VIP，沒帶 `Host: myapp.example.com`（或 `--resolve`）時 Gateway 比對不到 host —— 然後你會誤以為那一邊掛了。症狀要分兩種情況看（見 16.4 的表）：
+
+* **HTTPS 且 Gateway 的 hosts 是具體名字**：curl 直接打 VIP 的 IP 不會送 SNI，TLS handshake 就失敗，access log 是 `NR`、details `filter_chain_not_found`，**不是 404**。
+* **HTTP，或 Gateway 用 wildcard `*` 收下了請求**：Gateway 收得進來，但 VirtualService 的 host 對不到，才是 404（`NR`，Envoy 文件對 `NR` 的定義是「No route configured for a given request in addition to 404 response code or no matching filter chain for a downstream connection」）。
+
+兩種都要帶 `Host` 或 `--resolve` 才會比對得到。見 Part 11.4。
 
 > **延伸閱讀**：入口鏈逐跳的錯誤碼見 [Part 1](#part-1流量入口鏈-vip-到-pod)；跨 cluster 身分斷裂與 JWT 補救見 [Part 5](#part-5獨立-cluster-互打走對方-vip-與-virtualservice)；兩座 cluster 的入口模式與 session 問題見 [Part 11](#part-11fz1-與-fz2-雙-cluster-的入口設計dns-record-放哪)。
+
+### 參考來源
+
+- Kubernetes — Endpoints deprecation：https://kubernetes.io/blog/2025/04/24/endpoints-deprecation/
+- Istio — Debugging Your Configuration (proxy-cmd)：https://istio.io/latest/docs/ops/diagnostic-tools/proxy-cmd/
+- Istio — Getting Envoy's Access Logs：https://istio.io/latest/docs/tasks/observability/logs/access-log/
+- Envoy — Substitution formatter（response flags）：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
+- Kubernetes — kubectl logs：https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/
+- Istio — ServiceEntry reference：https://istio.io/latest/docs/reference/config/networking/service-entry/
+- Istio — DestinationRule reference：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- Istio — Gateway reference：https://istio.io/latest/docs/reference/config/networking/gateway/
+- Istio — Install Multi-Primary on different networks：https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
+- Istio — Supported Releases：https://istio.io/latest/docs/releases/supported-releases/
 
 ---
 
