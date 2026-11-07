@@ -5130,7 +5130,7 @@ spec:
         # 【必要】steps 用了 setHeaderRoute，就必須在這裡宣告它的名字。沒寫 managedRoutes，
         # Rollout 驗證直接失敗（"Rollout has missing field 'spec.strategy.canary.trafficRouting.managedRoutes'"）；
         # 寫了但漏列某個 route，也會失敗（Steps define a route that does not exist，指的就是 managedRoutes 裡沒有這個名字）。
-        # 這份骨架的步驟 1 用 canary-test，下面 cookie 版本用 canary-testers，所以兩個都列；列的順序就是優先序。
+        # 這份骨架的步驟 1 用 canary-test，下面 cookie 版本用 canary-testers，所以兩個都列（canary-testers 只有改用 cookie 版本時才用到）；列的順序就是優先序。
         managedRoutes:
           - name: canary-test
           - name: canary-testers
