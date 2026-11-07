@@ -728,3 +728,11 @@ Started: (not yet run)
 - Review: 1 輪，diff 只有 2 處，對照 track-b/release/20-rollout.yaml（app label、kind: Rollout）人工審；帳本該列無官方 URL（證據是 repo 內檔案），無發現。validate.sh exit 0。
 - 未改：istio-proxy 映像有沒有 curl 帳本註明未研究，故沒動。
 ---
+## 2026-11-07 - US-066
+- 修正 Part 12 / 12.11（1/2）：P12-015（改成 track-b 實際路徑並列出差異）、P12-016（標成未完成、不可直接 apply；Rollout env 加警告註解）、
+  P12-017（user-name-attribute 改 sub）、P12-018（刪 app.cors／app.sso，補 app.post-logout-redirect-uri）、P12-021（補 -svc Service 與 ServiceAccount 的說明）。
+- 連動修改：12.11 開頭「前面 12.2 的 Rollout 是精簡版…才是可以直接 apply 的完整版」改成與新警告一致；章節標題「六份資源」改為含 ServiceAccount／-svc 的說法。
+- 觀察（未改，屬其他故事）：套用順序（00-configmap.yaml…05-analysistemplate.yaml）與 Part 15 的檔名樹仍是舊檔名。
+- Files: k8s-ecosystem-guide.md
+- Review：1 輪（BASE=95dc186），Standards／Spec 皆無發現；來源為 repo 檔案，已直接對照 CANARY-COMPLETE.md 與 track-b/*。
+---
