@@ -192,3 +192,4 @@
 
 ## 留給特定帳本列的提醒（修到那一列時照做；做完就把該條刪掉）
 
+- **Part 14 的 `### 參考來源`（最後一個 Part 14 故事）**：要含 https://argo-rollouts.readthedocs.io/en/stable/migrating/（P14-016；US-075 把行內的裸 URL 拿掉了，等這節建立再放），同時把 "Part 14" 加進 VERIFIED_PARTS。做完刪掉這條。

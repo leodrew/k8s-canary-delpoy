@@ -7026,8 +7026,6 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 **⚠ 兩軌互斥**：不是因為兩個 controller 會搶同一批 pod——官方說「The Rollout won't try to manage existing Deployment Pods.」。本 repo 互斥的原因是兩軌共用 `app` label 與 VirtualService `app-routing`，同時存在會互相干擾流量。切換時**不要先刪 Deployment**：官方建議「a Rollout should run next to the Deployment before deleting the Deployment or scaling down the Deployment」，不照這個順序可能造成中斷（downtime）。
 
-參考：https://argo-rollouts.readthedocs.io/en/stable/migrating/
-
 #### Track B 的兩個容易漏掉的設定
 
 ```yaml
