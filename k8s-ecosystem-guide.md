@@ -6706,7 +6706,7 @@ pod label 用 `version: stable` / `version: canary`：這是 Istio 的標準 lab
 
 ### 14.4 完整 manifest
 
-本節不再貼完整 manifest。完整的目標狀態（ConfigMap、兩份 Deployment、DestinationRule、VirtualService、套用順序）只有一個真實來源：`canary-manual/CANARY-COMPLETE.md` 的 §2（目錄結構與三層）與 §3.2–§3.9（逐檔的目標內容）；實際可 `kubectl apply` 的檔案在 `canary-manual/track-a/{base,release,runtime}/`，兩者不一致時以 §3 為準。
+本節不再貼完整 manifest。完整的目標狀態（ConfigMap、兩份 Deployment、DestinationRule、VirtualService、套用順序）只有一個真實來源：`canary-manual/CANARY-COMPLETE.md` 的 §2（目錄結構與三層）與 §3.2–§3.9（逐檔的目標內容）、§4.2（套用順序）；實際可 `kubectl apply` 的檔案在 `canary-manual/track-a/{base,release,runtime}/`，兩者不一致時以 §3 為準。
 在這裡貼一份複本，遲早會跟那邊分歧，而讀者照著複本做就會踩到已修掉的問題。下面只保留最容易接錯的「四層 label 串接」，因為看懂它之後，不論讀哪一份 YAML 都通了。
 
 #### 四層 label 串接（先看懂這張圖，任何一份 YAML 就都通了）
