@@ -359,7 +359,7 @@ selector:
 | 跳 | 誰決定 | 設錯的典型症狀 | 查法 |
 |---|---|---|---|
 | ② VIP | 網路組 / F5 設定 | 完全連不上、TLS 憑證錯誤 | `curl -v` 看憑證 CN、`dig` 看 DNS |
-| ③ Service | `istio-ingressgateway` Service 的 port 定義 | `Connection refused` | `kubectl get svc -n istio-system istio-ingressgateway` |
+| ③ Service | `istio-ingressgateway` Service 的 port 定義 | 連不上（`Connection refused` 或 timeout，取決於外部 LB 怎麼處理，見文末「需向他人確認」） | `kubectl get svc -n istio-system istio-ingressgateway` |
 | ④a **Gateway** | `servers.port` + `servers.hosts` + `tls` | **host 對不上 → 404＋`NR`**，跟 VS 沒匹配長得一樣（見表下說明） | `istioctl proxy-config listener <gw-pod> -n istio-system` |
 | ④b **VirtualService** | `hosts` + `gateways` + `match` | **404＋`response_flags: NR`** ← 沒有 route 匹配（前提：access log 已開啟，見表下說明） | `istioctl proxy-config route <gw-pod> -n istio-system` |
 | ⑤ DestinationRule | `subsets.labels` | **503 `UH`** ← subset 選不到任何 Pod（其他 503 旗標見表下說明） | `istioctl proxy-config endpoint <gw-pod> -n istio-system` |
@@ -399,7 +399,7 @@ selector:
 
 | 情境 | ingressgateway 看到的 source IP | 真實 client IP 在哪 |
 |---|---|---|
-| VIP 做 SNAT（多數 F5 預設） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
+| VIP 做 SNAT（多數 F5 預設；你們的 VIP 是否 SNAT 要問網路組，見文末「需向他人確認」） | VIP／F5 的 SNAT 位址 | **只在 `X-Forwarded-For` 裡**，而且 F5 要有加 |
 | Service `externalTrafficPolicy: Cluster`（預設） | 經過 node SNAT，看到 node IP | 通常**完全遺失**，除非更前面的 L7 proxy 先寫進 `X-Forwarded-For`（見表下說明） |
 | Service `externalTrafficPolicy: Local` | 保留真實 client IP 到 gateway | gateway 會把它寫進 `X-Forwarded-For` |
 
@@ -590,7 +590,7 @@ CUSTOM  →  DENY  →  ALLOW
                         不是 app label、不是 Pod 名
 ```
 
-> **直接關係到你目前環境**：`spring_full_v4.md` 裡的 Deployment **沒有設 `serviceAccountName`**，所以所有 Pod 都跑在 `default` SA 下，身分是 `cluster.local/ns/ea-pmc/sa/default`。這代表**你無法用 principals 區分 ea-pmc 裡的三個 GUI 服務**——它們身分完全一樣。要做細粒度授權，第一步就是給每個 Deployment 獨立 SA（Part 4 有完整做法）。
+> **直接關係到你目前環境**：`spring_full_v4.md` 裡的 Deployment **沒有設 `serviceAccountName`**，所以所有 Pod 都跑在 `default` SA 下，身分是 `cluster.local/ns/ea-pmc/sa/default`（這是本環境的現況，用 `kubectl get pod -o jsonpath='{.spec.serviceAccountName}'` 自己確認）。這代表**你無法用 principals 區分 ea-pmc 裡的三個 GUI 服務**——它們身分完全一樣。要做細粒度授權，第一步就是給每個 Deployment 獨立 SA（Part 4 有完整做法）。
 
 #### 三種 IP 白名單寫法對照（Q1 的核心）
 
@@ -1353,8 +1353,8 @@ K8s 的 namespace **預設不是網路邊界** —— 不裝任何東西的話�
 // 錯：從 ea-pmc 的 Pod 打這個名字，DNS 解析不到
 restTemplate.getForObject("http://epmm-api-svc/api/v1/forms", ...);
 
-// 可以：至少要帶 namespace
-"http://epmm-api-svc.ea-epmm/api/v1/forms"
+// 可以：至少要帶 namespace（沒寫 port 就是 Service port 80；Service port 若是 8080 要補 :8080）
+"http://epmm-api-svc.ea-epmm:8080/api/v1/forms"
 
 // 可讀性最好：完整 FQDN（但它只有 4 個點、少於 ndots:5，照樣會先跑 search domain，不會比上一行省查詢）
 "http://epmm-api-svc.ea-epmm.svc.cluster.local:8080/api/v1/forms"
@@ -1388,7 +1388,7 @@ kubectl debug -n ea-pmc "$POD" -it --image=busybox:1.36 --target=app -- \
 
 ### 步驟 1：兩邊各給獨立 ServiceAccount（最重要的一步）
 
-**沒有這步，後面的授權全部做不到粒度。** 你現在兩邊都是 `default` SA，等於「整個 namespace 一個身分」。
+**沒有這步，後面的授權全部做不到粒度。** 你現在兩邊都是 `default` SA（現況用 `kubectl get pod -o jsonpath='{.spec.serviceAccountName}'` 自己確認），等於「整個 namespace 一個身分」。
 
 ```yaml
 # ea-pmc 側
@@ -2813,7 +2813,7 @@ spec:
 | Key | 預設 | 說明 |
 |---|---|---|
 | `schedule` | 必填 | cron 格式。也支援 `@daily` `@hourly` |
-| `timeZone` | controller 時區 | **一定要設**，否則 UTC 跟你想的差 8 小時 |
+| `timeZone` | controller 時區 | **一定要設**，否則若 controller 跑在 UTC（要向平台組確認），會跟你想的差 8 小時 |
 | `concurrencyPolicy` | `Allow` | 資料庫同步類的一定要設 `Forbid` |
 | `startingDeadlineSeconds` | 無 | **強烈建議設定**，見踩雷 |
 | `successfulJobsHistoryLimit` | 3 | 設 0 = 跑完就刪 |
@@ -4034,6 +4034,8 @@ kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c app -- \
 
 以下是對照 `spring_full_v4.md` §24 的實際 manifest 找到的問題，按影響程度排序。
 
+> **注意**：發現 1、2（sessionAffinity）、3、4、6，以及發現 5 的 strategy 部分，`canary-manual/track-a/` 已經修掉；這一章描述的是修正前的狀態。PodDisruptionBudget 的 `base/04-poddisruptionbudget.yaml` 目前只出現在 CANARY-COMPLETE.md 3.9 的目標狀態，檔案還不存在。
+
 ### 發現 1：Deployment 沒有 `serviceAccountName`（阻擋所有細粒度授權）
 
 **現狀**：`spring_full_v4.md` 裡 `pmc-epmmformquerygui` 的 Pod spec 沒有 `serviceAccountName`，所有 Pod 都使用 `default` SA。（repo 的 `canary-manual/track-a/` 已修：Deployment 設了 `serviceAccountName: pmc-epmmformquerygui` 與 `automountServiceAccountToken: false`，SA 定義在 `base/00-serviceaccount.yaml`。下面是還沒修的環境該怎麼改。）
@@ -4696,7 +4698,7 @@ routable VIP 通常要求 gateway Pod 跑在特定網段的 node 上。這就是
 
 ### 11.2 模式 A：單一 DNS 指向 FZ1
 
-這是 CD 預設會做的事——`myapp.example.com` 這筆 A record 只指向 FZ1 的 VIP。
+這是 CD 預設會做的事——`myapp.example.com` 這筆 A record 只指向 FZ1 的 VIP。（依貴司 CD 工具行為，需向 CD 團隊確認，見文末「需向他人確認」。）
 
 ```
                     DNS: myapp.example.com ──▶ 10.20.30.40（只有 FZ1 的 VIP）
@@ -7236,7 +7238,7 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | 只改後端邏輯，介面沒動 | 指標判斷就夠 | 成功率和延遲抓得到 |
 | 改了資料庫 schema | **人工 + 額外準備回滾腳本** | 兩者都救不了資料問題 |
 | 緊急修補（線上正在出事） | Track B 的 `promote --full` | 會跳過還沒跑的 analysis、pause 與剩餘 step（見 15.2 的 `promote --full` 說明）；已跑完的 analysis 不受影響 |
-| 夜間 / 週末發布 | Track B 全自動 | 沒人待命時自動回滾比叫人起床可靠 |
+| 夜間 / 週末發布 | Track B 全自動（本環境不適用：CD 只能 `kubectl apply`，見 CANARY-COMPLETE.md §0） | 沒人待命時自動回滾比叫人起床可靠 |
 | 改動很小（改個文字、調個參數） | 指標判斷 | 人工驗證的邊際效益太低 |
 | 第一次用新的發布機制 | **人工，而且要有人盯著** | 先建立對機制本身的信任 |
 | 有人待命 | 兩者皆可 | |
@@ -7622,7 +7624,7 @@ DNS 回 FZ1 VIP → FZ1 ingressgateway → 共用 wildcard Gateway 收下 host
 # 1. DNS 現在回哪個 IP？
 nslookup myapp.example.com
 
-# 2. 跟兩邊 ingressgateway 的 EXTERNAL-IP 對照
+# 2. 跟兩邊 ingressgateway 的 EXTERNAL-IP 對照（context 名稱 fz1／fz2 與 <FZ2_VIP> 是環境值，依你的 kubeconfig 調整）
 kubectl --context=fz1 -n istio-system get svc istio-ingressgateway
 kubectl --context=fz2 -n istio-system get svc istio-ingressgateway
 
@@ -7904,3 +7906,13 @@ standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直�
 | 環境有沒有 Prometheus / Argo Rollouts | 用 Part 12.10 的指令自己查 | Part 12.10 |
 | FZ1 / FZ2 有沒有做 Istio multi-cluster（共用 root CA、remote secret、east-west gateway） | 平台組 | Part 16.6 路線二 |
 | active zone 怎麼切換（誰觸發、自動還是人工）、DNS TTL 多長 | 網路組 | Part 16.1 |
+| VIP 前面的流量路徑（F5／硬體 LB／雲端 LB）、VIP 是否做 SNAT、F5 是 L4 還是 L7（L4 不會加 `X-Forwarded-For`，要改用 PROXY protocol）、Service port 設錯時外部 LB 的症狀（refused 或 timeout） | 網路組 | Part 1、Part 10.5 |
+| app 映像有沒有 `curl`（沒有就改用 `kubectl debug --target=app --image=curlimages/curl …`） | 看 Dockerfile／自己查 | Part 4 |
+| Deployment 現在用哪個 ServiceAccount（目前環境是 `default`；Part 3、4 的 `sa/pmc-epmmformquerygui` 範例以已依 Part 4 建立同名 SA 為前提） | 自己查（`kubectl get pod -o jsonpath='{.spec.serviceAccountName}'`） | Part 3、Part 4 |
+| CronJob controller 的時區是不是 UTC | 平台組 | Part 6 |
+| 實際的叢集現況：in-memory session 的影響、Spring Boot 啟動時間、有沒有 PDB／HPA、設定是不是還手動 apply | 自己查／AP 團隊 | Part 6、Part 9、Part 11.7、Part 12 |
+| routable／non-routable 兩組 VIP 與 node 的分層（10.x／100.64.x）、routable node 的數量 | 網路組 / 平台組 | Part 10、Part 13 |
+| CD 只能 `kubectl apply` 的限制是否仍成立（決定能不能用 Track B 全自動） | CD 團隊 | Part 15 |
+| 公司 DNS 是不是 active/standby、FZ1 是否只有 CD 建的共用 Gateway、`--context` 名稱與 FZ2 VIP、16.7 表格的分工與切 zone 流程 | 網路組 / 平台組 | Part 16.1、16.5、16.6、16.7 |
+| FZ2 ingressgateway 的憑證由哪個 CA 簽發（決定路線一的 DestinationRule 要不要 `credentialName`／`caCertificates`） | 平台組 | Part 16.6 路線一 |
+| 環境有沒有開 access log（Telemetry API 或 `meshConfig.accessLogFile`）—— Part 1、8、16 的除錯步驟都假設有 | 平台組 | Part 8.2、16.4、16.5 |
