@@ -7482,7 +7482,7 @@ ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 re
   │     4a Gateway            這個 port / host / TLS 收不收？
   │     4b VirtualService     host + path → 要送去哪個 destination.host（+ subset）
   │     4c DestinationRule    subset 對到哪些 label 的 Pod、LB 策略、連線池
-  │     4d AP 的 Service + Endpoints   destination.host → Pod IP 清單（通訊錄）
+  │     4d AP 的 Service + EndpointSlice   destination.host → Pod IP 清單（通訊錄）
   ▼
  [5] 直接連目標 Pod IP（不經過 AP Service 的 ClusterIP，也不經過 kube-proxy）
   ▼
@@ -7512,7 +7512,7 @@ ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 re
   ClusterIP: 10.96.12.34          ← Service 自己的 IP（總機）
   selector:  app=pmc-epmmformquerygui
 
-K8s 依 selector 自動產生的 Endpoints（通訊錄）：
+K8s 依 selector 自動產生的 EndpointSlice（通訊錄；舊的 Endpoints API 自 v1.33 起 deprecated）：
   172.16.3.21:8080   label version=stable
   172.16.5.8:8080    label version=stable
   172.16.7.40:8080   label version=canary
@@ -7526,7 +7526,7 @@ request 到了 ingressgateway 的 Envoy，Envoy 在內部做三步：
 ```
 ① 查 VS：/gui_epmmFormQuery/ → 「pmc-epmmformquerygui-svc 的 stable subset」
    對應到 Envoy 內部的 cluster：outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
-② 這個 cluster 的成員 = Service 的 Endpoints ∩ DR subset label（version=stable）
+② 這個 cluster 的成員 = Service 的 EndpointSlice ∩ DR subset label（version=stable）
      172.16.3.21 ✔   172.16.5.8 ✔   172.16.7.40 ✗（canary）
 ③ 依 DR 的 LB 策略挑一個，例如 172.16.5.8，直接建立連線
 
@@ -7544,12 +7544,14 @@ request 到了 ingressgateway 的 Envoy，Envoy 在內部做三步：
 
 ```bash
 # 通訊錄：一排 Pod IP
-kubectl -n ea-pmc get endpoints pmc-epmmformquerygui-svc
+# （Endpoints API 自 v1.33 起 deprecated，用 get endpoints 會出現棄用警告，所以改看 EndpointSlice）
+kubectl -n ea-pmc get endpointslice -l kubernetes.io/service-name=pmc-epmmformquerygui-svc
 
 # Envoy 手上有哪些 cluster（一個 Service 會展開成「不分 subset」＋ 每個 subset 各一個）
 istioctl proxy-config cluster deploy/istio-ingressgateway -n istio-system \
   --fqdn pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local
-#   SERVICE FQDN                                        PORT  SUBSET  DIRECTION  TYPE
+#   （節錄，只列前五欄；實際輸出最後還有 DESTINATION RULE 欄，subset 那兩行會顯示 pmc-epmmformquerygui-dr.ea-pmc）
+#   SERVICE FQDN                                        PORT  SUBSET  DIRECTION  TYPE  ...
 #   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  -       outbound   EDS
 #   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  stable  outbound   EDS
 #   pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local   8080  canary  outbound   EDS
@@ -7557,16 +7559,17 @@ istioctl proxy-config cluster deploy/istio-ingressgateway -n istio-system \
 # stable subset 裡實際有誰 —— 只有 stable，而且都是 Pod IP
 istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
   --cluster "outbound|8080|stable|pmc-epmmformquerygui-svc.ea-pmc.svc.cluster.local"
-#   ENDPOINT          STATUS
+#   （節錄，實際輸出在 STATUS 後還有 OUTLIER CHECK、CLUSTER 兩欄）
+#   ENDPOINT          STATUS   ...
 #   172.16.3.21:8080  HEALTHY
 #   172.16.5.8:8080   HEALTHY
 ```
 
-gateway access log 的 `upstream_host` 欄位印出來的也會是 `172.16.5.8:8080`，不是 `10.96.12.34`。VS / DR / Service 三者是用哪些 key 連起來的，見 [Part 0「物件之間怎麼互相找到」](#物件之間怎麼互相找到label名字host-三種連結)。
+（前提：access log 要先開，Istio 預設不開，見 16.4 表下說明。）開了之後，gateway access log 的 `upstream_host` 欄位印出來的也會是 `172.16.5.8:8080`，不是 `10.96.12.34`。VS / DR / Service 三者是用哪些 key 連起來的，見 [Part 0「物件之間怎麼互相找到」](#物件之間怎麼互相找到label名字host-三種連結)。
 
 ### 16.3 控制面：表是誰填的 —— 404 的根本原因
 
-16.2 裡 Envoy 查的那四張表，不是 Envoy 自己知道的。是 **istiod 去 watch 本 cluster 的 API server**，把讀到的 Gateway / VS / DR / Service / Endpoints 翻成 Envoy 設定（xDS）推下去。
+16.2 裡 Envoy 查的那四張表，不是 Envoy 自己知道的。是 **istiod 去 watch 本 cluster 的 API server**，把讀到的 Gateway / VS / DR / Service / EndpointSlice 翻成 Envoy 設定（xDS）推下去。
 
 關鍵在「**本 cluster**」三個字：
 
@@ -7601,11 +7604,13 @@ DNS 回 FZ1 VIP → FZ1 ingressgateway → 共用 wildcard Gateway 收下 host
 
 | FZ1 的狀態 | 使用者看到 | access log `response_flags` |
 |---|---|---|
-| Gateway 不收這個 host（HTTPS，SNI 對不到任何 server） | TLS handshake 失敗 / 連線被 reset | 通常沒有 log |
+| Gateway 不收這個 host（HTTPS，SNI 對不到任何 server） | TLS handshake 失敗 / 連線被 reset | 開了 access log 時，通常會有一行沒有 method、沒有 path 的紀錄：flag `NR`、details `filter_chain_not_found`（沒開就什麼都看不到） |
 | 共用 wildcard Gateway 收了，但**沒有 VS** | **404** ← 你遇到的就是這個 | `NR`（no route） |
 | 有 VS，但**沒有 AP Service**，或 VS 指的 subset 在 DR 裡沒定義 | 503 | `NC`（no cluster） |
 | VS + Service + DR 都有，但**沒有 Pod**、或 Pod label 跟 subset 對不上 | 503 | `UH`（no healthy upstream） |
 | 整套都有 | 200 | `-` |
+
+> **前提：這張表和 16.5 第 4 步都要先有 access log。** Istio 預設不開 access log（官方只說 `demo` configuration profile 會啟用，並建議用 Telemetry API）。要用 Telemetry API 或 `meshConfig.accessLogFile=/dev/stdout` 打開，否則 `response_flags` 欄位根本看不到。
 
 **結論：在 FZ1 只補一個 VS 是不夠的** —— 404 只會變成 503。FZ1 要嘛有整套（Gateway 收 host + VS + DR + Service + Pod），要嘛靠 16.6 的方式把流量送去 FZ2。
 
@@ -7626,8 +7631,10 @@ kubectl --context=fz2 -n istio-system get svc istio-ingressgateway
 curl -vk --resolve myapp.example.com:443:<FZ2_VIP> \
   https://myapp.example.com/gui_epmmFormQuery/rs/gui/ping
 
-# 4. FZ1 gateway 的 access log：看到 404 + NR = FZ1 沒有這個 host 的 VS
-kubectl --context=fz1 -n istio-system logs deploy/istio-ingressgateway --tail=200 \
+# 4. FZ1 gateway 的 access log（要先開 access log，見 16.4）：看到 404 + NR = FZ1 沒有這個 host 的 VS
+#    --all-pods=true：gateway 多半有多個 replica，不加只會讀其中一個 pod，可能剛好漏掉那筆 404
+#    （舊版 kubectl 沒有 --all-pods，可改 -l app=istio-ingressgateway --prefix）
+kubectl --context=fz1 -n istio-system logs deploy/istio-ingressgateway --all-pods=true --tail=200 \
   | grep myapp.example.com
 
 # 5. FZ1 的 Envoy 到底有沒有這個 host 的 route（空的 = 沒有）
