@@ -7601,7 +7601,7 @@ kubectl -n $NS delete rollout pmc-epmmformquerygui
 
 | 錯誤 | 症狀 | 預防 |
 |---|---|---|
-| 兩個 controller 並存 | pod 反覆被建立刪除 | **一定要刪乾淨再建**，用 `kubectl get deploy,rollout -l app=...` 確認 |
+| Deployment 與 Rollout 並存 | 兩邊各管各的 ReplicaSet（不會互搶 pod），但共用 `app` label 與 VirtualService，流量與 Service endpoint 混在一起 | **一定要刪乾淨再建**，用 `kubectl get deploy,rollout -l app=...` 確認 |
 | VirtualService 指向還沒有 endpoint 的 Service | 503 `UH` | 先讓 pod 就緒，再切 VS |
 | ConfigMap 引用漏改 | 新版程式配舊版設定 | 切換前先確認 `configMap.name` 對得上 |
 
