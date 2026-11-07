@@ -6765,11 +6765,11 @@ istioctl proxy-config endpoint deploy/pmc-epmmformquerygui-stable -n ea-pmc \
 
 你的 app 用 in-memory `HttpSession`，而 `sessionAffinity: ClientIP` 在 Istio 下不生效（Part 6.2）。canary 若開 2 個 pod，**pilot 使用者的請求會在兩個 canary pod 之間跳，一樣會被登出**——cookie 只保證他進 canary 這一軌，不保證進哪一個 pod。
 
-開 1 個 pod 是最簡單可靠的解法。真的需要多個 canary pod 時，必須在 canary subset 上加 `consistentHash`。
+開 1 個 pod 是最簡單可靠的解法，repo 也規定 canary 一律只開 1 個 replica（`canary-manual/CANARY-COMPLETE.md` §8.3：in-flight OAuth2 `state` 在 pod 記憶體裡，canary 開超過 1 個 replica 時，使用者會拿到 `authorization_request_not_found`）。
 
 #### 前提 2：Service 的 port 一定要命名
 
-cookie 比對是 **L7 功能**。Service 的 port 沒有 `name: http` / `appProtocol: http` 時，Istio 可能用 L4 處理這個 port，**cookie 路由會直接失效而且沒有錯誤訊息**——症狀是「帶了 cookie 還是進 stable」。
+cookie 比對是 **L7 功能**。Service 的 port 沒有 `name: http` / `appProtocol: http` 時，Istio 靠自動偵測，通常認得出 HTTP（Istio 官方：「Istio can automatically detect HTTP and HTTP/2 traffic.」）；偵測失敗才會被當成純 TCP（「If the protocol cannot automatically be determined, traffic will be treated as plain TCP traffic.」），這時 **cookie 路由會失效而且沒有錯誤訊息**——症狀是「帶了 cookie 還是進 stable」。明確宣告才可靠（`appProtocol` 優先於 port 名稱前綴）。
 
 這就是 Part 9 發現 4 為什麼要修。
 
