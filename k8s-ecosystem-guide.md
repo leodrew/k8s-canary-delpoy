@@ -4936,7 +4936,7 @@ done
 
 原因：GSLB 是 **DNS 層級**的導流，它的粒度是「一次 DNS 查詢」，不是「一個使用者的一整段連線」。實務上會發生：
 
-- 使用者的 DNS 快取過期 → 重新查詢 → GSLB 這次回 FZ2 的 IP → **使用者的 session 在 FZ1，FZ2 不認得他 → 被要求重新認證**。Keycloak 的 SSO session 還在時，這是不用輸入帳密的重新認證，但正在送出的表單或 POST 會遺失；登入流程進行到一半就跳邊，還會出現 `authorization_request_not_found`。只有 SSO session 也過期時，才真的看到登入頁
+- 使用者的 DNS 快取過期 → 重新查詢 → GSLB 這次回 FZ2 的 IP → **使用者的 session 在 FZ1，FZ2 不認得他 → 被要求重新認證**。Keycloak 的 SSO session 還在時，這是不用輸入帳密的重新認證，但正在送出的表單或 POST 會遺失；登入流程進行到一半就被切到另一邊，還會出現 `authorization_request_not_found`。只有 SSO session 也過期時，才真的看到登入頁
 - 使用者換網路（有線換 Wi-Fi、VPN 重連）→ 重新解析 → 可能落到另一邊
 - 使用者換用不同的瀏覽器或不同的裝置 → 各自解析、各有各的 DNS 快取 → 有機會分散到兩邊
 
@@ -4946,7 +4946,7 @@ done
 |---|---|---|
 | GSLB source-IP affinity | 讓 GSLB 記住「這個來源 IP 上次給了哪邊」 | **脆弱**。使用者換網路就失效；公司 NAT 後大量使用者共用同一個出口 IP，反而會全部擠到同一邊 |
 | 兩邊 session 互相複寫 | Redis 跨 cluster replication | 跨機房延遲高，且複寫延遲期間仍可能讀不到 |
-| GSLB／LB 前端的 cookie persistence | 前面若是 L7 的 F5 LTM（在 F5 終結 TLS、兩個 VIP 都是 pool member），用 HTTP cookie 把使用者黏在同一個 cluster（F5 文件：「Cookie persistence directs session requests to the same server based on HTTP cookies…」） | 比 source-IP 可靠，不受換網路與 NAT 影響；**但需要在 F5 終結 TLS**才讀得到 cookie，且 cluster 掛掉時黏住的使用者仍會落到另一邊、session 照樣遺失 |
+| GSLB／LB 前端的 cookie persistence | 前面若是 L7 的 F5 LTM（在 F5 終結 TLS、兩個 VIP 都是 pool member），用 HTTP cookie 把使用者黏在同一個 cluster（F5 文件：「Cookie persistence directs session requests to the same server based on HTTP cookies…」） | 比 source-IP 可靠；**但需要在 F5 終結 TLS**才讀得到 cookie |
 | **session 外部化 + 固定一邊** | Spring Session + Redis，Redis 只放一邊（或用主從） | **實務上最可行**。但要接受「Redis 那邊掛了兩座 cluster 都受影響」 |
 
 > **結論**：**在解決 session 之前，不要開 active-active。** 你會用「偶爾被登出」換到「故障時自動切換」，而前者天天發生、後者一年一次。
