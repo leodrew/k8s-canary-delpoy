@@ -742,3 +742,11 @@ Started: (not yet run)
 - Review round 1: Standards 3 hard（引用已刪字樣、未附來源的斷言、delete 沒擋在 status 後）＋smells；Spec 1（「selector 不能重疊」官方頁沒寫）。全修：改成不加引號敘述、刪掉 selector 推論、delete 用 && 串在 status 後、第二份 DR 註解改「同上」。第 2 輪未重跑 review（只剩小修，validate.sh exit 0）。
 - 未動（帳本其他列範圍）：其餘 JSESSIONID／retryOn 5xx 出現在 Part 14 等處；track-b 實際 DR 檔還沒改 epmm-affinity（track-b 未補齊，已知）。
 ---
+## 2026-11-07 - US-068
+- 修正 Part 12 的 12.12：P12-025（enough-traffic 指標 failureLimit 形同虛設 → 改成把最低樣本數併進 success-rate 的 query，加 failureCondition 空隙與 inconclusiveLimit，並說明為什麼不另開指標；註明 track-b success-rate-safe 仍有同樣問題、尚未修）、P12-026（analysis 後接 pause 無法在失敗時停下來 → 改成 Inconclusive 設計或 dryRun）。
+- 連動修改：「陷阱」小節的「解法：多加一個指標」改成併進 query（與新 yaml 一致）；刪掉推薦 success-rate-safe 的 blockquote 改為警示。
+- Part 12 結尾加 `### 參考來源`（14 個去重官方 URL），"Part 12" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（3 項判斷題：「停下來等人」引號、與 12.4 說明重複、用詞密度，未改）；Spec 無發現（P12-026 的 "or abort the rollout completely" 因 WebFetch 截斷未能逐字確認，其餘引文皆確認；"空結果→Inconclusive" 官方來源未明講，但由求值順序推得）。
+- 觀察（未改）：5916–5920、7575–7592 仍用 success-rate-safe ＋ pause: {}，屬另一列範圍。
+---
