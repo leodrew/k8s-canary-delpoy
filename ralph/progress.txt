@@ -871,3 +871,13 @@ Started: (not yet run)
 - Review: 第 1 輪 Standards 2 項軟性（格子與段落重複、「見表下說明」指標落空）、Spec 2 項小提醒（edit-last-applied 權限、連動修改需記錄）→ 全部修掉；第 2 輪無發現。
 - 觀察（不屬本故事）：15.11 的「ConfigMap 累積怎麼辦」（約 7606 行）可能是已刪 P15-030 列的對應處，留給負責的故事。
 ---
+## 2026-11-07 - US-086
+- 修正 Part 15 的 15.9（P15-033～036）：track-a 目錄樹換成 CANARY §2 的樹（10-/11- 固定檔名、補 runtime/05-）；
+  「打回 100/0」改成 controller 立刻改回、權重短暫跳動、VS 留 base/、Argo CD 設 ignoreDifferences；
+  編號表補 05-、10-～11-；apply 順序註明是 kubectl 走目錄的實作行為（P15-036 保守寫法，引文為官方 configmap 頁原句）。
+- 連動修改：編號表 `00-～09-` 改 `00-～04-`（避免與 05- 重疊）；「限制二」段的同一句錯誤說法（帳本「另 7704」）一併改掉。
+- Files: k8s-ecosystem-guide.md
+- Review: round 1 Spec 1 項（P15-034 第二處未改）、Standards 判斷題（05- 範圍重疊），均已修；round 2 無發現。
+- 觀察（未改，不屬本故事列）：15.10 仍有 `release/10-configmap-1.3.0.yaml` 與 immutable 說法；track-b 樹仍帶版本號（符合現況）。
+- Learnings: WebFetch 的 configure-pod-configmap 頁引文在 offset 100000 之後。
+---
