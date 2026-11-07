@@ -722,3 +722,9 @@ Started: (not yet run)
 - Review round 1: Standards 抓到 1 處「碰運氣」引號落空（改成不加引號的敘述）、success-rate-bg 沒交代做法（補「複製 12.4、刪 count、改名」）；Spec 全部引文在官方頁找到，唯一提醒是「不設 count」官方只明寫 0（改為引官方 count 0 原句）。Round 2：只有上述小修，由我自行對照確認（未再開 sub-agent）。
 - Learnings: 註解裡用「」引 guide 自己的字樣要先 grep 確認存在。
 ---
+## 2026-11-07 - US-065
+- P12-014: 兩處 `kubectl exec deploy/pmc-epmmformquerygui[-stable]`（12.10 與「先確認環境有沒有 Prometheus」）改成用 `-l app=pmc-epmmformquerygui` 挑 pod，並在註解說明 Track B 是 Rollout、沒有 Deployment。
+- Files: k8s-ecosystem-guide.md
+- Review: 1 輪，diff 只有 2 處，對照 track-b/release/20-rollout.yaml（app label、kind: Rollout）人工審；帳本該列無官方 URL（證據是 repo 內檔案），無發現。validate.sh exit 0。
+- 未改：istio-proxy 映像有沒有 curl 帳本註明未研究，故沒動。
+---
