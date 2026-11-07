@@ -7278,14 +7278,13 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 - **【改動】** = 編輯 YAML → commit → pipeline apply
 - **【驗證】** = 你自己下唯讀指令確認（pipeline 不需要這些）
 
-#### 四件做不到的事與對應做法
+#### 三件做不到的事與對應做法
 
 | 做不到 | 影響 | apply-only 的做法 |
 |---|---|---|
-| `kubectl scale` | 開關 canary 沒辦法用指令 | **`replicas` 寫死在 YAML**，改 replicas = 改檔案 + apply |
+| `kubectl scale` | 開關 canary 沒辦法用指令 | **開 canary＝把 `replicas` 改成 1**（改檔案 + apply）；**關 canary＝先把 `APP_CANARY_ENABLED` 設成 `false`、image 改回 stable 版本並 apply，確認排空後才把 `replicas` 改成 0**（見表下說明） |
 | `kubectl rollout undo` | 沒有一鍵回滾 | **回滾 = 把 YAML 改回上一版**，**Git 歷史就是你的回滾機制**（15.11） |
-| `kubectl delete` | 舊 ConfigMap 清不掉 | 接受累積 + 定期請有權限的人清（15.11） |
-| `kubectl argo rollouts promote` | Track B 的人工閘門推不動 | `promote` 改的是 **`status`**，apply 只能改 **`spec`** → 改用 `spec.paused`（15.12） |
+| `kubectl argo rollouts promote` | Track B 的人工閘門推不動 | 官方文件沒有寫 promote 的實作細節，也沒說 `spec.paused` 能取代 pause step；能不能改用 `spec.paused` 要先驗證（15.12） |
 
 #### 一個容易忽略的連鎖影響：replicas 與 HPA 會打架
 
@@ -7293,10 +7292,12 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 | | 寫不寫 `replicas` | 能不能接 HPA |
 |---|---|---|
-| **canary** | **一定要寫**（靠它開關 0 / 1） | **不能** |
+| **canary** | **要寫**（開＝1；關＝0，但只能在確認排空後才設 0） | **不能** |
 | **stable** | 要接 HPA 的話**省略這個欄位** | 可以 |
 
-省略 `replicas` 的話，`kubectl apply` 不會管這個欄位，HPA 設定的值就保留得住。這跟 Part 7.5 的建議一致，只是這裡多一層：**canary 因為要當開關，注定不能接 HPA**。
+省略 `replicas` 之後，`kubectl apply` 就不再把這個欄位寫回去，HPA 設定的值才保留得住。但**從「有寫」改成「省略」的那一次要小心**：官方文件提醒，移除 `spec.replicas` 可能造成一次性的 Pod 數量下降（「Keep in mind that the removal of `spec.replicas` may incur a one-time degradation of Pod counts as the default value of this key is 1」，預設值是 1）。遷移時先執行 `kubectl apply edit-last-applied deployment/<name>`，把 `last-applied` 註解裡的 `replicas` 拿掉，再 apply 省略 `replicas` 的 YAML。這跟 Part 7.5 的建議一致，只是這裡多一層：**canary 因為要當開關，注定不能接 HPA**。
+
+canary 的「關」不是單純把 `replicas` 改成 0：直接改成 0 會讓還指向 canary 的流量瞬間 503 UH，並且卡到 cookie 過期（8h），所以 `replicas: 0` 不可單獨使用，只能在確認排空後收尾（CANARY-COMPLETE.md §8.1）。
 
 ---
 
