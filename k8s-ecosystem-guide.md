@@ -7344,7 +7344,7 @@ canary-manual/
 
 | 編號 | 意義 |
 |---|---|
-| `00-` ~ `09-` | base：身分、網路 |
+| `00-` ~ `04-` | base：身分、網路 |
 | `05-` | runtime：pilot 名單 ConfigMap（`runtime/`，pilot 期間常改，不跟著發布） |
 | `10-` ~ `11-` | release：ConfigMap（`10-` stable、`11-` canary，各一份、檔名固定） |
 | `20-` ~ `29-` | release：workload（Deployment / Rollout） |
@@ -7661,7 +7661,7 @@ apply-only 沒有 `kubectl delete`，三個選項：
 
 Argo 會動態改 VirtualService：改 `primary` route 的 weight、插入與移除 `pilot-run` route。
 
-**發布途中 apply 它，會把權重打回 `100/0`，直接中斷正在進行的 canary。**
+**發布途中 apply 它，Argo Rollouts controller 會立刻把權重改回它該有的值，但權重會短暫跳動。** 若用 Argo CD 同步，要對這些欄位設 ignoreDifferences。
 
 所以：
 - VirtualService **必須**放在 `base/`
