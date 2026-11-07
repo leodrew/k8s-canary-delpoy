@@ -542,7 +542,7 @@ spec:
     - from:
         - source:
             principals:                 # 誰可以來（來自 mTLS 憑證）
-              - "cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"
+              - "cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"   # 前提：已依 Part 4 建立同名 SA；目前環境是 sa/default
       to:
         - operation:
             methods: ["GET"]
@@ -671,7 +671,7 @@ spec:
   rules:
     - from:
         - source:
-            principals: ["cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"]
+            principals: ["cluster.local/ns/ea-pmc/sa/pmc-epmmformquerygui"]   # 前提：已依 Part 4 建立同名 SA；目前環境是 sa/default
       to:
         - operation:
             methods: ["GET", "POST"]
@@ -2813,7 +2813,7 @@ spec:
 | Key | 預設 | 說明 |
 |---|---|---|
 | `schedule` | 必填 | cron 格式。也支援 `@daily` `@hourly` |
-| `timeZone` | controller 時區 | **一定要設**，否則若 controller 跑在 UTC（要向平台組確認），會跟你想的差 8 小時 |
+| `timeZone` | controller 時區 | **一定要設**，否則若 controller 跑在 UTC（見文末「需向他人確認」），會跟你想的差 8 小時 |
 | `concurrencyPolicy` | `Allow` | 資料庫同步類的一定要設 `Forbid` |
 | `startingDeadlineSeconds` | 無 | **強烈建議設定**，見踩雷 |
 | `successfulJobsHistoryLimit` | 3 | 設 0 = 跑完就刪 |
@@ -7912,7 +7912,7 @@ standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直�
 | CronJob controller 的時區是不是 UTC | 自己查 | Part 6 |
 | 實際的叢集現況：in-memory session 的影響、Spring Boot 啟動時間、有沒有 PDB／HPA、設定是不是還手動 apply | 自己查 | Part 6、Part 9、Part 11.7、Part 12 |
 | routable／non-routable 兩組 VIP 與 node 的分層（10.x／100.64.x）、routable node 的數量 | 網路組 / 平台組 | Part 10、Part 13 |
-| CD 只能 `kubectl apply` 的限制是否仍成立（決定能不能用 Track B 全自動） | CD 團隊 | Part 15 |
+| Track B 全自動是否適用本環境（CANARY-COMPLETE.md §0：CD 只能 `kubectl apply`，不能 patch／scale／delete） | CD 團隊 | Part 15 |
 | 公司 DNS 是不是 active/standby、FZ1 是否只有 CD 建的共用 Gateway、`--context` 名稱與 FZ2 VIP、16.7 表格的分工與切 zone 流程 | 網路組 / 平台組 | Part 16.1、16.5、16.6、16.7 |
 | FZ2 ingressgateway 的憑證由哪個 CA 簽發（決定路線一的 DestinationRule 要不要 `credentialName`／`caCertificates`） | 平台組 | Part 16.6 路線一 |
 | 環境有沒有開 access log（Telemetry API 或 `meshConfig.accessLogFile`）—— Part 1、8、16 的除錯步驟都假設有 | 平台組 | Part 8.2、16.4、16.5 |
