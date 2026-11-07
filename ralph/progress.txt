@@ -888,3 +888,11 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards 無發現；Spec 無發現（帳本六則引文都在 CANARY-COMPLETE.md 找到，guide 沒有懸空的「見 15.10」）。
 - Learnings: 觀察（不屬本故事）— guide 約 7386 行仍有「三處版本號改回 1.2.3」，屬 P15-044。
 ---
+## 2026-11-07 - US-088
+- 修正 Part 15 的 15.11（P15-044～047）：revert 註解與好處段落改成「ConfigMap 內容＋image tag＋config-hash 一起還原，前提同一個 commit，用 8.4 比對 hash」；
+  「舊 ConfigMap 絕對不能刪／保留 3 版」改成「舊版不必保留」＋歷史說明；prune 列補上 alpha 原文引文與 last-applied／allowlist 範圍，「不建議」不變。
+- 連動修改：「那 ConfigMap 累積怎麼辦」小節改名為「那要不要清 ConfigMap」，表格去掉「定期請有權限的人清」列（依 P15-046 累積問題已消失）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 無硬性違規（6 項判斷題：表格只剩兩列、段落密度等，未改）；Spec 無缺漏，allowlist 為「partial list」的細節屬輕微不完整，未改。
+- Learnings: Part 15 的 `### 參考來源` 與 VERIFIED_PARTS 由最後一個 Part 15 故事加入，本故事不加。
+---
