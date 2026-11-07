@@ -5586,7 +5586,9 @@ kubectl get svc -A | grep -i prometheus
 kubectl get pods -n istio-system | grep -i prometheus
 
 # 2. Istio 的指標有沒有在產生？
-kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui -c istio-proxy -- \
+# Track B 是 Rollout、沒有 Deployment，所以 deploy/<名稱> 不存在；改用 label 挑一個 pod
+POD=$(kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ea-pmc "$POD" -c istio-proxy -- \
   curl -s localhost:15020/stats/prometheus | grep istio_requests_total | head -5
 
 # 3. 有沒有裝 Argo Rollouts？
@@ -6231,7 +6233,9 @@ canary 初期只有 5% 流量。如果那 2 分鐘總共只進來 **3 個請求*
 kubectl get svc -A | grep -i prometheus
 
 # 2. Istio 的指標有沒有在產生？
-kubectl exec -n ea-pmc deploy/pmc-epmmformquerygui-stable -c istio-proxy -- \
+# Track B 是 Rollout、沒有 -stable Deployment（deploy/...-stable 只存在於 Track A）；用 label 挑一個 pod
+POD=$(kubectl get pod -n ea-pmc -l app=pmc-epmmformquerygui -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ea-pmc "$POD" -c istio-proxy -- \
   curl -s localhost:15020/stats/prometheus | grep istio_requests_total | head -3
 
 # 3. 手動跑一次 query，確認拿得到數字（把 Prometheus port-forward 出來）
