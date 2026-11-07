@@ -902,3 +902,9 @@ Started: (not yet run)
 - Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（兩個 nit：摘要比 2-3 句稍長、帳本行號已過時，皆不處理）。
 - 連動修改：無。Learnings：無新增（沒有可重用的新慣例）。
 ---
+## 2026-11-07 - US-090
+- 15.13 換成摘要＋指標（CANARY-COMPLETE.md 第 2 章、4.1、第 8 章）；P15-050/051 的錯誤說法隨舊內容移除。
+- Part 15 結尾加 ### 參考來源（取已修列的官方 URL）；"Part 15" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（4 項軟性觀察，未改）；Spec 無阻擋，指出 Traffic Management／Analysis 兩個 URL 只來自「正確」列 → 已從參考來源移除。
+---
