@@ -7383,37 +7383,31 @@ release: promote pmc-epmmformquerygui 1.3.0 to stable
 # 找出 promote 的 commit
 git log --oneline -- release/20-deployment-stable.yaml
 
-# revert 它（會把三處版本號改回 1.2.3）
+# revert 它（ConfigMap 與 Deployment 一起還原：image tag、config-hash 都回到上一版）
 git revert <commit-sha>
 git push
 ```
 
 然後重跑 pipeline apply `release/`。
 
-**revert 的好處**：它把 image 和 ConfigMap 引用**一起**改回去，不會發生「只回滾了 image、設定還是新版」的半吊子狀態。
+**revert 的好處**：ConfigMap 內容、image tag 和 `config-hash` annotation 會**一起**還原，不會發生「只回滾了 image、設定還是新版」的半吊子狀態。**前提是這幾項改動當初放在同一個 commit**（CANARY-COMPLETE.md 2.2）；拆成兩個 commit，revert 就只還原一半。revert 並 apply 之後，用 CANARY-COMPLETE.md 8.4 的做法比對 hash，確認 pod 掛的是還原後的設定。
 
-#### ⚠ 最重要的警告：舊 ConfigMap 絕對不能刪
+#### 舊版 ConfigMap 不必保留
 
-revert 之後 `20-deployment-stable.yaml` 會引用回 `pmc-epmmformquery-config-1.2.3`。
-**如果那份 ConfigMap 已經從 cluster 刪掉了，Pod 會卡在 `ContainerCreating`，而你回不去了。**
+ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 revert 之後 `20-deployment-stable.yaml` 引用的名字沒變，apply 時 ConfigMap 的 `data` 會被還原成上一版的內容。回滾不需要「找回某個舊版 ConfigMap」，也就沒有「ConfigMap 不存在、Pod 卡在 `ContainerCreating`」的問題。
 
-```
-   刪掉舊 ConfigMap  ==  毀掉回滾能力
-```
+> 歷史說明：舊做法是每個版本一份帶版本號的 ConfigMap（`pmc-epmmformquery-config-1.2.3`），回滾超過保留的版本數就會找不到檔案。名稱固定後這個問題已經消失，不需要再保留、累積舊版本。
 
-**保留數量必須 ≥ 你可能回滾的深度。** 建議至少保留 3 個版本。
+#### 那要不要清 ConfigMap
 
-#### 那 ConfigMap 累積怎麼辦
-
-apply-only 沒有 `kubectl delete`，三個選項：
+不需要累積，也就不需要定期清。唯一要注意的是別用 prune 去「順便清理」：
 
 | 做法 | 評價 |
 |---|---|
-| **接受累積**（推薦） | ConfigMap 很小（幾 KB），一年幾十個對 etcd 完全無感。**這是最安全的選項** |
-| 定期請有權限的人清 | 每季一次，保留最近 5 個版本。要有明確的「不能刪最近 3 個」規則 |
-| `kubectl apply --prune -l app=...` | **不建議**。prune 會刪掉「不在這次 apply 檔案裡、但帶有該 label」的所有資源 —— label 寫錯或檔案漏帶就會誤刪正在用的東西 |
+| 照常 apply，不清理 | ConfigMap 只有 `-stable` / `-canary` 兩份，沒有累積問題。**這是最安全的選項** |
+| `kubectl apply --prune -l app=...` | **不建議**。官方文件標示 allowlist-based pruning 仍是 alpha：「This mode has existed since kubectl v1.5 but is still in alpha due to usability, correctness and performance issues with its design.」prune 只會刪帶有 last-applied annotation、且種類在 allowlist 內的物件 —— label 寫錯或檔案漏帶，就可能誤刪正在用的東西 |
 
-> **建議直接選第一個。** 為了省幾 KB 而讓自己失去回滾能力，是很糟的交易。
+> **不要為了「清理」而冒誤刪的風險。** 名稱固定之後，沒有舊版本需要清。
 
 ---
 
