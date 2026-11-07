@@ -841,3 +841,10 @@ Started: (not yet run)
   約 7922 行屬 P15-051。另：摘要含 §4.3、§9 兩個額外指標（超出 P15-012 的 §4.1/§5/§8）。
 - Learnings: 取代整節後，其他段落對該節的描述（「15.4 / 15.5 的 SOP」）會變過時；需另開帳本列處理。
 ---
+## 2026-11-07 - US-082
+- 15.5 Track B SOP（約 120 行：前置檢查、步驟 1–6、緊急煞車）換成摘要＋指標：需要 kubectl argo rollouts、與 apply-only 不相容；track-b 沒依附錄 C 補齊；指向 CANARY-COMPLETE.md §0、§10 第 11 項；一句「日後補齊以 Argo 官方文件為準」；保留指向 15.12。
+- 註解/skip-yaml 標記：該小節沒有 skip 標記需刪。
+- Files: k8s-ecosystem-guide.md
+- Review round 1（inline，BASE=af91313）：Standards 0；Spec 0（引文在 CANARY-COMPLETE.md §10 #11 逐字存在；§0 第 41 行是「目前沒有跟上自動分流」）。無禁止操作字樣。
+- 觀察（未改，不屬 P15-021）：guide 第 7087 行「15.4 / 15.5 是有完整 kubectl 權限時的版本」、第 7347、7805 行仍提到 15.5 的 SOP；應由 15.8／15.11 對應帳本列處理。
+---
