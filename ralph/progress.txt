@@ -896,3 +896,9 @@ Started: (not yet run)
 - Review round 1：Standards 無硬性違規（6 項判斷題：表格只剩兩列、段落密度等，未改）；Spec 無缺漏，allowlist 為「partial list」的細節屬輕微不完整，未改。
 - Learnings: Part 15 的 `### 參考來源` 與 VERIFIED_PARTS 由最後一個 Part 15 故事加入，本故事不加。
 ---
+## 2026-11-07 - US-089
+- 15.12 Track B 在 apply-only 下：標題保留，內文（限制一／二、spec.paused 流程表、比較表）換成摘要＋指向 CANARY-COMPLETE.md 第 0 章、第 10 章 #11 的指標（P15-048）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（兩個 nit：摘要比 2-3 句稍長、帳本行號已過時，皆不處理）。
+- 連動修改：無。Learnings：無新增（沒有可重用的新慣例）。
+---
