@@ -934,3 +934,9 @@ Started: (not yet run)
 - Review round 1: Standards 0 hard（提醒 Envoy 引文無句號，屬片段引用，不改）；Spec 0 finding（Envoy NR 引文分兩次 fetch 對到）。無 fix commit。
 - Learnings: 無新增通用慣例。
 ---
+## 2026-11-07 - US-095
+- 文末「需向他人確認」表新增 10 列（涵蓋 30 個環境特定 ID，含 Q-001/Q-002）；原處加註：P01-004 改寫、P02-009 SA 前提（455/545/674）、P04-001 補 :8080、P04-015 curl 前提、P06-210 UTC 前提、P09-001 已修正橫幅、P10-011 F5 L4/PROXY、P11-001 CD 確認、P15-023 本環境不適用、P16-007 kubeconfig 加註。
+- Files: k8s-ecosystem-guide.md
+- Review: R1 Standards 4 judgement（jsonpath 重複等）、Spec 缺 P02-009/P10-011/P04-015 原處註與杜撰的「問誰」→全修；R2 殘留 545/674 註、UTC 問誰不一致、P15-023 列措辭→已修（R2 後的修正未再 review）。URL 引文 P04-005/P10-011 已確認。
+- Learnings: 帳本的「問誰」欄空白時，表格「問誰」寫「自己查」，不要編造團隊。
+---
