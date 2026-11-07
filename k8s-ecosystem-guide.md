@@ -6657,21 +6657,25 @@ Part 7 的權重分流 canary 有一個對「人工簽核流程」致命的缺�
    正式使用者 ─────────────────────▶ stable（舊版，權重 100）
                                        ▲
    pilot 使用者                        │  簽核通過後
-   （帶 canary=always cookie）         │  才把 canary 的 image 升為 stable
+   （BFF 依名單自動發 cookie）         │  才把 canary 的 image 升為 stable
         └─────────────────────────▶ canary（新版，權重 0）
 ```
 
 **關鍵性質：canary 的正式流量權重永遠是 0。**
+
+pilot 使用者靠 `canary=always` cookie 進 canary，而這個 cookie 不是使用者自己設的：stable pod 在**登入成功那一刻**依名單自動發放（名單的維護方式見 `canary-manual/CANARY-COMPLETE.md` §7.1）。所以持有 cookie 的人自己不一定知道自己有。
 
 這帶來三個好處：
 
 | | 權重分流 canary | **cookie 指定** |
 |---|---|---|
 | pilot 使用者保證看到新版 | **不能** | **能，100% 確定** |
-| 驗證期間對正式使用者的風險 | 有（5% 真的進新版） | **零** |
+| 驗證期間對正式使用者的風險 | 有（5% 真的進新版） | **路由風險為零；程式風險不為零**（發 cookie 的那段程式跑在 stable 的每一次登入上，見 `CANARY-COMPLETE.md` §10 #1） |
 | 使用者驗到一半被切回舊版 | 會 | 不會 |
-| canary 掛掉的影響 | 5% 使用者受影響 | **完全沒有影響** |
+| canary 掛掉的影響 | 5% 使用者受影響 | **正式使用者不受影響；但持有 cookie 的 pilot 使用者會吃 503（`response_flags=UH`）**（見表下說明） |
 | 適合人工簽核 | 不適合 | **適合** |
+
+canary 掛掉時（沒有 endpoint），帶 cookie 的請求會被 Istio 回 503，而且這些人永遠打不到 stable，app 端「清 cookie」的邏輯沒有機會執行，會一直卡到 cookie 過期（8 小時）。cookie 又是自動發的，持有者並不知道自己有。（出處：`CANARY-COMPLETE.md` §8.2）
 
 ### 14.3 命名採「固定 stable / canary」而不是版本號
 
@@ -6682,7 +6686,7 @@ Part 7.2 用的是 `v1` / `v2` 命名。那個模式的問題是**每次發布�
 | | 版本號累加（Part 7.2） | **固定 stable/canary（本節）** |
 |---|---|---|
 | Deployment 名稱 | `...-v1`、`...-v2`、`...-v3`… | 永遠是 `...-stable`、`...-canary` |
-| 每次發布要改 | Deployment + DR + VS | **只改 canary 的 image tag** |
+| 每次發布要改 | Deployment + DR + VS | **canary ConfigMap（若有差異）＋ image tag ＋ `replicas` 0→1 ＋ 跑 `sync-config-hash.sh`，全部放同一個 commit** |
 | DestinationRule | 每次要加 subset | **永遠不動** |
 | VirtualService | 每次要改 subset 名稱 | **永遠不動** |
 | 舊資源清理 | 要記得刪 | 不會累積 |
@@ -6690,7 +6694,12 @@ Part 7.2 用的是 `v1` / `v2` 命名。那個模式的問題是**每次發布�
 
 pod label 用 `version: stable` / `version: canary`：這是 Istio 的標準 label，會成為 metrics 的 `destination_version`，所以 Prometheus 查詢可以直接用它區分兩軌。
 
-**promote 的動作 = 把 stable 的 image 改成 canary 現在跑的那一版**，然後 canary 縮到 0。下次發布時 canary 再被拉起來裝更新的版本。
+**promote 不是「stable 換 image、canary 縮到 0」那麼簡單**：縮到 0 會讓還握著 cookie 的人吃 503。要分成兩個 commit：
+
+1. 把 canary ConfigMap 的 `data` 複製進 stable ConfigMap、stable 的 `image` 改成 canary 現在跑的那一版、canary 設 `APP_CANARY_ENABLED=false` 且 `replicas` **維持 1**，再跑 `sync-config-hash.sh`。
+2. 等持有 cookie 的人排空之後，才把 canary 的 `replicas` 設為 0。
+
+下次發布時 canary 再被拉起來裝更新的版本。（出處：`CANARY-COMPLETE.md` §5 步驟 4a）
 
 ### 14.4 完整 manifest
 
