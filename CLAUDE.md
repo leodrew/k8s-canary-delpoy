@@ -28,8 +28,7 @@ bash scripts/validate.sh      # 或 npm run validate
   是 Argo Rollouts 的一份 Rollout。互斥的真正原因**不是**兩個 controller 搶 pod ——
   Argo 官方："The Rollout won't try to manage existing Deployment Pods."，官方遷移流程
   反而是讓 Rollout 與 Deployment 並存。真正會壞的是：兩軌共用 `app` label，pod 會被對方的
-  Service 選進 endpoint；兩軌也共用同一條 VirtualService。所以規則不變，但別拿「搶 pod」
-  當理由去說服人（帳本 X-002）。
+  Service 選進 endpoint；兩軌也共用同一條 VirtualService。所以規則不變。
   **目前所有修正都只做在 track-a**；track-b 的 ConfigMap 還沒依附錄 C 補齊，只有
   `BOTH_TRACK_CONFIGMAPS` 那幾項回歸檢查涵蓋它。
 - **track 底下按變更頻率分三層**（CANARY-COMPLETE.md 第 2 章）：`base/`（SA、Service、
@@ -95,12 +94,13 @@ bash scripts/validate.sh      # 或 npm run validate
   建議改法、使用者確認），spec 是 `tasks/prd-k8s-guide-verification.md`；每個故事的
   `ledgerIds` 列出它負責的帳本列，只改那些列。上一個 run 封存在
   `ralph/archive/2026-10-31-canary-configmap-split/`（US-010 未完成）。
-  這個 run 的回顧在 `tasks/retro-k8s-guide-verification.md`。
-- **改 guide 的任何一個 Part 之前：** 帳本與 spec 是唯一事實依據，guide 的措辭要回到帳本
-  「原文摘錄」與官方 URL 對照，不要憑印象改。`VERIFIED_PARTS` 裡列的 Part 必須維持它的
-  `### 參考來源`（至少一個官方網域連結，來源就是帳本的 URL 欄）—— 刪掉或換成部落格連結，
-  檢查 [11] 會 FAIL；沒列進陣列的 Part 則完全沒有保護，修完一個 Part 的最後一個故事要
-  順手加進去。guide 的 yaml 區塊要能被 [10] 解析，刻意寫錯的片段用 skip-yaml 標記並寫原因。
+  這個 run 的回顧在 `tasks/retro-k8s-guide-verification.md`（換 run 時這行可刪）。
+- **改 `k8s-ecosystem-guide.md` 的任何一個 Part 之前（任何 run 都適用）：** 事實依據是
+  `tasks/guide-verification-ledger.md`（「原文摘錄」與官方 URL 欄）和
+  `tasks/prd-k8s-guide-verification.md`，措辭要回到那裡對照，不要憑印象改。
+  `VERIFIED_PARTS`（檢查 [11]，用法見下方「擴充 `scripts/validate.sh`」一節）裡列的 Part
+  必須維持它的 `### 參考來源`，來源 URL 就取自帳本的 URL 欄；刪掉或換成部落格連結都會 FAIL，
+  而 FAIL 訊息不會告訴你去哪找原來的 URL。
 
 ## 改 manifest 就要加檢查，而且要在同一個 commit
 
