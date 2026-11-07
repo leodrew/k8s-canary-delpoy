@@ -765,3 +765,11 @@ Started: (not yet run)
   podAntiAffinity、"REPLICAS 含 Pending"、"Deployment pods:" 字樣無法在被抓的頁面範圍內直接查到，來自帳本建議改法（使用者已確認）。第 2 輪僅確認修正是單行改動、validate.sh exit 0。
 - Learnings: HPA walkthrough 頁的 get hpa 表頭欄位是 TARGET（單數）。
 ---
+
+## 2026-11-07 - US-071
+- 修正 Part 14 的 14.2／14.3（P14-001..005）：圖說改「BFF 依名單自動發 cookie」並指向 CANARY-COMPLETE §7.1；風險列改「路由風險為零；程式風險不為零」；canary 掛掉改為正式使用者不受影響、cookie 持有者吃 503 UH；每次發布要改改為 ConfigMap＋image＋replicas 0→1＋sync 同 commit；promote 改兩個 commit。
+- 連動修改：表格儲存格改成一句結論＋「（見表下說明）」，細節放表下清單（patterns.md 的規矩）。
+- Files: k8s-ecosystem-guide.md
+- Review: round 1 Standards 2 項（儲存格太長、重複一句 cookie 持有者不知情）→ 已改；Spec 0 項。round 2 無發現。
+- Learnings: 帳本引的是本地 CANARY-COMPLETE.md 而非網址，直接對該檔 grep 驗證即可。
+---
