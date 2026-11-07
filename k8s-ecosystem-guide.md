@@ -5479,7 +5479,7 @@ canary 初期只有 5% 流量。如果那段時間總共只進來 3 個請求，
         - pause: {}                      # ⚠ 無 duration = 無限期等待人工 promote
                                          # 放在關閉 header route 之前：人工 pilot run 期間
                                          # header 規則還開著，pilot 使用者才能穩定打到 v2；
-                                         # 若先關掉，只剩 5% 隨機權重，正是 12.2 批評的「碰運氣」
+                                         # 若先關掉，只剩 5% 隨機權重，正是 12.2 批評的情況（測試有 90% 機率落在 v1）
         - setHeaderRoute: { name: canary-test }   # 只帶 name、不帶 match = 關閉這條 header route
 ```
 
@@ -5550,8 +5550,9 @@ spec:
       analysis:                          # 【背景分析】在 rollout 期間持續監控，
         templates:                       # 不只在特定 step 檢查
           # ⚠ 本 Part 前面那份 success-rate 有 count: 5，跑完 5 次就結束，不會持續整個 rollout。
-          #   背景分析要另寫一份「不設 count」的 AnalysisTemplate（官方：count 為 0 /
-          #   不設 = 背景分析會跑到 Rollout 結束），這裡用名稱 success-rate-bg 示意
+          #   背景分析要另寫一份拿掉 count 的 AnalysisTemplate（官方：「The `count` can have 0 as
+          #   value which means that it will run until the end of the Rollout execution」）：
+          #   複製 12.4 那份 success-rate、刪掉 count: 5、改名為 success-rate-bg 即可
           - templateName: success-rate-bg
         startingStep: 2                  # 從 0 起算：2 = 第 3 個 step，延到該 step 才開始分析
 ```
