@@ -818,3 +818,10 @@ Started: (not yet run)
 - Files: k8s-ecosystem-guide.md
 - Review round 1: Standards 無違反（重複說明為判斷題，未改）；Spec 抓到 P15-001 第二位置漏改 → fix commit 7dee46d。第 2 輪未另跑（修正僅一格、validate.sh exit 0）。
 ---
+## 2026-11-07 - US-079
+- 修正 15.3 表格 P15-005～009：ConfigMap 命名(Track A 固定 -stable/-canary)、檔案總數 9/7、權重不調、promote 指向第 5 章 4a、回滾指向 git revert/8.1/8.3。
+- 連動修改：15.3 資源清單表 ConfigMap 列 Track A 欄（同為 P15-005 的 6867 行）。
+- Files: k8s-ecosystem-guide.md
+- Review: 1 round, Standards/Spec 皆無發現（引文逐一對照 CANARY-COMPLETE.md；實數 track-a 4+4+1、track-b 7）。
+- Learnings: 帳本引用本地檔時，直接讀該檔取代 WebFetch。
+---
