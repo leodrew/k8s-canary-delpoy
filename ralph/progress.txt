@@ -750,3 +750,10 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（3 項判斷題：「停下來等人」引號、與 12.4 說明重複、用詞密度，未改）；Spec 無發現（P12-026 的 "or abort the rollout completely" 因 WebFetch 截斷未能逐字確認，其餘引文皆確認；"空結果→Inconclusive" 官方來源未明講，但由求值順序推得）。
 - 觀察（未改）：5916–5920、7575–7592 仍用 success-rate-safe ＋ pause: {}，屬另一列範圍。
 ---
+## 2026-11-07 - US-069
+- Part 13 (13.3, 13.4) fixed per ledger P13-002..P13-005 (feat commit 4503b3a; review fix follow-up).
+- Files changed: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1 (BASE=0c971cb): Spec 0 blocking (2 minor notes: "預設" for Cluster not quoted from page; not-ready example consistent with guide line 2272). Standards 0 hard; 1 judgement fixed: unquoted English paraphrase of Cluster policy replaced by the verbatim ledger quote. Not changed: repeated Cluster/Local explanation (intentional, each spot read standalone).
+- Observation (out of scope): Part 10 may still carry "一定要 routable" framing; owned by another ledger row.
+- Learnings: story may already have its feat commit when an iteration starts; use the commit before it as BASE.
+---
