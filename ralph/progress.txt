@@ -811,3 +811,10 @@ Started: (not yet run)
 - Review round 1: Standards — 圖列太擠（改成兩行各自對齊）、最後一筆來源與 `---` 之間缺空行（已補）；Spec — 所有引文在官方頁都找得到，P14-017 與 CANARY-COMPLETE.md §0 一致，僅圖排版問題（同上已修）。未改動 P14-017 以外的說法。
 - Learnings: 在 ASCII 圖加字時用 node 依顯示寬度（CJK=2）補空白，欄寬不夠就拆成兩行而不是擠在同一行。
 ---
+## 2026-11-07 - US-078
+- 修正 Part 15：15.1 table cell（ownerReference／共用 app label 與 VS 才是互斥原因）、切換風險改為引用官方並存遷移建議＋workloadRef/scaleDown；15.2 做法二標題改「未來選項，目前不支援」並加 ⚠ 說明（CANARY-COMPLETE §0／§10 #11）；promote --full 依官方「skipping analysis, pauses, and steps」限縮說法；結尾「建議」改為未來選項。
+- 連動修改：15.7「切換時最容易出錯的三件事」表第一列（P15-001 的第二個位置，帳本行號 7302），因為與 15.1 同一說法。
+- 觀察、未改：15.6 約 7503 行「Track B 的 promote --full 指標仍會跑」（非本故事 ID）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無違反（重複說明為判斷題，未改）；Spec 抓到 P15-001 第二位置漏改 → fix commit 7dee46d。第 2 輪未另跑（修正僅一格、validate.sh exit 0）。
+---
