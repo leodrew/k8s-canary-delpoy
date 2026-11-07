@@ -914,3 +914,9 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（判斷題：access log 前提在三處重複、16.4 表格第一列儲存格偏長，未改）；Spec：四列引文皆在頁面上找到，P16-006 的 filter_chain_not_found 字串不在 Envoy 頁面上（帳本建議改法明列此字串，依帳本保留）。無需修改。
 - 未改（範圍外）：16.6 之後 line ~7739 的 "Service / Endpoints"（多叢集段落，非帳本列）。
 ---
+## 2026-11-07 - US-092
+- 修正 Part 16.6：P16-009 ServiceEntry exportTo 加 istio-system；P16-010 sni 改成「明確化」並補 CA 說明；P16-011 SNI 加 stable_；P16-012 label 標在 istio-system namespace 並補 global 值與 expose-services.yaml；P16-013 第 5 點降為建議，標題改「1～4 缺一不可」（連動修改）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（判斷題：stable_ 說明、expose-services）；Spec 無發現（5 個 URL 引文皆驗證）。修了 expose-services 與 stable_ 備註。
+- Learnings: 無新增通用慣例。
+---
