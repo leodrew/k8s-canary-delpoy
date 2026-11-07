@@ -6540,9 +6540,11 @@ kubectl get node <那台 node> -o wide
 kubectl describe pod <pod> -n <ns> | tail -20
 # Events:
 #   Warning  FailedScheduling  0/12 nodes are available:
-#     3 node(s) had untolerated taint {network: routable},
+#     3 node(s) had untolerated taint(s),
 #     9 node(s) didn't match Pod's node affinity/selector.
 ```
+
+> **版本差異**：K8s v1.34 起，這則事件只印「node(s) had untolerated taint(s)」，**不再印出 taint 的 key／value**；v1.33 以前才會印成 `node(s) had untolerated taint {network: routable}`。看到新格式時，要再跑 `kubectl describe node <node>` 看 `Taints:`，才知道缺的是哪一個 toleration。
 
 **這行訊息就是答案**：`untolerated taint` = 缺 toleration；`didn't match node affinity/selector` = 那些 node 沒有你要的 label。
 
@@ -6574,11 +6576,15 @@ routable node 通常只有 2~3 台。如果同時設了：
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule      # ⚠ 硬性
+          labelSelector:                        # 少了它就不會計入任何 Pod，這條約束等於沒有作用
+            matchLabels: { app: my-app }
 ```
 
-當 replica 數超過 routable node 數量時，**多出來的 Pod 會排不上去**（因為 `DoNotSchedule` 不允許同一台放兩個以上造成傾斜）。
+`DoNotSchedule` 擋的是**不均勻**，不是「一台最多放一個」：`maxSkew: 1` 允許任兩台 node 的 Pod 數相差 1。3 台 routable node 放第 4 個 Pod，結果是 2/1/1，skew 是 1，仍然符合 `maxSkew`，**排得上去**。所以 replica 數超過 routable node 數量，本身不會讓 Pod 卡住。
 
-**修法**：在 node 稀缺的情況下改用軟性約束：
+真正會讓多出來的 Pod 排不上去的，是以 `kubernetes.io/hostname` 為 topologyKey 的 **required `podAntiAffinity`**（一台 node 只准放一個）；或是 routable node 的 CPU／memory 不夠。`topologySpreadConstraints` 要有 `labelSelector`，官方說明是「Pods that match this label selector are counted」。
+
+**修法**：如果你的目的是在 node 稀缺時還能盡量分散，改用軟性約束：
 
 ```yaml
           whenUnsatisfiable: ScheduleAnyway     # 盡量分散，但排不下就擠在一起
@@ -6588,7 +6594,7 @@ routable node 通常只有 2~3 台。如果同時設了：
 
 HPA 把 replica 從 2 拉到 10，但 routable node 只夠放 4 個 → **6 個 Pod 卡在 Pending，而 HPA 不會因此回退**。
 
-`kubectl get hpa` 會顯示 `CURRENT` 一直達不到 `DESIRED`，但沒有明顯錯誤。
+`kubectl get hpa` 沒有 `CURRENT`／`DESIRED` 欄位（欄位是 `NAME REFERENCE TARGETS MINPODS MAXPODS REPLICAS AGE`），而且 `REPLICAS` 會把 Pending 的 Pod 也算進去，所以會顯示 10，看不出卡住。要看 `kubectl get deploy` 的 `READY`（例如 `4/10`），或 `kubectl describe hpa` 裡的「Deployment pods: X current / Y desired」。
 
 **修法**：
 - 給需要 routable 的服務設一個**符合實際容量的 `maxReplicas`**
@@ -6614,6 +6620,16 @@ HPA 把 replica 從 2 拉到 10，但 routable node 只夠放 4 個 → **6 個 
 **建議：擇一使用。** 需要彈性就只用 `nodeAffinity`，簡單情況就只用 `nodeSelector`。
 
 > **延伸閱讀**：Deployment 其他排程相關設定（`podAntiAffinity`、`topologySpreadConstraints`、`priorityClassName`）見 [Part 6](#part-6六種常用-kind-詳解) 的 6.1；為什麼 ingressgateway 一定要 routable 見 [Part 10](#part-10istio-ingressgateway-與一般-service-的差別含雙-vip-架構)。
+
+### 參考來源
+
+- Kubernetes — Virtual IPs and Service Proxies：https://kubernetes.io/docs/reference/networking/virtual-ips/
+- Kubernetes — Deployments：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- Kubernetes — Taints and Tolerations：https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
+- Kubernetes — Pod Topology Spread Constraints：https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+- Kubernetes — HPA Walkthrough：https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/
+- github.com/kubernetes — taint_toleration.go（release-1.34）：https://github.com/kubernetes/kubernetes/blob/release-1.34/pkg/scheduler/framework/plugins/tainttoleration/taint_toleration.go
+
 ---
 
 ## Part 14：保留人工 pilot run 的 Canary 發布
