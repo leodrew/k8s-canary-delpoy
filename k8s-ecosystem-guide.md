@@ -7166,13 +7166,13 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 
 | 資源 | Track A | Track B |
 |---|---|---|
-| **ConfigMap** | 2 份（版本化） | 2 份（版本化） |
+| **ConfigMap** | 2 份（固定名稱 `-stable` / `-canary`） | 2 份（版本化） |
 | **workload** | **Deployment ×2**（`-stable` / `-canary`） | **Rollout ×1** |
 | **Service** | **1 個**（`-svc`） | **2 個**（`-stable` / `-canary`）+ 可選的 `-svc` |
 | **DestinationRule** | **1 份**（含 `subsets`） | **2 份**（無 `subsets`，只有 `trafficPolicy`） |
 | **VirtualService** | 1 份（你自己維護 3 條 route） | 1 份（**Argo 會改它**，你只寫 2 條 route） |
 | **AnalysisTemplate** | 不需要 | 需要（用指標判斷時） |
-| 檔案總數 | 5 | 6 |
+| 檔案總數 | 9（`base/` 4 ＋ `release/` 4 ＋ `runtime/` 1） | 7 |
 
 #### 逐欄位差異
 
@@ -7181,7 +7181,7 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | **workload kind** | `Deployment` ×2 | `Rollout` ×1 | Argo 用一份 template 產生兩組 ReplicaSet |
 | **pod label `version`** | **要寫**（`stable` / `canary`） | **不要寫** | Argo 自己用 `rollouts-pod-template-hash` 區分 |
 | **`replicas` 怎麼控制 canary** | canary Deployment 寫 `replicas: 1` | Rollout 的 `setCanaryScale: {replicas: 1}` | Track B 由 steps 控制，不是靜態欄位 |
-| **ConfigMap 命名** | 版本化（也可用 `-stable`/`-canary`） | **只能版本化** | Argo 單一 template 的架構限制（見 12.11） |
+| **ConfigMap 命名** | 固定名稱 `-stable` / `-canary`（不是選項：版本號只留在 image tag 一處，`validate.sh` 檢查 [8] 會擋版本號） | **只能版本化** | Argo 單一 template 的架構限制（見 12.11） |
 | **Service selector** | 只寫 `app`（兩軌都選中） | 只寫 `app`（Argo 動態補 hash） | Track A 靠 DR subset 分軌；Track B 靠 Service 分軌 |
 | **DR 有沒有 `subsets`** | **有**（`stable` / `canary`） | **沒有** | Track B 用兩個 Service 就分開了，不需要 subset |
 | **DR 份數** | 1（綁 `-svc`） | 2（各綁一個 Service） | DR 是綁 host 的 |
@@ -7190,9 +7190,9 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | **cookie 路由誰建** | **你自己寫在 VS 裡**（常駐） | **Argo 動態建立/移除**（`setHeaderRoute`） | Track B 只在 canary 期間存在 |
 | **VS route 要不要 `name`** | 不強制（但建議） | **`primary` 是必要的** | Argo 靠名字找到要改的 route |
 | **`managedRoutes`** | 不存在 | **必須宣告** | 沒宣告 `setHeaderRoute` 不生效 |
-| **權重誰改** | 你手動 `kubectl patch` | **Argo 自動改** | |
-| **promote 機制** | 改 stable Deployment 的 image + ConfigMap 引用 | `kubectl argo rollouts promote` | |
-| **回滾機制** | `kubectl rollout undo` / 縮 canary 到 0 | `kubectl argo rollouts abort` / `undo` | |
+| **權重誰改** | **不調權重**（正式流量的 canary 權重永遠是 0，pilot 靠 cookie 路由） | **Argo 自動改** | |
+| **promote 機制** | 改 stable 的 image，並把 canary ConfigMap 的 `data:` 複製進 stable 那份（見 `CANARY-COMPLETE.md` 第 5 章步驟 4a） | `kubectl argo rollouts promote` | |
+| **回滾機制** | `git revert`（`CANARY-COMPLETE.md` 8.4）；pilot 期間預設先 `APP_CANARY_ENABLED=false` ＋ image 改回 stable 版（8.1 第 1 張牌）。`rollout undo` 與單獨縮 canary 到 0 是禁止動作（8.3） | `kubectl argo rollouts abort` / `undo` | |
 | **失敗自動回滾** | **沒有**（要人發現) | **有**（analysis 失敗自動 abort） | |
 
 #### 同樣的部分（可以直接沿用，不用改）
