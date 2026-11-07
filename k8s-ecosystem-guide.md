@@ -6369,7 +6369,7 @@ kubectl -n istio-system port-forward svc/prometheus 9090:9090
 >
 > **ingressgateway 是否「一定要」排到 routable node，不是 K8s 的通則，要看條件：**
 >
-> - `externalTrafficPolicy: Cluster`（預設）時，K8s 官方說明是 route external traffic to all ready endpoints——VIP 落到任何一台 node，都會轉發到其他 node 上的 Pod，Pod 不一定要在 routable node。
+> - `externalTrafficPolicy: Cluster`（預設）時，K8s 官方說明："Set the field to `Cluster` to route external traffic to all ready endpoints"——VIP 落到任何一台 node，都會轉發到其他 node 上的 Pod，Pod 不一定要在 routable node。
 > - `externalTrafficPolicy: Local` 時，官方說明是 "If the traffic policy is `Local` and there are no node-local endpoints, the kube-proxy does not forward any traffic for the relevant Service."——VIP 所在的 node 上沒有 gateway Pod 就不轉發，此時 Pod 必須在 VIP 實際對外宣告的那些 node 上。
 > - 貴司 LB／CNI 若限制只能把流量送到特定網段的 node，也會讓 Pod 必須排到該網段（環境特定）。
 > - 檢查指令：`kubectl get svc -n istio-system istio-ingressgateway -o jsonpath='{.spec.externalTrafficPolicy}'`
