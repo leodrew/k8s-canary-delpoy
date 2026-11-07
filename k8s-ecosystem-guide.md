@@ -6594,7 +6594,7 @@ routable node 通常只有 2~3 台。如果同時設了：
 
 HPA 把 replica 從 2 拉到 10，但 routable node 只夠放 4 個 → **6 個 Pod 卡在 Pending，而 HPA 不會因此回退**。
 
-`kubectl get hpa` 沒有 `CURRENT`／`DESIRED` 欄位（欄位是 `NAME REFERENCE TARGETS MINPODS MAXPODS REPLICAS AGE`），而且 `REPLICAS` 會把 Pending 的 Pod 也算進去，所以會顯示 10，看不出卡住。要看 `kubectl get deploy` 的 `READY`（例如 `4/10`），或 `kubectl describe hpa` 裡的「Deployment pods: X current / Y desired」。
+`kubectl get hpa` 沒有 `CURRENT`／`DESIRED` 欄位（欄位是 `NAME REFERENCE TARGET MINPODS MAXPODS REPLICAS AGE`），而且 `REPLICAS` 會把 Pending 的 Pod 也算進去，所以會顯示 10，看不出卡住。要看 `kubectl get deploy` 的 `READY`（例如 `4/10`），或 `kubectl describe hpa` 輸出裡的 `Deployment pods: <X> current / <Y> desired` 那一行。
 
 **修法**：
 - 給需要 routable 的服務設一個**符合實際容量的 `maxReplicas`**
