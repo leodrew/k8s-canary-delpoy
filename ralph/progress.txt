@@ -908,3 +908,9 @@ Started: (not yet run)
 - Files: k8s-ecosystem-guide.md, scripts/validate.sh
 - Review round 1: Standards 無硬性違規（4 項軟性觀察，未改）；Spec 無阻擋，指出 Traffic Management／Analysis 兩個 URL 只來自「正確」列 → 已從參考來源移除。
 ---
+## 2026-11-07 - US-091
+- 修正 Part 16（16.2/16.3/16.4/16.5）：P16-002 Endpoints→EndpointSlice（圖、清單、指令、16.3 一句連動）、P16-003 範例輸出補欄位並註明節錄、P16-004 補 access log 預設不開的前提（16.2 括號、16.4 表下引言、16.5 第 4 步）、P16-006 「通常沒有 log」改為 NR + filter_chain_not_found、P16-008 加 --all-pods=true。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（判斷題：access log 前提在三處重複、16.4 表格第一列儲存格偏長，未改）；Spec：四列引文皆在頁面上找到，P16-006 的 filter_chain_not_found 字串不在 Envoy 頁面上（帳本建議改法明列此字串，依帳本保留）。無需修改。
+- 未改（範圍外）：16.6 之後 line ~7739 的 "Service / Endpoints"（多叢集段落，非帳本列）。
+---
