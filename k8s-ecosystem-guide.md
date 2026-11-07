@@ -7056,7 +7056,7 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
   ─────────────────       ─────────────────         ─────────────────
   cookie 指定 canary  →   cookie 指定 canary    →   cookie 指定 canary
   人工 pilot run          人工 pilot run             自動 smoke test
-                          + 自動 smoke test          + 指標分析
+  BFF 依名單自動發 cookie + 自動 smoke test          + 指標分析
                             （兩者比對）              失敗自動回滾
   人工 promote            人工 promote               自動 promote
 ```
@@ -7066,6 +7066,14 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 而 `pilot-run-guide.md` 裡要求驗證人員**具體寫下第 6 項測了什麼**，就是在為這一步收集素材——那些答案就是第一版自動化測試的內容。
 
 > **延伸閱讀**：權重分流的做法見 [Part 7](#part-7canary-發布與自動擴縮容)；完全自動化的做法見 [Part 12](#part-12用-argo-rollouts-取代人工-pilot-run)；本節依賴的三個前提見 [Part 9](#part-9你目前環境的具體發現) 的發現 2、3、4。
+
+### 參考來源
+
+- Istio — DestinationRule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
+- Istio — Protocol Selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+- Istio — Traffic Management 概念：https://istio.io/latest/docs/concepts/traffic-management/
+- Istio — VirtualService：https://istio.io/latest/docs/reference/config/networking/virtual-service/
+- Argo Rollouts — Migrating to Rollouts：https://argo-rollouts.readthedocs.io/en/stable/migrating/
 ---
 
 ## Part 15：兩種上版方式的完整對照與 SOP
