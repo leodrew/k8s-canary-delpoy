@@ -5309,7 +5309,8 @@ metadata:
   namespace: ea-pmc
 spec:
   args:
-    # 要量哪個 Service。由 Rollout 的 analysis step 用 args 傳入（例如 pmc-epmmformquerygui-canary）。
+    # 要量哪個 Service。沒有 default，所以 Rollout 的 analysis step 一定要傳，否則這個 template 跑不起來：
+    #   - analysis: { templates: [{ templateName: success-rate }], args: [{ name: service-name, value: pmc-epmmformquerygui-canary }] }
     # 不要寫死 destination_workload="pmc-epmmformquerygui"：Istio 對 Rollout 的 stable 與 canary
     # 兩組 ReplicaSet 回報的是同一個 workload 名，那樣量到的是兩者的合計，不是 canary。
     - name: service-name
@@ -5382,7 +5383,7 @@ canary 初期只有 5% 流量。如果那段時間總共只進來 3 個請求，
 
 三個防護：
 
-1. **把最低樣本數檢查併進同一條 query**（上面 `success-rate` 裡的 `and on() (... >= 20)`），流量不夠時 query 回傳空結果，落到 Inconclusive，而不是 Failed。不要拆成獨立的 `enough-traffic` 指標：它的 `failureLimit` 預設是 0，只要有一次樣本低於 20 就 Failed，整個 AnalysisRun 跟著 Failed（取最糟的結果），Rollout abort——跟「不下結論」相反
+1. **把最低樣本數檢查併進同一條 query**（上面 `success-rate` 裡的 `and on() (... >= 20)`），流量不夠時 query 回傳空結果，落到 Inconclusive，而不是 Failed。為什麼不拆成獨立的 `enough-traffic` 指標，見上面 query 裡的註解
 2. **`failureLimit` 不要設 0**——給它一次容錯機會
 3. **query 裡的 range（`[2m]`）拉長**（例如 `[5m]`），讓每次取樣涵蓋足夠的請求。`interval` 只決定多久測一次，不決定每次涵蓋多少請求
 
