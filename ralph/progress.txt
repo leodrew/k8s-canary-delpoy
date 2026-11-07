@@ -793,3 +793,10 @@ Started: (not yet run)
 - Review round 1: Spec — 引文皆在頁面上；多餘的「實際比例依 least request 即時負載」已刪。retryOn 清單在 virtual-service 參考頁而非帳本引的 concepts 頁（內容為真，未新增來源，依帳本）。Standards — 無硬性違規；retries 儲存格改成「不行（…）」與鄰列一致。未處理：方法 2 callout 內含 native sidecar 說明（來自帳本，保留）。
 - Learnings: 無新增通用慣例。
 ---
+
+## 2026-11-07 - US-075
+- 修正 Part 14 的 14.7（P14-012 加註 x-app-track 只證明 pod、指向 §6.4；P14-013 加註指向 §3.4）與 14.9（P14-014 流量切換、P14-015 promote 兩 commit、P14-016 兩軌互斥原因與官方建議順序）。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md
+- Review round 1: Standards 無硬性違規（4 項 judgement call，只處理行內 URL 重複：移除，改留 patterns.md 提醒）；Spec 無發現，官方兩段引文皆在頁面上。
+- 未處理的 judgement call：表格儲存格偏長、「base/03 還沒改」句子日後可能過時（帳本建議改法本身要求這句）。
+---
