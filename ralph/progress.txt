@@ -757,3 +757,11 @@ Started: (not yet run)
 - Observation (out of scope): Part 10 may still carry "一定要 routable" framing; owned by another ledger row.
 - Learnings: story may already have its feat commit when an iteration starts; use the commit before it as BASE.
 ---
+## 2026-11-07 - US-070
+- 修正 Part 13 的 13.7 踩雷：P13-006（v1.34 起事件只印 untolerated taint(s)，加版本差異說明）、P13-007（DoNotSchedule+maxSkew 擋的是不均勻、補 labelSelector、真正排不上去的是 hostname required podAntiAffinity）、P13-009（get hpa 沒有 CURRENT/DESIRED，改看 get deploy READY／describe hpa）。
+- Part 13 結尾加 ### 參考來源（6 個官方 URL）；VERIFIED_PARTS 加 "Part 13"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（describe hpa 的 X/Y 放在「」裡不逐字 → 改成反引號）；Spec 抓到 get hpa 欄位寫成 TARGETS（頁面是 TARGET）→ 已改。
+  podAntiAffinity、"REPLICAS 含 Pending"、"Deployment pods:" 字樣無法在被抓的頁面範圍內直接查到，來自帳本建議改法（使用者已確認）。第 2 輪僅確認修正是單行改動、validate.sh exit 0。
+- Learnings: HPA walkthrough 頁的 get hpa 表頭欄位是 TARGET（單數）。
+---
