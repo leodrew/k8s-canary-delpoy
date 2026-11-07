@@ -780,3 +780,10 @@ Started: (not yet run)
 - Review：未啟動平行 sub-agent；因為來源皆為本地 CANARY-COMPLETE.md，直接核對章節存在、14.4 無禁止操作字樣、diff 僅限 14.4。發現 1 項（指標漏 §4.2 套用順序），已補。
 - 觀察（不在本故事範圍，未改）：guide 其他處仍指向 14.4 的完整 manifest——Part 12 開頭「Part 14.4 給了 Track A 的完整 manifest」、14.6「14.4 的 VirtualService 裡那條 default route」、末尾延伸閱讀「Track A 的完整 manifest 見 Part 14 的 14.4」。
 ---
+## 2026-11-07 - US-073
+- 修正 Part 14 的 14.5：P14-006（前提 1 刪掉「必須在 canary subset 上加 consistentHash」，改成 repo 規定 canary 只開 1 個 replica，引 CANARY-COMPLETE.md §8.3）、P14-007（前提 2 改成「靠自動偵測，通常認得出 HTTP；偵測失敗才當純 TCP；明確宣告才可靠，appProtocol 優先於 port 名稱前綴」，逐字引官方兩句英文）。
+- Files changed: k8s-ecosystem-guide.md（2 行）
+- Review round 1: Standards 0 hard violations（5 條風格 judgement call：句子偏長等，未改）；Spec 0 findings（兩個官方 URL 的引文都 WebFetch 確認存在，appProtocol 優先於 port name 亦吻合）。
+- 未改動：14.5 結尾「這就是 Part 9 發現 4 為什麼要修」、line 5577 的「Istio 可能用 L4 處理」屬其他帳本列範圍，留給對應故事。CANARY §4.1 同樣過強的說法不在本故事範圍。
+- Learnings: 無新增通用慣例。
+---
