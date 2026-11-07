@@ -708,3 +708,9 @@ Started: (not yet run)
 - Review round 1: Standards no hard violations (quoted elision, wrong "step 3 closes cookie route" claim -> fixed); Spec: all ledger quotes verified on pages, leftover table claim -> fixed. Round 2: only minor canary-testers comment clarity -> fixed.
 - Learnings: ledger line numbers drift; grep by text. Same wrong claim often appears twice (table + paragraph).
 ---
+## 2026-11-07 - US-063
+- 修正 Part 12 / 12.4（P12-005~008）：query 改 reporter="destination" + destination_service_name（args 傳入）；enough-traffic 併進 success-rate query（and on() >= 20）；警告第 3 點改成拉長 [2m] range；Inconclusive 改為「success+failure 兩條件留空隙」並補 NaN／空陣列／consecutiveErrorLimit 說明。
+- 連動修改（同一小節一致性）：latency-p99 也加了 failureCondition／inconclusiveLimit／len(result)、selector 換成同一組；successCondition 小標題改名。
+- 未動（屬其他故事）：12.12 的 enough-traffic（P12-025）、12.6 的 analysis step 沒傳 args（success-rate 現在有必填 arg service-name，12.6／12.11 的 Rollout 範例需要在其故事補 args）。
+- Review：round 1 Standards 0 硬性、2 observation（重複說明、args 示範）已修；Spec 0 阻擋，建議補 args 傳法，已修。
+---
