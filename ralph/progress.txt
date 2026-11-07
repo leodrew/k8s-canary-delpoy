@@ -881,3 +881,10 @@ Started: (not yet run)
 - 觀察（未改，不屬本故事列）：15.10 仍有 `release/10-configmap-1.3.0.yaml` 與 immutable 說法；track-b 樹仍帶版本號（符合現況）。
 - Learnings: WebFetch 的 configure-pod-configmap 頁引文在 offset 100000 之後。
 ---
+## 2026-11-07 - US-087
+- 15.10「Track A 的 apply-only SOP」整段（約 206 行，含起始狀態、步驟 1–5b、操作對照總表）換成一句摘要＋兩點指標：主線以 CANARY-COMPLETE.md §5（步驟 0–5）為準，關閉看 §8（8.1／8.2），回滾看 8.4 與 15.11。標題保留。
+- 解決 P15-037～P15-043。摘要不含任何禁止操作字樣（連「replicas: 0」都避開，改寫成「縮到零個 replica」）。該小節沒有 validate:skip-yaml 標記。
+- Files changed: k8s-ecosystem-guide.md（只有 15.10）。沒有連動修改其他句子。
+- Review rounds: 1 輪。Standards 無發現；Spec 無發現（帳本六則引文都在 CANARY-COMPLETE.md 找到，guide 沒有懸空的「見 15.10」）。
+- Learnings: 觀察（不屬本故事）— guide 約 7386 行仍有「三處版本號改回 1.2.3」，屬 P15-044。
+---
