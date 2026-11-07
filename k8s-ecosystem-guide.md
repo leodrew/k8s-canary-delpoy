@@ -7764,12 +7764,14 @@ spec:
    FZ2 Pod 的 sidecar（mTLS 從 FZ1 ingressgateway 一路到這裡才終止）→ app
 ```
 
+（SNI 中的 `stable_` 是這個 repo 的 VS 走 `subset: stable` 的結果；沒有 subset 時該段為空的 `_`。官方只說 subset 會編進 SNI，沒有寫出字串格式，格式以實測為準。）
+
 **前提（1～4 缺一不可，全部是平台組的事）：**
 
 1. **共用 root CA** —— 兩邊 istiod 用同一張 root 簽發（`cacerts` secret），否則 FZ2 的 sidecar 不信任 FZ1 送來的憑證
 2. **istiod 讀得到對方 API server** —— `istioctl create-remote-secret` 產生的 secret，且網路上 FZ1 → FZ2 API server 要通
 3. **east-west gateway** —— 跟 ingressgateway 分開的另一組 gateway，專收跨 cluster 流量（15443）
-4. **network label** —— 每座 cluster 的 `istio-system` namespace 標 `topology.istio.io/network`（安裝時另設 `global.meshID`、`global.multiCluster.clusterName`、`global.network`），istiod 才知道「這個 Pod IP 我直接連不到，要走對方的 east-west gateway」
+4. **network label** —— 每座 cluster 的 `istio-system` namespace 標 `topology.istio.io/network`（安裝時另設 `global.meshID`、`global.multiCluster.clusterName`、`global.network`，並套 `expose-services.yaml` 讓 east-west gateway 對外開 `*.local`），istiod 才知道「這個 Pod IP 我直接連不到，要走對方的 east-west gateway」
 5. （建議，非官方前提）兩邊 istiod 版本同步升級、遵守 Istio 的版本差政策，以平台組實測為準
 
 **AP 團隊在 FZ1 要放什麼：**
