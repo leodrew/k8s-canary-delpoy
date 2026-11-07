@@ -805,3 +805,9 @@ Started: (not yet run)
 - Files: k8s-ecosystem-guide.md（只動 14.10；該區塊無 skip-yaml 標記，無連動修改）
 - Review: 1 輪。Standards／Spec 皆無發現（diff 內被禁字串只出現在刪除行；章節標題已對照 CANARY-COMPLETE.md）。
 ---
+## 2026-11-07 - US-077
+- 14.11 圖「現在」欄補上「BFF 依名單／自動發 cookie」（P14-017）；Part 14 結尾加 `### 參考來源`（5 個官方 URL，含 migrating/）；"Part 14" 加進 VERIFIED_PARTS；patterns.md 刪掉已完成的 Part 14 提醒。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh, ralph/patterns.md
+- Review round 1: Standards — 圖列太擠（改成兩行各自對齊）、最後一筆來源與 `---` 之間缺空行（已補）；Spec — 所有引文在官方頁都找得到，P14-017 與 CANARY-COMPLETE.md §0 一致，僅圖排版問題（同上已修）。未改動 P14-017 以外的說法。
+- Learnings: 在 ASCII 圖加字時用 node 依顯示寬度（CJK=2）補空白，欄寬不夠就拆成兩行而不是擠在同一行。
+---
