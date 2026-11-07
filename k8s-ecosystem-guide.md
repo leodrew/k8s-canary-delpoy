@@ -7056,8 +7056,8 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
   ─────────────────       ─────────────────         ─────────────────
   cookie 指定 canary  →   cookie 指定 canary    →   cookie 指定 canary
   人工 pilot run          人工 pilot run             自動 smoke test
-  BFF 依名單自動發 cookie + 自動 smoke test          + 指標分析
-                            （兩者比對）              失敗自動回滾
+  BFF 依名單              + 自動 smoke test          + 指標分析
+  自動發 cookie             （兩者比對）              失敗自動回滾
   人工 promote            人工 promote               自動 promote
 ```
 
