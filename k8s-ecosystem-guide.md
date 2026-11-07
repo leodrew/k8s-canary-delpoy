@@ -6188,27 +6188,46 @@ spec:
 
 canary 初期只有 5% 流量。如果那 2 分鐘總共只進來 **3 個請求**，其中 1 個是使用者自己按取消造成的 5xx —— 成功率就變成 **66%**，Rollout 會誤判失敗直接回滾，但其實根本沒問題。
 
-**解法：多加一個「請求數要夠多才算數」的指標。**
+**解法：把「請求數要夠多才算數」併進同一條 query，並讓成功與失敗兩個條件之間留一段空隙。** 流量不夠時 query 回傳空結果，落到 Inconclusive（暫停等人），而不是 Failed。
 
 ```yaml
-    # 加在上面的 metrics 陣列裡
-    - name: enough-traffic
+    # 取代上面的 success-rate 指標（同一個指標內含最低樣本數檢查）
+    - name: success-rate
       interval: 1m
       count: 5
-      successCondition: result[0] >= 20     # 2 分鐘內至少要有 20 個請求
-      failureLimit: 5                       # 故意設寬鬆：流量少不是「失敗」，
-                                            # 只是「資料不足」，不該因此回滾
+      # 成功與失敗各寫一個條件，中間留空隙（0.95 ~ 0.99）；沒有資料時也是 Inconclusive。
+      successCondition: len(result) > 0 && result[0] >= 0.99
+      failureCondition: len(result) > 0 && result[0] < 0.95
+      failureLimit: 1
+      inconclusiveLimit: 2                  # 允許 2 次 Inconclusive 量測，再多就把整個指標判 Inconclusive
       provider:
         prometheus:
           address: http://prometheus.istio-system.svc.cluster.local:9090
           query: |
-            sum(increase(istio_requests_total{
-              destination_workload="pmc-epmmformquerygui",
-              destination_workload_namespace="ea-pmc"
-            }[2m]))
+            (
+              sum(rate(istio_requests_total{
+                destination_workload="pmc-epmmformquerygui",
+                destination_workload_namespace="ea-pmc",
+                response_code!~"5.."
+              }[2m]))
+              /
+              sum(rate(istio_requests_total{
+                destination_workload="pmc-epmmformquerygui",
+                destination_workload_namespace="ea-pmc"
+              }[2m]))
+            )
+            # 最低樣本數：近 2 分鐘不到 20 個請求就整條回傳空向量（-> len(result) == 0 -> Inconclusive）。
+            and on() (
+              sum(increase(istio_requests_total{
+                destination_workload="pmc-epmmformquerygui",
+                destination_workload_namespace="ea-pmc"
+              }[2m])) >= 20
+            )
 ```
 
-> 正式環境建議直接用這個兩指標版本（`canary-manual/track-b/base/04-analysistemplate.yaml` 裡的 `success-rate-safe`），而不是單指標版。多寫 12 行，省掉很多假警報。
+**為什麼不另開一個 `enough-traffic` 指標**：一個指標的 `failureLimit` 是「這個指標容許自己失敗幾次」，超過才把該指標判 Failed；而整個 AnalysisRun 取各指標中最糟的結果。`count: 5` 搭配 `failureLimit: 5` 的指標最多只會失敗 5 次，永遠不會超過上限，等於形同虛設；它也擋不住 `success-rate` 自己失敗。若改設 `failureLimit: 0`（預設），樣本不足又會讓它 Failed、整個 Rollout abort，跟「不下結論」正好相反。指標之間沒有依附關係，所以樣本數檢查要併進同一條 query。
+
+> `canary-manual/track-b/base/04-analysistemplate.yaml` 裡的 `success-rate-safe` 目前仍是另開 `enough-traffic` 指標的寫法，有上述同樣的問題，尚未修正，不要當成正式環境的範本照抄。
 
 #### 想再加 P99 延遲的話
 
@@ -6247,7 +6266,7 @@ canary 初期只有 5% 流量。如果那 2 分鐘總共只進來 **3 個請求*
 
 **使用者端幾乎無感**，因為 canary 本來就只有 5% 流量，切回去是秒級的。
 
-想在失敗時「停下來等人」而不是自動回滾，就把 `analysis` 後面接一個 `pause: {}`——但那樣要有人隨時待命，否則 canary 會一直掛在那裡。
+analysis 一失敗，Rollout 就整個 abort，根本走不到後面的 step，所以在 `analysis` 後面接 `pause: {}` 並不能做到「失敗時停下來等人」。要停下來等人，應把指標設計成 Inconclusive（`successCondition` 與 `failureCondition` 之間留空隙，見上面的範例）；或用 `dryRun` 只收集數據、不讓結果影響 Rollout。
 
 #### 先確認環境有沒有 Prometheus
 
@@ -6269,6 +6288,25 @@ kubectl -n istio-system port-forward svc/prometheus 9090:9090
 **第 3 步很重要**：先手動確認 query 拿得到合理的數字，再放進 AnalysisTemplate。不然你會在發布時才發現 query 寫錯，而那時候 Rollout 已經卡住了。
 
 如果環境**沒有 Prometheus**，改走 12.3 的 Job-based smoke test —— 那條路線完全不依賴監控系統。
+
+### 參考來源
+
+- Argo Rollouts — Analysis & Progressive Delivery：https://argo-rollouts.readthedocs.io/en/stable/features/analysis/
+- Argo Rollouts — Prometheus provider：https://argo-rollouts.readthedocs.io/en/stable/analysis/prometheus/
+- Argo Rollouts — Notifications：https://argo-rollouts.readthedocs.io/en/stable/features/notifications/
+- Argo Rollouts — Rollout Specification：https://argo-rollouts.readthedocs.io/en/stable/features/specification/
+- Argo Rollouts — Traffic Management：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/
+- Argo Rollouts — Migrating to Rollouts：https://argo-rollouts.readthedocs.io/en/stable/migrating/
+- github.com/argoproj — analysis.go：https://github.com/argoproj/argo-rollouts/blob/master/analysis/analysis.go
+- github.com/argoproj — analysis_types.go（failureLimit）：https://github.com/argoproj/argo-rollouts/blob/master/pkg/apis/rollouts/v1alpha1/analysis_types.go
+- github.com/argoproj — validation.go：https://github.com/argoproj/argo-rollouts/blob/master/pkg/apis/rollouts/validation/validation.go
+- github.com/istio — pkg/kube/util.go：https://github.com/istio/istio/blob/master/pkg/kube/util.go
+- istio.io — Annotations 參考：https://istio.io/latest/docs/reference/config/annotations/
+- istio.io — Standard Metrics：https://istio.io/latest/docs/reference/config/metrics/
+- Prometheus — Querying basics：https://prometheus.io/docs/prometheus/latest/querying/basics/
+- Envoy — route_components.proto：https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto
+
+---
 
 ## Part 13：node 排程與 routable 網段
 
