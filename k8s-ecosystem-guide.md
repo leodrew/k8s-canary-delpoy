@@ -5890,7 +5890,9 @@ spec:
 
       trafficRouting:
         managedRoutes:
-          - name: pilot-run       # 【必要】沒宣告的話 setHeaderRoute 不生效
+          # 【必要】steps 用了 setHeaderRoute，就必須宣告它的名字。沒宣告的話不是「不生效」，
+          # 而是整個 Rollout 驗證失敗（InvalidSpec），根本不會往下推進。
+          - name: pilot-run
         istio:
           virtualService:
             name: app-routing
@@ -5994,7 +5996,10 @@ spec:
     loadBalancer:
       consistentHash:
         httpCookie:
-          name: JSESSIONID
+          # 不要用 JSESSIONID：設了 ttl 之後，請求沒帶這個 cookie 時 Envoy 會自己產生一個同名 cookie
+          # （Envoy 文件："a cookie with the TTL will be generated if the cookie is not present"），
+          # 和 Spring 的 session cookie 同名會互相覆寫，黏著反而被破壞，所以改用專屬名稱。
+          name: epmm-affinity
           ttl: 10800s
     connectionPool:
       tcp:  { maxConnections: 100, connectTimeout: 3s }
@@ -6016,7 +6021,10 @@ spec:
     loadBalancer:
       consistentHash:
         httpCookie:
-          name: JSESSIONID
+          # 不要用 JSESSIONID：設了 ttl 之後，請求沒帶這個 cookie 時 Envoy 會自己產生一個同名 cookie
+          # （Envoy 文件："a cookie with the TTL will be generated if the cookie is not present"），
+          # 和 Spring 的 session cookie 同名會互相覆寫，黏著反而被破壞，所以改用專屬名稱。
+          name: epmm-affinity
           ttl: 10800s
     connectionPool:
       tcp:  { maxConnections: 100, connectTimeout: 3s }
@@ -6067,7 +6075,8 @@ spec:
       retries:
         attempts: 3
         perTryTimeout: 4s
-        retryOn: "5xx,reset,connect-failure"
+        # 不放 5xx：Istio 的 retry 不分 HTTP method，5xx 會讓一個失敗的 POST 表單最多重送 3 次
+        retryOn: "reset,connect-failure,refused-stream"
 
     - name: default                          # catch-all 安全網
       route:
@@ -6086,17 +6095,23 @@ spec:
 ```bash
 NS=ea-pmc
 
-# ⚠ 如果原本是 Track A，必須先刪掉 Deployment，否則兩個 controller 會搶 pod
+# 先驗語法（server-side dry-run）：整個目錄一次驗完，任何一份有錯就在這裡停下，還沒動到叢集
+kubectl -n $NS apply --dry-run=server -f base/ -f release/
+
+# ⚠ 如果原本是 Track A：不要先刪 Deployment。Argo 文件說 Rollout 不會去管理既有 Deployment 的 Pod，
+# 且「a Rollout should run next to the Deployment before deleting the Deployment」，
+# 不照這個順序可能停機。所以先建 Rollout、確認健康，最後才刪舊 Deployment。
+# 兩者同時存在時 selector 不能重疊（否則兩邊都會認領同一批 Pod），不確定就改用 workloadRef + scaleDown: onsuccess。
+kubectl -n $NS apply -f base/00-serviceaccount.yaml    # 缺了它 Rollout 的 pod 建不起來（serviceAccountName）
+kubectl -n $NS apply -f release/10-configmap-1.2.3.yaml
+kubectl -n $NS apply -f base/01-services.yaml
+kubectl -n $NS apply -f base/02-destinationrule.yaml
+kubectl -n $NS apply -f base/03-virtualservice.yaml
+kubectl -n $NS apply -f base/04-analysistemplate.yaml
+kubectl -n $NS apply -f release/20-rollout.yaml        # Rollout 最後套，前面的都要先就位
+
+kubectl argo rollouts status pmc-epmmformquerygui -n $NS   # 確認健康後
 kubectl -n $NS delete deploy pmc-epmmformquerygui-stable pmc-epmmformquerygui-canary
-
-kubectl -n $NS apply -f 00-configmap.yaml
-kubectl -n $NS apply -f 02-services.yaml
-kubectl -n $NS apply -f 03-virtualservice.yaml
-kubectl -n $NS apply -f 04-destinationrule.yaml
-kubectl -n $NS apply -f 05-analysistemplate.yaml
-kubectl -n $NS apply -f 01-rollout.yaml       # Rollout 最後套，前面的都要先就位
-
-kubectl -n $NS apply --dry-run=server -f ./   # 套用前先驗語法
 ```
 
 ---
