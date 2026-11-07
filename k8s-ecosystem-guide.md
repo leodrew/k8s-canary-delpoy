@@ -6295,7 +6295,6 @@ kubectl -n istio-system port-forward svc/prometheus 9090:9090
 - Argo Rollouts — Prometheus provider：https://argo-rollouts.readthedocs.io/en/stable/analysis/prometheus/
 - Argo Rollouts — Notifications：https://argo-rollouts.readthedocs.io/en/stable/features/notifications/
 - Argo Rollouts — Rollout Specification：https://argo-rollouts.readthedocs.io/en/stable/features/specification/
-- Argo Rollouts — Traffic Management：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/
 - Argo Rollouts — Migrating to Rollouts：https://argo-rollouts.readthedocs.io/en/stable/migrating/
 - github.com/argoproj — analysis.go：https://github.com/argoproj/argo-rollouts/blob/master/analysis/analysis.go
 - github.com/argoproj — analysis_types.go（failureLimit）：https://github.com/argoproj/argo-rollouts/blob/master/pkg/apis/rollouts/v1alpha1/analysis_types.go
@@ -7435,9 +7434,7 @@ ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 re
 
 ### 參考來源
 
-- Argo Rollouts — Traffic Management：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/
 - Argo Rollouts — Istio：https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/istio/
-- Argo Rollouts — Analysis：https://argo-rollouts.readthedocs.io/en/stable/features/analysis/
 - Argo Rollouts — Specification：https://argo-rollouts.readthedocs.io/en/stable/features/specification/
 - Argo Rollouts — kubectl argo rollouts promote：https://argo-rollouts.readthedocs.io/en/stable/generated/kubectl-argo-rollouts/kubectl-argo-rollouts_promote/
 - Argo Rollouts — Migrating to Rollouts：https://argo-rollouts.readthedocs.io/en/stable/migrating/
