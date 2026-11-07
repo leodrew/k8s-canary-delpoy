@@ -6775,7 +6775,7 @@ cookie 比對是 **L7 功能**。Service 的 port 沒有 `name: http` / `appProt
 
 #### 前提 3：VirtualService 必須含 `mesh`，且 `hosts` 要包含內部 FQDN
 
-沒有 `mesh` 的話，cluster 內部呼叫會繞過整條 VirtualService，在 stable 和 canary 的 pod 之間**隨機分配**——以 stable 2 個 pod、canary 1 個 pod 計算，**約三分之一（近似值，實際比例依 least request 的即時負載而定）的內部流量會打到未經驗證的 canary**，而且這個比例不會出現在任何權重設定裡。
+沒有 `mesh` 的話，cluster 內部呼叫會繞過整條 VirtualService，在 stable 和 canary 的 pod 之間**隨機分配**——以 stable 2 個 pod、canary 1 個 pod 計算，**約三分之一（近似值）的內部流量會打到未經驗證的 canary**，而且這個比例不會出現在任何權重設定裡。
 
 **機制與完整說明見下一節 14.6**（這是本章最容易被忽略、後果也最嚴重的一項），對應 Part 9 發現 3。
 
@@ -6882,7 +6882,7 @@ spec:
 |---|:---:|
 | `route` 的 subset 選擇與 `weight` | 不行 |
 | `timeout` | 不行（退回 Istio 預設：不逾時） |
-| `retries` | VS 的 `retries` 不生效，但仍套用 Istio 預設重試（見表下說明） |
+| `retries` | 不行（但仍套用 Istio 預設重試，見表下說明） |
 | `headers`（請求/回應改寫） | 不行 |
 | `rewrite` / `redirect` | 不行 |
 | `fault`（故障注入） | 不行 |
