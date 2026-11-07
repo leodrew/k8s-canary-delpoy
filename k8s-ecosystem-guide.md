@@ -6358,18 +6358,27 @@ kubectl -n istio-system port-forward svc/prometheus 9090:9090
 
 | Workload | 需要 routable？ | 原因 |
 |---|:---:|---|
-| **istio-ingressgateway** | **一定要** | 它要綁公司可路由的 VIP，Pod 必須在那個網段的 node 上（見 Part 10） |
+| **istio-ingressgateway** | **通常要（看環境）** | 它要綁公司可路由的 VIP；是否一定要排到那個網段的 node，取決於 Service 的 `externalTrafficPolicy` 與你們 LB／CNI 的限制（見表下說明與 Part 10） |
 | 需要被公司**其他系統直接連**的服務 | 要 | 例如提供 API 給別的部門的系統呼叫 |
 | 需要**主動連外部系統**的服務 | 看情況 | 取決於出向是否經過 SNAT——要問網路組 |
-| `pmc-epmmformquerygui` 這類 GUI | **不用** | 它的流量從 ingressgateway 進來，自己不需要可路由 IP |
+| `pmc-epmmformquerygui` 這類 GUI | **看情況** | 入口流量從 ingressgateway 進來，不需要可路由 IP；但它是 BFF，啟動時與登入時都會主動連 Keycloak（discovery、token、JWKS），屬於上一類「主動連外部系統」——看 Keycloak 的位置與出向是否經過 SNAT，要問網路組 |
 | 一般後端 API（`epmm-api`） | **不用** | 只被 mesh 內部呼叫 |
 | CronJob / 批次任務 | **不用** | 除非要打公司內其他系統 |
 
-> **原則：需要「被外面直接找到」或「自己主動出去」的才需要 routable。** 躲在 ingressgateway 後面的服務都不需要——這也是用 ingressgateway 共用入口的另一個好處：**只有 gateway 要佔用稀缺的 routable node。**
+> **原則：需要「被外面直接找到」或「自己主動出去」的才需要 routable。** 躲在 ingressgateway 後面、而且自己不主動連外部系統的服務，不需要——這也是用 ingressgateway 共用入口的另一個好處：**入口這一側只有 gateway 要佔用稀缺的 routable node。**
+>
+> **ingressgateway 是否「一定要」排到 routable node，不是 K8s 的通則，要看條件：**
+>
+> - `externalTrafficPolicy: Cluster`（預設）時，K8s 官方說明是 route external traffic to all ready endpoints——VIP 落到任何一台 node，都會轉發到其他 node 上的 Pod，Pod 不一定要在 routable node。
+> - `externalTrafficPolicy: Local` 時，官方說明是 "If the traffic policy is `Local` and there are no node-local endpoints, the kube-proxy does not forward any traffic for the relevant Service."——VIP 所在的 node 上沒有 gateway Pod 就不轉發，此時 Pod 必須在 VIP 實際對外宣告的那些 node 上。
+> - 貴司 LB／CNI 若限制只能把流量送到特定網段的 node，也會讓 Pod 必須排到該網段（環境特定）。
+> - 檢查指令：`kubectl get svc -n istio-system istio-ingressgateway -o jsonpath='{.spec.externalTrafficPolicy}'`
 
 ### 13.4 完整寫法
 
 #### 基本版：nodeSelector + toleration
+
+> **注意：下面是片段，不是能直接 apply 的完整 Deployment。** 它省略了 `spec.selector`（apps/v1 的必填欄位，官方：".spec.selector is a required field that specifies a label selector"），直接 `kubectl apply` 會被拒絕。另外 ingressgateway 的 Deployment 通常由安裝工具管理，`nodeSelector` / `tolerations` 應該寫在 IstioOperator 或 Helm values 裡；直接改 Deployment，下次安裝工具重新套用時可能被蓋回去。這裡只是用 Deployment 的形狀示範這兩個欄位放在哪一層。
 
 ```yaml
 apiVersion: apps/v1
@@ -6436,15 +6445,17 @@ spec:
 | `PreferNoSchedule` | 盡量不排，但真的沒地方時還是會排（軟性） |
 | `NoExecute` | **不排新的，而且把已經在跑的驅逐掉** |
 
-搭配 `NoExecute` 時可以加 `tolerationSeconds`：
+搭配 `NoExecute` 時可以加 `tolerationSeconds`，但**它只適合 not-ready 這類暫時性的 taint**。官方說明："Pods that tolerate the taint without specifying `tolerationSeconds` in their toleration specification remain bound forever"；有指定時則 "remain bound for the specified amount of time. After that time elapses, the node lifecycle controller evicts the Pods from the node."
 
 ```yaml
-        - key: "network"
-          operator: "Equal"
-          value: "routable"
+        # 暫時性 taint 的例子（not-ready）：node 異常時容忍 300 秒，之後才驅逐
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
           effect: "NoExecute"
-          tolerationSeconds: 300     # 被打上 taint 後，還能撐 300 秒才被驅逐
+          tolerationSeconds: 300
 ```
+
+`network=routable` 是永久的專用 taint，toleration **不要**加 `tolerationSeconds`：加了等於 gateway Pod 每 300 秒就被驅逐一次。
 
 #### 管理員那一側的指令（了解即可，通常不是你做）
 
@@ -6499,15 +6510,15 @@ Part 10 講的雙 VIP 架構，**能不能成立就取決於這一節**：
         │  selector: istio=ingressgateway
         ▼
   ingressgateway Pod
-        │  ⚠ 這個 Pod 必須跑在 routable 網段的 node 上，
-        │    VIP 的流量才到得了它
+        │  ⚠ 在 Local／LB 有網段限制的環境，這個 Pod 必須跑在
+        │    routable 網段的 node 上，VIP 的流量才到得了它
         ▼
   nodeSelector: network=routable  +  toleration
         ▼
   routable node（IP 10.x.x.x）
 ```
 
-如果 gateway Pod 被排到 non-routable 的 node 上，**Service 拿得到 VIP，但流量進不來**——症狀是 external IP 有值、endpoint 也有值，但從外面 curl 就是 timeout。這種問題非常難查，因為所有 K8s 物件看起來都正常。
+如果 gateway Pod 被排到 non-routable 的 node 上，**在 `externalTrafficPolicy: Local`（或貴司 LB／CNI 有網段限制）的環境下，Service 拿得到 VIP，但流量進不來**（`Cluster` 時 VIP 會把流量轉發到其他 node 上的 Pod，不會有這個症狀）——症狀是 external IP 有值、endpoint 也有值，但從外面 curl 就是 timeout。這種問題非常難查，因為所有 K8s 物件看起來都正常。
 
 **驗證 gateway Pod 排在對的地方：**
 
