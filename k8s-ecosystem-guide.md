@@ -7413,65 +7413,12 @@ ConfigMap 名稱固定為 `-stable` / `-canary`（不帶版本號），所以 re
 
 ### 15.12 Track B 在 apply-only 下的限制與解法
 
-#### 限制一：`promote` 碰不到（這是硬限制）
+**這一節不再保留完整的 Track B 操作步驟**，因為副本會跟 `canary-manual/CANARY-COMPLETE.md` 分歧；apply-only 環境的結論以該文件第 0 章（適用範圍：CD 只能 `kubectl apply`）與第 10 章 #11（Track B 沒有跟上）為準。
 
-```
-  kubectl argo rollouts promote  →  改的是 Rollout 的 status.pauseConditions
-  kubectl apply                  →  只能改 spec
-```
-
-**`status` 是 subresource，`apply` 送不進去。** 所以 `steps` 裡的 `pause: {}` 在 apply-only 環境下**推不動** —— rollout 會永遠卡在那一步。
-
-#### 可行解法：改用 `spec.paused`
-
-`spec.paused` 是 **spec 欄位**，apply 改得到：
-
-```diff
- spec:
-   replicas: 2
--  paused: false
-+  paused: true          # 暫停，等人驗證
-```
-
-流程變成：
-
-| 階段 | 改什麼 | apply 後的效果 |
-|---|---|---|
-| 1. 發布 | image + ConfigMap 三處，`paused: true` | Rollout 起 canary 但暫停 |
-| 2. 驗證 | 不改任何東西 | pilot run |
-| 3. 推進 | `paused: true` → `false` | 繼續走完剩下的 steps |
-| 4. 中止 | 把三處版本號 revert 回舊版 | Argo 視為新的一次 rollout，回到舊版 |
-
-而且 `steps` 裡**不要**放 `pause: {}`（那個推不動），改成只有 `analysis` 與 `setWeight`。
-
-> **⚠ 這一段必須先在你們環境驗證。**
-> `spec.paused` 與 canary `steps` 的互動細節（暫停時機、跟 `setCanaryScale` 的先後、resume 之後從哪一步繼續）我無法替你保證。
-> **驗證方式**：在測試環境跑一次完整流程，用 `kubectl -n ea-pmc get rollout pmc-epmmformquerygui -o yaml` 觀察 `status.currentStepIndex` 的變化，確認暫停與繼續的行為符合預期，再用到正式環境。
-
-#### 限制二：VirtualService 不能進 release 流程
-
-Argo 會動態改 VirtualService：改 `primary` route 的 weight、插入與移除 `pilot-run` route。
-
-**發布途中 apply 它，Argo Rollouts controller 會立刻把權重改回它該有的值，但權重會短暫跳動。** 若用 Argo CD 同步，要對這些欄位設 ignoreDifferences。
-
-所以：
-- VirtualService **必須**放在 `base/`
-- release stage 的檔案清單**絕不能**包含它
-- 用 Argo CD 的話，要設定忽略該資源 weight 欄位的差異
-
-#### 結論：apply-only 環境下 Track A 明顯更適合
-
-| | Track A | Track B |
-|---|---|---|
-| 權重誰控制 | **你的 YAML** | Argo（會跟 apply 打架） |
-| replicas 誰控制 | **你的 YAML** | Argo 的 `setCanaryScale` |
-| 人工閘門怎麼推 | **改 `replicas` 就好** | 只能靠 `spec.paused`（需驗證） |
-| 回滾 | **git revert** | git revert（但要小心 Argo 的狀態機） |
-| 有沒有 controller 跟你搶 | **沒有** | 有 |
-
-**在只能 apply 的環境，Track A 的每一個控制點都在你自己的 YAML 裡，沒有第二個 controller 跟你搶控制權。** 這是決定性的優勢。
-
-**建議**：apply-only 就用 Track A。等到 pipeline 能跑指令了（或導入 Argo CD 的 UI promote）再考慮 Track B。
+- `promote` 需要 CLI：人工閘門要靠 `kubectl argo rollouts promote` 推進，這在只能 `kubectl apply` 的環境做不到。
+- apply-only 下唯一的替代方案是改用 `spec.paused`，但這**沒有驗證過**，要先在測試環境確認行為。
+- VirtualService 必須放在 `base/`，不能進 release 流程，否則會跟 Argo Rollouts controller 打架。
+- 結論：apply-only 環境用 Track A（與 CANARY-COMPLETE.md 第 0 章一致）。
 
 ---
 
