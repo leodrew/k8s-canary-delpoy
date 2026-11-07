@@ -7195,10 +7195,10 @@ cookie header 的格式是 `a=1; b=2; c=3`，所以要比對「字串開頭或�
 | **回滾機制** | `git revert`（`CANARY-COMPLETE.md` 8.4）；pilot 期間預設先 `APP_CANARY_ENABLED=false` ＋ image 改回 stable 版（8.1 第 1 張牌）。`rollout undo` 與單獨縮 canary 到 0 是禁止動作（8.3） | `kubectl argo rollouts abort` / `undo` | |
 | **失敗自動回滾** | **沒有**（要人發現) | **有**（analysis 失敗自動 abort） | |
 
-#### 同樣的部分（可以直接沿用，不用改）
+#### 兩個 track 共通的部分（有些可以沿用，ConfigMap 與 pod template 不行）
 
 - **ConfigMap 的內容**：**不能**直接複製。Track B 的 `20-rollout.yaml` 沒有 `APP_TRACK` / `APP_CANARY_ENABLED` / 名單掛載，`10-configmap` 也還沒依附錄 C 補齊（`CANARY-COMPLETE.md` §10 #11）；而且 Track B 的 Rollout 仍是 `SPRING_CONFIG_ADDITIONAL_LOCATION`（merge），Track A 的 Deployment 是 `SPRING_CONFIG_LOCATION`（replace），整段複製會把兩種語意搞混
-- **pod template 的內容**：probe、resources、securityContext、preStop、volumes 的**寫法**可以參考 Track A，但不是整段複製 —— 上一條說的 env（`APP_TRACK`、`APP_CANARY_ENABLED`、`SPRING_CONFIG_*`）與名單掛載在 Track B 要自己補
+- **pod template 的內容**：probe、resources、securityContext、preStop、volumes 的**寫法**可以參考 Track A，但不是整段複製 —— 上一條列的 env 與名單掛載在 Track B 要自己補
 - **ServiceAccount**：同一個
 - **Secret**：同一個
 - **cookie 的名稱與 regex**：`canary=always` 與 `^(.*;\\s*)?canary=always(\\s*;.*)?$`
