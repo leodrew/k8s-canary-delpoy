@@ -487,16 +487,17 @@ meshConfig:
 | 身分長怎樣 | 憑證的 CN 當 username、O 當 group | SPIFFE 身分，對應 ServiceAccount（`spiffe://cluster.local/ns/<ns>/sa/<sa>`） |
 | 誰在管 | 平台組 | 你，用 PeerAuthentication |
 
-兩套互不相干：改 PeerAuthentication 不會動到控制面憑證，控制面憑證過期也不會影響 mesh 內的 mTLS。
+兩套互不相干：憑證由不同的 CA 簽、用在不同的連線上；你用 PeerAuthentication 管的只有右邊那一套。
 
 - 控制面那套（Kubernetes：「Kubernetes requires PKI certificates for authentication over TLS.」）：每個 kubelet、每個 API server、scheduler 各有 client 憑證，用來向 API server 或 etcd 證明自己（Kubernetes：「Client certificates for each kubelet, used to authenticate to the API server as a client of the Kubernetes API」）。
-- apiserver 怎麼從憑證取身分（Kubernetes：「Kubernetes determines the username from the `commonName` field in the _subject_ of the certificate (for example, `commonName=bob` represents a user with username "bob").」；群組則是「Client certificates can also indicate a user's group memberships using the certificate's organization fields.」）。這跟 Part 3「K8s RBAC 版」判斷 403 時看到的 user／group 是同一套。
+- apiserver 怎麼從憑證取 username（Kubernetes：「Kubernetes determines the username from the `commonName` field in the _subject_ of the certificate (for example, `commonName=bob` represents a user with username "bob").」）。
+- 群組則看憑證的 organization 欄位，也就是表中的 O（Kubernetes：「Client certificates can also indicate a user's group memberships using the certificate's organization fields.」）。這跟 Part 3「K8s RBAC 版」判斷 403 時看到的 user／group 是同一套。
 
 **握手五步驟**（以 pmc GUI 打 epmm-api 為例；Istio：「Istio re-routes the outbound traffic from a client to the client's local sidecar Envoy.」）：
 
 1. pmc GUI 的 app 照常發出請求，Istio 把這個 outbound 流量導到 pmc GUI Pod 內的本機 sidecar Envoy。
 2. pmc GUI 的 Envoy 與 epmm-api 的 Envoy 做 mTLS 握手（Istio：「The client side Envoy starts a mutual TLS handshake with the server side Envoy.」），雙方出示憑證。
-3. client 端 Envoy 做 secure naming 檢查：確認對方憑證裡的身分，確實是 epmm-api 這個 Service 該有的 ServiceAccount。
+3. secure naming 檢查（官方把它算在握手裡，這裡拆出來是為了看清楚在查什麼）：client 端 Envoy確認對方憑證裡的身分，確實是 epmm-api 這個 Service 該有的 ServiceAccount。
 4. 檢查通過，連線建立。
 5. epmm-api 的 Envoy 做授權（Istio：「The server side Envoy authorizes the request.」），通過才轉給 epmm-api 的 app。
 
