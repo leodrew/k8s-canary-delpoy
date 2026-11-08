@@ -1,0 +1,948 @@
+# Ralph Progress Log
+Started: (not yet run)
+---
+
+> Codebase Patterns 已移到 ralph/patterns.md（2026-11-01）。本檔只是給人看的歷史紀錄，代理不讀；
+> 只在重試某個故事時 grep 該故事的條目。值得傳下去的 learning 要寫進 patterns.md，不是這裡。
+
+---
+
+## 2026-10-31 - US-001（passes 仍為 false：第 2 輪 review 留下 1 項，見 prd.json notes）
+- 實作：scripts/validate.sh 新增
+  - [10] guide-yaml：用 require("js-yaml") 的 loadAll 解析 k8s-ecosystem-guide.md 每個 ```yaml／```yml
+    區塊（整份 guide 一項 check，失敗時每個壞區塊各印起始行號＋原因＋錯誤所在行）。
+    `<!-- validate:skip-yaml 原因 -->` 放在 fence 緊鄰前一行就略過；原因空白 FAIL、標記後面不是
+    yaml fence FAIL、fence 沒關 FAIL、一個 yaml 區塊都沒找到也 FAIL（防永遠綠燈）。
+  - [11] guide-sources：VERIFIED_PARTS=()（初始為空）每個 "Part N" 的 `## Part N` 區段裡要有
+    `### 參考來源`，且至少一個官方網域白名單連結（github 只認 kubernetes/istio/argoproj/envoyproxy 組織；
+    網域比對「相同或子網域」）。
+  - 兩者共用 GUIDE_FENCE_JS（OPEN/CLOSE fence 判定），接在兩段 node 腳本前面。
+- guide 原本解析失敗的 6 個區塊：203（selector A/B）、995（principals 錯/對）、6684（regex 錯/對）、
+  7407（stable/canary 兩檔）拆成兩塊；1227 的 `...` 改成 `# ...（其餘欄位不變）` 註解讓它能解析；
+  3695 的 preStop 片段（從 Deployment 截出、縮排不能獨立成立）加 skip 標記並寫原因。
+- CLAUDE.md「擴充 scripts/validate.sh 的既有工具」補上 skip-yaml 標記與 VERIFIED_PARTS 兩條。
+- Files: scripts/validate.sh, k8s-ecosystem-guide.md, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- 反向測試（每項都先確認改動真的寫進檔案，測完 cmp 確認還原）：
+  (a) 把 207 行 `    app:` 縮排改成兩格 → FAIL「第 203 行的 ```yaml 區塊解析失敗：bad indentation…（錯誤在檔案第 208 行）」
+  (b) 在 203 行前加 `<!-- validate:skip-yaml -->` → FAIL「skip-yaml 標記沒有寫原因」；
+      標記與 fence 中間隔一行空行 → FAIL「標記的下一行不是 yaml fence」；
+      刪掉 preStop 片段的 skip 標記 → FAIL（第 3699 行區塊解析失敗）
+  (c) VERIFIED_PARTS=("Part 0") → FAIL「Part 0（第 33–283 行）裡沒有 "### 參考來源" 小節」
+  另測 [11]：只有 medium.com＋evil-kubernetes.io → FAIL；github.com/someuser、raw…/foo → FAIL；
+  kubernetes.io → PASS；github.com/istio/… → PASS；來源只放在 Part 10、登記 Part 1 → FAIL（不會誤對到 Part 10）；
+  裸寫 `https://kubernetes.io。` → PASS（review 修正後）；```yaml title="x" 的壞區塊 → FAIL（review 修正後）。
+  全部還原，validate.sh exit 0（127 項）。
+- Review round 1（BASE a8304e4）：
+  - Standards：無硬性違規。2 個 bug —— fence regex 不接受 info string（```yaml title=x 讓整份文件區塊裡／外顛倒、
+    壞 YAML 無聲漏檢）、裸 URL 後接全形標點（。，）會被吃進 hostname 而誤判；judgement call —— [10]/[11] 各寫一套
+    fence 判定且已分歧（Duplicated Code）；Part 區段邊界的說明在腳本註解與 CLAUDE.md 不一致。
+  - Spec：全部驗收條件達成；1227 改 `# ...` 符合「skip 只給縮排不能獨立的片段」的意圖。
+  - 修正（fix: US-001 - address review）：抽出共用 GUIDE_FENCE_JS、OPEN 允許 info string、URL 排除全形標點、對齊說明。
+- Review round 2：
+  - Spec：無發現。
+  - Standards：1 項未處理 —— [10] 偵測不到 blockquote 裡的 fence（`> ```yaml`），guide 第 4571 行附近
+    Argo Rollouts「前置條件」VS 片段因此不受保護。另一項低優先：`https://kubernetes.io.`（ASCII 句點）假 FAIL。
+  - 已達兩輪上限，依 ralph/CLAUDE.md 寫進 prd.json notes，passes 維持 false，交人工判斷。
+- **Learnings for future iterations:**
+  - guide 有 fence 長在 blockquote（`> ```yaml`）與清單縮排底下的情況；掃 markdown 時「fence 長什麼樣」要先
+    盤點一次（grep '```' 看前綴），不要假設都在行首。
+  - 掃 markdown 的多個檢查要共用同一組 fence 判定，否則同一行在不同檢查眼中一個在區塊裡、一個在區塊外。
+  - 中文段落裡的裸 URL 後面常接全形標點，URL 字元類別要排除它們。
+  - 拆「錯／對」並列的區塊時，每個區塊的註解要跟著留在對的那一塊（`# 錯的寫法` 在上、`# ✅` 在下），只在中間
+    插 ``` ＋空行＋```yaml，內容一字不動。
+---
+
+## 2026-10-31 - US-001 第三次嘗試（passes 仍為 false：第 2 輪 Standards 留下非無聲的項目，見 prd.json notes）
+- BASE 沿用 a8304e4（本故事第一個改動之前）。
+- 17bf27d（fix）：處理前次 notes。
+  - GUIDE_FENCE_JS 改成 splitQuote／fenceOpen／fenceClose／fenceBody：先剝 `>` 前綴（記層數）再套 OPEN／CLOSE，
+    區塊內容剝掉同樣層數的 `>` 與 fence 縮排；blockquote 在結尾 ``` 之前斷掉 → [10] FAIL、[11] 視為區塊結束。
+  - [11] URL 結尾的 ASCII 句讀（. , ; : ! ?）剝掉，`https://kubernetes.io.` 不再假 FAIL。
+- Review round 1：
+  - Standards：blockquote 內的 skip 標記（`> <!-- ... -->`）認不得；~~~／```` fence 無聲漏檢（潛在）；
+    [11] 會算 <!-- --> 註解與 code fence 裡的連結（假 PASS）；fenceBody 重複 `>` regex（Duplicated Code）。
+  - Spec：無發現（notes 兩項確認已修）；另提 4581 行的連帶錯誤訊息屬雜訊、可選。
+  - 修正 18078fa：標記先 splitQuote 再比對；UNSUPPORTED_FENCE（~~~／````）→ FAIL；[11] 只收 fence 外、
+    註解外的連結；fenceBody 重用 splitQuote(l, depth)。
+- Review round 2：Spec 無發現。Standards 無無聲漏檢，但留下：行內程式碼 ```` ```yaml ```` 開頭的散文會假 FAIL、
+  長度 ≥4 的結尾 fence 不被認得（錯誤位置不對）、兩份 fence walk（判斷題）、全部區塊壞掉時多印一行誤導訊息。
+  已達兩輪上限 → 寫進 notes，passes 維持 false。
+- 反向測試（全部在備份上做、cp 還原、cmp 確認）：
+  - [10] blockquote 區塊 4574 行縮排改壞 → FAIL（第 4571 行區塊解析失敗，錯誤在 4574 行）；
+    4576 行拿掉 `>` → FAIL（blockquote 斷掉）；一般區塊 207 行改壞 → FAIL（回歸）。
+  - `> <!-- validate:skip-yaml 測試用 -->` ＋ 改壞的 blockquote 區塊 → PASS（略過）；原因空白 → FAIL。
+  - `~~~yaml` 與 ````yaml 區塊 → FAIL。（第一次插在 100 行時 PASS —— 那行在 ASCII 圖的 fence 裡，內容本來就不該被當 fence；
+    換到散文位置才是有效的測試。）
+  - [11]（暫時 VERIFIED_PARTS=("Part 0") ＋ 插入 ### 參考來源）：`https://kubernetes.io/docs/concepts/. For more.` → PASS；
+    medium.com. ＋ evil-kubernetes.io. → FAIL；官方連結只在單行／多行 <!-- --> 或 bash fence 裡 → FAIL；可見的官方連結 → PASS。
+  - validate.sh exit 0（127 項）。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/progress.txt, ralph/prd.json
+- **Learnings for future iterations:**
+  - 反向測插入內容前，先確認插入點不在既有 fence 裡（這份 guide 開頭就有大段 ASCII 圖的 fence），否則「該 FAIL 卻 PASS」
+    看起來像檢查壞了，其實是測錯位置。用 `## Part N` 標題的前一行當插入點比較保險。
+  - 傳給 `node -e` 的參數以 `-` 開頭會被 node 當成選項吃掉（`bad option`）；測試字串用 `*` 當清單符號。
+  - 在 heredoc 寫的 node 改寫腳本裡用 template literal 帶 `\n`／`\s`，跳脫層數會出乎意料（實際寫進檔案的是真換行與 `s`）；
+    改完一定 grep 一下結果，或直接用 Edit 工具。
+---
+
+## 2026-10-31 - US-001 第四次嘗試（passes 仍為 false：第 2 輪的發現在輪數上限之後才修，待人工確認）
+- BASE 沿用 a8304e4。
+- 612fc39（fix，前一個 iteration）：處理第三次嘗試的 notes —— fence 照 CommonMark 認（``` 以上／~~~、結尾同字元
+  且長度不短於開頭、info string 不含反引號），移除 UNSUPPORTED_FENCE；[10]／[11] 共用 fenceBlocks；
+  「找不到 yaml 區塊」改以 yamlBlocks 判斷。
+- 6792957（fix）：前一個 iteration 在 commit 前中斷，fenceBody 的「非空白行縮排比 fence 淺 → 區塊斷掉」
+  以未 commit 的狀態留在工作目錄（第 1 輪 review 紀錄沒有留下）。本 iteration 驗證後 commit：
+  反向測 —— 散文後插入 4 格縮排的 ```yaml ＋ 頂格的壞 ```yaml → FAIL（指出第 289 行斷點＋解析錯誤）；
+  清單項目底下正確縮排的 fence → PASS。
+- Review round 2：
+  - Spec：無發現（US-001 ledgerIds 為空，沒有來源 URL 要 WebFetch；全部驗收條件達成）。
+  - Standards：前次 (1)–(4) 實測確認已修。新發現 1 項無聲 PASS —— CLOSE 接受任意縮排的結尾 fence，yaml 區塊
+    內容裡更深縮排的 ```（`|` 字串夾 markdown）讓區塊提早結束、下一個 ```yaml 被吞掉不解析。
+    判斷題：「縮排比 fence 淺就斷」對兩種罕見合法 markdown 會大聲 FAIL（未修）。
+  - e34f851（fix）：結尾 fence 縮排 ≤ 開頭＋3。反向測：reviewer 的情境由 PASS 變成 FAIL（第 293 行 bad indentation），
+    還原後 validate.sh exit 0（127 項）。
+  - 已達兩輪上限，e34f851 沒有再 review → passes 維持 false，寫進 notes 交人工確認。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 在 bash 的 node -e '...' 裡寫含 \s 的 regex 字串做取代，跳脫會被吃掉（實際比對的是 `s*`）；改 validate.sh 的
+    JS 片段直接用 Edit 工具。
+  - GUIDE_FENCE_JS 包在 bash 單引號裡，在裡面加註解時不能出現 ASCII 單引號。
+  - 掃 markdown 的 fence 時，開頭與結尾的縮排都有上限（CommonMark：相對容器 ≤3 格）；只管開頭會留下
+    「內容裡縮排的 ``` 被當結尾」的無聲漏檢。
+---
+
+## 2026-10-31 - US-001 第五次嘗試（完成，passes: true）
+- 前次 notes 要求人工確認 e34f851（第 2 輪上限之後才修、沒有 review）。本 iteration 改以 6792957 為 fixed point，
+  只 review e34f851 之後的改動，不重開整個故事 —— 每次從 a8304e4 全量 review 都會挖出新的邊界情況，故事收斂不了。
+- Review round 1：
+  - Spec：無發現（US-001 ledgerIds 為空，沒有來源 URL 要 WebFetch）。
+  - Standards：1 項無聲 PASS —— fenceClose 用 m[1].length 量縮排，tab 只算 1；yaml 區塊內容裡 `\t```` 會被當
+    結尾，後面的 ```yaml 被吞掉不解析。另 1 項措辭：註解說「開頭的縮排就是清單項目的內容欄」不精確。
+  - 0871fd5（fix）：新增 indentCols（tab 展開到下一個 4 的倍數），fenceClose 與 fenceBody 都改用它；註解改正；
+    CLAUDE.md「3 格」→「3 欄」並註明 tab 算法。反向測：在 guide 尾端暫時加
+    ```yaml / x: | / \t``` / ``` / ```yaml / bad: [ / ``` —— 修前 PASS guide-yaml（無聲漏檢），修後 FAIL 並同時
+    指出兩個區塊（第 2 個是 `bad: [` 的 flow collection 錯誤，證明被吞的區塊現在有被解析）；還原後 exit 0（127 項）。
+- Review round 2：
+  - Spec：無程式發現；指出 notes 沒提到 0871fd5（本次 chore 已補）。
+  - Standards：無硬性發現、無無聲 PASS。判斷題（不修、記在 notes）：fenceBody 剝縮排仍是字串前綴（tab／空格混用時
+    大聲 FAIL）；註解「格」vs CLAUDE.md「欄」；indentCols(open.indent) 每行重算。
+- Files: scripts/validate.sh, CLAUDE.md, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 量 markdown 縮排要算「欄」不是字元數（tab = 到下一個 4 的倍數）；只用 .length 的比較對 tab 會留無聲漏檢。
+  - 前一個 iteration 在輪數上限後才修的東西，下一個 iteration 用「那次修正之前」的 commit 當 fixed point 只 review
+    那一段即可；不要每次從故事起點全量重審，否則 review 永遠找得到新的邊界情況、故事收斂不了。
+  - 第 2 輪只剩「大聲 FAIL」的判斷題時就收，不要在上限之後再改 —— 改了就又是一段沒 review 的程式。
+---
+
+## 2026-10-31 - US-002（passes 仍為 false：第 2 輪 review 有發現，已修但未經第 3 輪 review，見 prd.json notes）
+- 實作（BASE 8642a38；commits 338d734 feat、2b42251 fix、f455ca8 fix）：k8s-ecosystem-guide.md Part 0
+  - P00-001：「K8s 原生只有 Service → Pod」改成「只用核心 Service 時」；補 Ingress／Gateway API add-on 支援權重分流，
+    身分、mTLS、L7 授權仍靠 mesh；replica 硬湊改成「官方 canary 範例 stable 3、canary 1 湊出 3:1」。
+  - P00-002：加 blockquote「本文只講 sidecar 模式」＋ ambient（per-node ztunnel，Rust；選用 waypoint，Envoy；可共存）；
+    元件表 Istio 列加「sidecar 模式下」限定。
+  - P00-011：「所有 Istio 設定對它都無效」改成兩邊分開講：自己的 inbound 政策（AuthorizationPolicy／PeerAuthentication）失效，
+    client 端 VS/DR 照樣生效；補 Pod label sidecar.istio.io/inject 與優先序。
+  - P00-014：istiod 只從自己 cluster（config cluster）讀 Istio 設定；multicluster 有 remote secret 時還讀他 cluster 的 Service/Endpoints。
+- 連動修改（為了前後一致）：「所以你會看到兩套系統疊在一起」那句搬回 sidecar/CRD 句後面（ambient 說明插進來後它的「所以」失去指涉）；
+  P00-011 那段加了「namespace 或 Pod 任一邊明確設成 disabled／"false" 就不注入」—— 帳本建議改法沒寫，但 P03-008 寫了且註明「與 P00-011 一致」，
+  來源同一頁（sidecar-injection 的 rule 1）。
+- Files: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：5 個 URL 全部 WebFetch，所有來源引文都找得到。1 項錯誤 —— 我把「istio-injection 優先」寫成「namespace label 與 Pod label 同時存在時」，
+    但原文是「istio-injection 與 istio.io/rev 同時在同一個 namespace 上」；namespace enabled ＋ Pod "false" 其實不注入，正好相反。
+    另 1 項 minor：gateway 頁只說 traffic weighting，沒有說 HTTPRoute。
+  - Standards：無硬性違規；judgement —— 「所以」句失去指涉、「那個 label」指涉不清、括號列的能力與下方清單不對應、ambient 組成重複兩次。
+  - 修正（2b42251）：優先序限定在同一 namespace、加 disabled 否決；「那個 label」寫明；「所以」句搬回；HTTPRoute 改「支援依權重分流」；表格去重。
+- Review round 2：
+  - Spec：引文全部找到；P00-011 三條規則逐條對過一致；minor —— 括號改成「加密、可觀測性」偏離帳本「身分、mTLS、L7 授權」；nit：Pod 層級 istio.io/rev。
+  - Standards：無硬性違規；引號引用「資料面＝所有 Envoy」在 guide 找不到；P00-011 括號重複主句。
+  - 修正（f455ca8）三項都改了，但已達兩輪上限，未再 review → passes 維持 false，寫進 notes。
+- 帳本外的觀察（沒改）：P00-011 下面的 `kubectl get ns ea-pmc --show-labels` 只看得到 namespace label，看不到 Pod 層級的
+  sidecar.istio.io/inject／istio.io/rev；若要補指令需另開帳本列。
+- **Learnings for future iterations:**
+  - 帳本「建議改法」措辭含糊時（如「兩種 label 同時存在時 istio-injection 優先」），回到官方頁看原句的限定範圍再寫 —— 本輪第 1 輪 Spec 就抓到寫反。
+  - 為了讓 review A 軸滿意而改措辭時，要回頭對照帳本建議改法，不然下一輪換 Spec 軸說偏離帳本（本輪 P00-001 括號被兩軸拉鋸）。
+  - 在 guide 裡用「」引用 guide 自己的字樣時，要逐字複製，reviewer 會 grep。
+  - Bash 工具裡不要在 heredoc 前面留 `cat > /dev/null;` 之類讀 stdin 的指令 —— 會卡到 timeout；含單引號的 node 片段一律用 Write 寫成 repo 內暫存 .js 再跑、跑完刪掉。
+---
+
+## 2026-10-31 - US-002 第 3 輪 review（完成，passes: true）
+- 本 iteration 沒有改 guide：照 prd.json notes，以 BASE 8642a38 重跑 code-review，涵蓋 f455ca8 的修正。
+- Review round 3：
+  - Spec：5 個來源 URL 全部 WebFetch，所有來源引文逐字找到；(a) 缺漏 0、(b) 範圍外 0、(c) 寫錯 0。
+    nit：「config cluster」字樣不在引用頁（頁面用 primary cluster），帳本建議改法本身就用這個字，不算偏離；
+    Pod 層級 istio.io/rev 仍未提（帳本沒寫）。
+  - Standards：沒有硬性違規；前兩輪的修正都還在。判斷題（未修，留給之後）：
+    (1) P00-001 括號裡的「以及下面的可觀測性」是第 2 輪為了對應下方 P99 那一條加的，帳本建議改法沒寫 —— 在此補記為連動修改；
+    (2) 括號套括號加破折號，讀起來吃力；(3) P00-011「反過來，…任一邊設 disabled 就不注入」的「反過來」不精確（意思是「即使另一邊開著」）；
+    (4) 「config cluster」沒解釋；(5) P03-008 修的時候應該指回 Part 0 的注入規則，不要再重述一次，否則兩份會漂移。
+- Files: ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - 兩輪上限之後才修的發現，下一個 iteration 只要以同一個 BASE 再 review 一次即可，不必重做故事。
+  - 修 P03-008（US-018）時讀一下這裡的 (5)：注入規則已經在 Part 0 寫齊。
+---
+
+## 2026-10-31 - US-003（passes 仍為 false：第 2 輪 review 有發現，已修但未經第 3 輪 review，見 prd.json notes）
+- 實作（BASE b01f8cf；commits 3240719 feat、2c4dd3a fix、2c5ab9b fix）：k8s-ecosystem-guide.md Part 0「物件之間怎麼互相找到」
+  - P00-024：圖 ⑧ 與 selector 表 Service 列「Endpoints」→「EndpointSlice」；圖下新增 ⑧ 說明：Endpoints API 從 v1.33 起 deprecated、
+    官方建議 client 改用 EndpointSlice，查詢指令 `kubectl get endpointslices -n ea-pmc -l kubernetes.io/service-name=pmc-epmmformquerygui-svc`。
+  - P00-025：圖 ⑨ 改成「== 程式實際 listen 的 port」；圖下新增 ⑨ 說明：containerPort 主要是宣告用（英文原句引用 Pod API 文件）、
+    named port 時才必須定義同名 port、targetPort 省略時預設等於 port。
+  - P00-034（無法驗證）：症狀表 ⑥／⑨ 拆成兩列，照帳本寫成 503 `NC`／503 `UF`／`URX`，各標「經驗值」，表下加一句說明經驗值的意思。
+  - P00-045：selector 表 AuthorizationPolicy 列改成：省略 selector（且 AuthorizationPolicy 沒寫 targetRefs）＝整個 namespace；
+    root namespace（meshConfig.rootNamespace，預設 istio-system）且省略＝整個 mesh；另可用 targetRefs，例如同 namespace 的 Gateway API Gateway。
+- 連動修改（為了同一小節前後一致，帳本行號以外）：
+  - selector 表 DestinationRule 列「Endpoints 裡的 Pod」→「EndpointSlice 裡的 Pod」（P00-024 換詞的一致性）。
+  - 「selector 共通的危險」段「Endpoints 變空」→「EndpointSlice 變空」（同上）。
+  - 症狀表下「response flag 的意思見 Part 8.2」：P00-034 新增的 NC／UF／URX 需要讀者能查到意思，8.2 有定義。
+  - ⑨ 說明裡「程式只要在 0.0.0.0 上 listen…照樣連得到」與 named port 那句：P00-025 建議改法的展開，來源是同一頁 Pod API 的同一段（"Any port which is listening on the default "0.0.0.0" address…"）與 Service 頁的 named port 段落。
+  - P00-045 沒寫「指定 Service」：來源頁說 targetRefs 的 Service 只支援 waypoint（ambient），本文只講 sidecar 模式。
+- 帳本外的觀察（沒改）：Part 0 第 140 行附近（P00-014 那句）「Service / Endpoints」與 Part 16（約 7833、7877、7917 行）仍寫 Endpoints，屬其他帳本列／故事。
+- Files: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：4 個 URL 全部 WebFetch（長頁用 offset 100000），所有來源引文逐字找到；沒有寫錯。minor：targetRefs 支援的 kind 不只 Gateway；帳本外的推論句（「寫了但沒 listen 照樣連不上」）。
+  - Standards：無硬性違規；判斷題 —— 「官方原文是「…被存取」」是翻譯卻放在「」裡；「省略時預設＝port」與「v1.33 deprecated」各重複兩處；圖 ⑧ 標籤欄位沒對齊；AuthorizationPolicy 表格格子太擠、提到 ambient。
+  - 修正（2c4dd3a）：引文改英文原句；刪重複；圖 ⑧⑨ 對齊；推論句刪掉；表格格子簡化成「另可用 targetRefs 取代 selector，例如…」。
+- Review round 2：
+  - Spec：引文全部找到、四列都修到；(c) minor —— 「同 namespace 的 Gateway」會被誤讀成 Istio Gateway（來源是 gateway.networking.k8s.io）。
+  - Standards：無硬性違規；判斷題 —— ⑦「比對 Pod 的 label」vs ⑧「選 Pod」動詞不一致；英文引號後接全形冒號；格子仍偏擠。
+  - 修正（2c5ab9b）：寫明 Gateway API `Gateway`（`gateway.networking.k8s.io`，不是上面那個 Istio Gateway）；⑧ 改回「比對 Pod」；冒號改「也就是說」。
+    已達兩輪上限，未再 review → passes 維持 false，寫進 notes。
+- **Learnings for future iterations:**
+  - kubernetes.io 的 Service 頁與 Pod API 頁都超過 100k 字，WebFetch 預設只讀前 100000 字；Endpoints deprecated、EndpointSlice 建議、containerPort 那句都在 offset 100000 之後。
+  - guide 裡「Gateway」有兩種：Istio 的 networking.istio.io Gateway 與 Gateway API 的 gateway.networking.k8s.io Gateway；Istio 官方頁說 targetRefs 時指的是後者，引用時要寫明。
+  - ASCII 圖的標籤欄對齊用 node 量寬度（CJK 算 2）再調空白；改字之後不量會歪。
+  - 官方原文用英文逐字引用，不要把翻譯放進「」當原文 —— reviewer 會抓。
+---
+
+## 2026-10-31 - US-003 第 3 輪 review（完成，passes: true）
+- 本 iteration 沒有改 guide：照 prd.json notes，以 BASE b01f8cf 重跑 code-review，涵蓋 2c4dd3a、2c5ab9b 的修正。
+- Review round 3：
+  - Spec：4 個來源 URL（K8s Service 頁、Pod v1 API 頁、Istio security concepts、Istio AuthorizationPolicy reference）全部 WebFetch，
+    所有引文逐字找到；(a) 缺漏 0、(b) 範圍外 0（三項連動修改都已記在 progress.txt）、(c) 寫錯 0。
+    nit：⑨ 說「只有 named port 才必須定義」對 Service 路由正確，但 probe 用 port 名字時也需要；帳本寫 targetRefs 可指 Gateway/Service，guide 只舉 Gateway（Service 只支援 waypoint，合理省略）。
+  - Standards：報 1 項「硬性」—— 第 140 行（Part 0 multicluster 那句）仍寫「Service / Endpoints」，與 ⑧ 改成 EndpointSlice 不一致。
+    判定為範圍外：那一行是帳本 P00-014（US-002，已 passes）的位置，不在 US-003 的 ledgerIds（P00-024 只管 166、223 行），依 prompt 第 6 步不改。
+    判斷題（未修）：Endpoints／EndpointSlice 兩詞在 guide 並存（Part 16 由 P16-002 負責）；「503 UH」在三處重複；AuthorizationPolicy 表格格子偏擠；
+    ASCII 圖 ③⑦⑩ 的【】欄位與 ⑧⑨ 差 1–2 欄（未改動的既有行，非本 diff 引入）。
+- 帳本外的觀察（沒改，留給人工／另開帳本列）：第 140 行「Service / Endpoints」若要改 EndpointSlice，需要補到 P00-014 或新增一列。
+- Files: ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - Standards reviewer 不看帳本，會把同一個詞在其他帳本列範圍內的出現也當成本故事的硬性違規；判定前先查帳本的行號欄，屬於別列就記觀察、不改。
+---
+
+## 2026-10-31 - US-004（完成，passes: true）
+- 實作（BASE b8ee31a；commits ba10504 feat、0120bf6 fix）：k8s-ecosystem-guide.md Part 0「一句話職責表」「認證 vs 授權 vs 防火牆」
+  - P00-058：DR 職責改「路由決定之後」＋「client 端對上游連線的 TLS 設定（如 ISTIO_MUTUAL）」；「沒有它會怎樣」改「同一個 Service 底下無法分版本」，
+    表下補充：不同 Service 用 VS weight 照樣能分流；server 端強制 mTLS 由 PeerAuthentication 決定。
+  - P00-059：「嚴格模式下打不出去」→「REGISTRY_ONLY 模式下打不出去」，表下補充預設 ALLOW_ANY 放行但走 passthrough、拿不到 VS/DR 功能，並註明與 mTLS STRICT 無關。
+  - P00-061：「沒有身分，授權policy 全部失效」→「預設 PERMISSIVE，明文也收」，表下補充 auto mTLS、明文繞過身分的風險、依賴 mTLS 的四組欄位，path/method 不受影響。
+  - P00-070（無法驗證）：① 改成帳本保守寫法 —— 通常是 timeout、RST 與否看 CNI、NetworkPolicy API 沒有阻擋紀錄、用 Calico／Cilium 工具查。
+  - Part 0 結尾加 `### 參考來源`（P00 已修各列的 12 個官方 URL，去重）；validate.sh `VERIFIED_PARTS=("Part 0")`。反向測：把標題改成「### 來源」→ [11] FAIL，還原後 PASS。
+- 連動修改（為了前後一致，寫明）：
+  - 新增「表中三列的補充」清單：P00-058／059／061 的建議改法塞不進表格格子，格子改成「（見表下說明）」指過去。
+  - ① 刪掉「看不到任何 Istio log」：它在 P00-070 的原文摘錄裡，但帳本建議改法沒保留這句（且 client 端 sidecar 其實會有 log），照帳本改法整句替換。
+  - ① 的「通常是 timeout」加粗：與 ②–④ 的粗體重點一致。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh, ralph/prd.json, ralph/progress.txt
+- Review round 1：
+  - Spec：4 個 URL 全部 WebFetch，引文全部找到（DR 的 "SSL/TLS related settings…" 與 NetworkPolicy 的 log 那句都在 100k 字之後）；0 項缺漏／範圍外；
+    minor：表下把 DR tls 窄化成「只管用不用 mTLS」，來源是整個 TLS 設定（含 SIMPLE/DISABLE）。
+  - Standards：無硬性違規；判斷題 —— 表格格子與表下段落重複、DR／ServiceEntry 格子太擠、「——」前後空白不一致、① 沒有粗體。
+  - 修正（0120bf6）：格子縮短成指向表下；表下改成三點清單；DR tls 改回「上游連線的 TLS 設定」；破折號空白；① 加粗。
+- Review round 2：
+  - Spec：4 個 URL 再次全部 WebFetch、引文逐字找到；(a)(b)(c) 皆 0。
+  - Standards：無硬性違規；判斷題（未修）—— DR 的 tls 說明格子與清單各一次；「真正的風險不是「沒有身分」」引用的是已刪掉的舊格子字樣；
+    參考來源引言提到內部檔案 tasks/guide-verification-ledger.md；① 比 ②–④ 長。
+- 帳本外的觀察（沒改）：Part 2 §2.5 圖（約 914 行）① 仍寫「timeout / connection refused」，屬 P02-215；P02-001、P04-008 修的時候應指回 Part 0 表下的 PeerAuthentication 說明，不要再列一次欄位清單。
+- **Learnings for future iterations:**
+  - 帳本建議改法太長、塞不進表格格子時，格子寫一句結論＋「（見表下說明）」，細節放表下清單；不要格子和段落各寫一份（第 1 輪 Standards 會抓重複）。
+  - `### 參考來源` 用裸 URL（`- 標題：https://...`）[11] 就認得；「Part 0 各列」照 PRD 解讀為「已修（✓ 且非正確）各列」的 URL 欄，Spec reviewer 接受。
+  - 在 guide 裡用「」引用舊說法來反駁時，被引用的字樣如果同一次改動刪掉了，reviewer 會說引用落空；改用不加引號的敘述。
+---
+## 2026-11-01 - US-005
+- 修正 Part 1「完整鏈路」⑤（P01-002：Pod IP 清單來自 istiod/service registry，DR labels 只是篩選）與「逐跳職責表」④a/④b/⑤（P01-005/006/007）：host 不符＝404+NR、SNI 不符＝TLS 失敗、access log 預設不開、UH/NC/UF 拆開；表下新增三條補充說明。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: R1 Standards 2 hard（⑤ 格子與說明重複 UF；④a「見表下說明」指向沒有 SNI 內容）→ 精簡格子、把 SNI 與 listener 提示搬進說明；Spec 無阻擋發現（「預設不開」「通常是 NC」「SNI 握手失敗」為帳本建議改法的推論，來源頁未逐字支持）。R2 乾淨。
+- Learnings: kubernetes guide 為 CRLF，用 node 腳本先 split("\r\n") 改完再還原；Edit 工具/ sed 含換行易壞。
+---
+## 2026-11-01 - US-006
+- Part 1 關鍵觀念一 fixed per P01-008..P01-011: kube-proxy iptables(default)/nftables + IPVS deprecation timeline (KEP-5495); sessionAffinity ClientIP claim kept with "derived from mechanism" caveat (P01-009, no new sources); consistentHash is soft affinity, useSourceIp/gateway caveat; L4/L7 decided by appProtocol / port-name prefix, auto-detect HTTP/HTTP2 before falling back to TCP.
+- Files: k8s-ecosystem-guide.md (3 lines). No linked edits outside these rows.
+- Review round 1: Standards no hard violations, 3 prose nits fixed (軟性 unquoted, 才 ambiguity, IPVS v1.40/v1.43 phrased as KEP plans); Spec clean, all quotes found on pages; nit "partial reassign" applied. Round 2: clean.
+- Learnings: KEP-5495 milestones are plans, word them as such. Observation (not fixed, other ledger rows): guide ~2233 and ~3668 also cover port naming/auto-detect.
+---
+## 2026-11-01 - US-007
+- 修正 Part 1「關鍵觀念二」P01-013～016：表格欄標題改為「ingressgateway 看到的 source IP」、Cluster 列改為「通常完全遺失，除非前面 L7 proxy 先寫 XFF」（細節放表下說明）；numTrustedProxies 可設全域 MeshConfig 或 gateway Pod annotation、改完要重啟 gateway Pod；yaml 註解改為 IstioOperator spec.meshConfig／ConfigMap key 為 mesh／只對 gateway 生效；N 的定義改為以 gateway 收到的 XFF 從右數第 N 個（app 端看到 N+1）、寫入 X-Envoy-External-Address、項數不足退回直連來源 IP。
+- 連動修改（帳本未列）：表中第一列「ingressgateway 的 Pod IP」改為「VIP／F5 的 SNAT 位址」，因為欄標題改成 ingressgateway 看到的 IP 後原值不成立（P01-012 為環境特定，此改動無官方來源，僅為與新欄標題一致）。
+- Part 1 結尾加 `### 參考來源`（10 個官方 URL，去重）；VERIFIED_PARTS 加入 "Part 1"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review 1: Standards 5 項輕微（註解與正文重複 annotation 說法、表格格子與表下說明重複、欄位級說明掛在單列下、「永遠」過度絕對）→ 全部修正；Spec 無阻擋性發現（P01-015 引文被截斷，用 offset 後確認前半）。未跑第 2 輪（修改僅為措辭精簡）。
+- Learnings: 無新增通則。
+---
+## 2026-11-01 - US-008
+- 修正 Part 2 §2.1（P02-001..005）：身分欄位依賴 mTLS 而非 PeerAuthentication 物件、PERMISSIVE 下 DENY 的 principals 可被明文繞過；portLevelMtls 需非空 selector.matchLabels（Istio >=1.23 CRD 拒絕）；mesh-wide 與名稱 default 無關；probe 改寫目標 15020、annotation 為 rewriteAppHTTPProbers、TCP/gRPC 也會改寫、關掉後 TCP probe 假綠燈。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md（刪 P02-001 提醒）
+- Review round 1: Standards 無硬性違規（引文含 **strict** 粗體不逐字、selector 註解與表格重複 -> 已修）；Spec 無缺漏，所有引文經 WebFetch/curl 確認（>=1.23 版本界線只在帳本，官方頁未載明）。修正後未再開第二輪 sub-agent review（只動兩處措辭，validate.sh 通過）。
+- Learnings: 引文不要帶 markdown 粗體；WebFetch 摘要器可能漏報句子，用 curl 驗證。
+---
+## 2026-11-01 - US-009
+- 修正 Part 2 §2.2（P02-006/007/008/010/011）：AUDIT 改述並指向 dry-run annotation、ipBlocks/remoteIpBlocks 說明與選擇準則、寫法 B/C 補 numTrustedProxies 前置、寫法 C 範圍與 B 對齊（連動：notRemoteIpBlocks 加入 172.16.0.0/12，帳本要求語意統一）、sidecar 範例移除 hosts 並在踩雷加一條。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 發現（六個 URL 引文皆查到）；Standards 1 硬（寫法 C 註解與值矛盾）＋2 判斷（位置式指引、非逐字「」）→ 已改（a7a7a1f）。未跑第 2 輪（只剩措辭修正）。
+- 觀察（不屬本故事）：guide 約 408 行（Part 1）仍寫「ipBlocks 幾乎永遠是錯的」、約 1374 行 AUDIT 屬 P04-011；皆留給對應帳本列。
+---
+## 2026-11-01 - US-010
+- 修正 Part 2 §2.2（2/2）：P02-012（headers 不分大小寫、只支援 HTTP）、P02-013（destination.port 是 workload port、values 字串）、P02-014（URI template {*}/{**}）、P02-015（預設 BASE 已處理 dot-segment；MERGE_SLASHES／DECODE_AND_MERGE_SLASHES 才處理 // 與 %2F）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 findings（引文全部在官方頁找到；P02-015 的 BASE 句實際在 normalization 頁，帳本來源欄略有出入）。Standards 2 項硬性（引文用 ASCII 引號而非「」；表格格子太長）＋標題與內容不符的判斷題。全修：格子改一句結論＋（見表下說明），細節移到表下清單；paths 萬用字元 bullet 改標題。第 2 輪未重審（僅措辭／版面調整）。
+- Learnings: 「Istio 1.22 起」的來源連結要在 Part 2 的參考來源段落補上（最後一個 Part 2 故事）。
+---
+## 2026-11-01 - US-011
+- Fixed Part 2 §2.3 Sidecar (P02-201..205): removed memory/listener numbers and "每次變動推全 mesh"; REGISTRY_ONLY described as best-effort, Egress Gateway+NetworkPolicy as the enforced approach; removed "隨機挑一個", added istioctl analyze IST0111/IST0110; istio-system/* pitfall rewritten (Prometheus scrapes); short-name DNS cause corrected to K8s search domains.
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 hard; Spec: all quotes verified on all 7 URLs; 1 finding (service-count inference stronger than source) -> softened to "可能越多". Not changed (out of ledger scope): line ~721 effect "減少 config push 風暴", line ~986 "config push 太慢", line ~985 table "兩層一起才擋得住" (REGISTRY_ONLY) — noted for a later row / follow-up.
+- Learnings: none new.
+---
+## 2026-11-01 - US-012
+- 修正 Part 2 §2.4（1/2）：P02-206（攻擊者繞過的是自己的 sidecar，缺口在 UDP/ICMP、port 22、sidecar 自己的 port、excludeInboundPorts）、P02-207（L3/L4、節點流量永遠放行）、P02-208（label 1.21 beta／1.22 GA）、P02-209（gateway 可能不在 istio-system 的註解）、P02-210（刪 egress 15017，註解說明方向與 istio-system default-deny 時要放行）。
+- Files changed: k8s-ecosystem-guide.md
+- Review 1 輪：Standards 無硬性發現；Spec 五列引文都在官方頁找到、wording 一致，無發現。
+- 觀察（不改）：Part 4 約 1331／1369 仍有舊說法，屬 P04-013，後續故事處理；P02-206 第一句引文省略了開頭 "Instead, "。
+- Learnings: 無新增通則。
+---
+## 2026-11-01 - US-013
+- 修正 Part 2 §2.4 NetworkPolicy（2/2）：P02-211 policyTypes 預設值（省略時一定含 Ingress，有 egress 規則才加 Egress）、
+  P02-212 ipBlock「mesh 外部」→「叢集外部」、P02-213 OR 範例改為 policy 所在 namespace（ea-epmm）、
+  P02-214 CNI 段落改為 flanneld 本身不實作＋Helm netpol.enabled＋deny-all 實測。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（觀察：policyTypes／ipBlock 表格格子與 CNI 條目偏長，未改）；
+  Spec 無發現，所有 guide 引文逐字出現在官方頁（P02-213 帳本引文因 WebFetch 摘要未逐字比到，guide 沒引它）。
+- Learnings: 無新增通用慣例。P02-215 提醒仍待做。
+---
+## 2026-11-01 - US-014
+- 修正 Part 2 §2.5（P02-215..219）：圖 ① 改「通常是 timeout (RST 與否依 CNI)」；Sidecar 句補 ingress 欄位與非授權機制；能力表 AuthzPolicy 直連改「部分」；決策表 principals／remoteIpBlocks／橫向掃描三格改寫。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md（刪除 P02-215 提醒）
+- Review round 1: Standards 2（remoteIpBlocks 格子太長 → 改「見表下說明」＋表下段落；patterns.md 殘留 P02-215 提醒 → 刪除）；Spec 0 項需修。
+  Spec 未能確認 kubernetes.io network-policies 的 podSelector 引文（頁面被截斷在 100000 字，需 offset 讀後段）；其餘引文皆逐字找到。未做第 2 輪（修正僅為搬移文字與刪提醒）。
+- 觀察：圖 ① 未加「NetworkPolicy 本身無阻擋紀錄」（P00-070 的句子在 296 行已有）；P04-013 修正時須與本故事的「部分」一致（AuthZ 格改「可以（被呼叫端 sidecar 仍執行）」與表中「部分」要對齊）。
+---
+## 2026-11-01 - US-015
+- 修正 P02-220（外部網址限制改成 ServiceEntry＋Egress Gateway＋NetworkPolicy，REGISTRY_ONLY 只是防呆）、P02-221（Sidecar「唯一」改「主要用途」，並提 outboundTrafficPolicy／ingress）。
+- 連動：2.5 決策表下新增「外部網址限制的組合」段落（細節放表下，格子只留結論）。Part 2 加 `### 參考來源`（24 個去重官方 URL），"Part 2" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Spec 無發現（兩段引文都在官方頁找得到）；Standards 3 點（格子與段落重複、與 2.3 重要澄清重複、交叉參照缺 outboundTrafficPolicy、推論未標註）→ 全修，段落改指回 2.3。未再跑第 2 輪（修改僅措辭、validate.sh 通過）。
+- Learnings: 同一主張已在前面小節出現時，新段落指回去，不要重寫。
+---
+## 2026-11-01 - US-016
+- 修正 Part 3 對照表（k8s-ecosystem-guide.md 約第 1048 行）：「body 就是那七個字」→「body 只有 `RBAC: access denied` 這一行純文字」（P03-001）
+- 沒有連動修改其他句子
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Spec：無發現（Envoy rbac_filter.cc 的 sendLocalReply 引文確實存在、新措辭與建議改法逐字相符）。Standards：無發現（觀察：第 1063 行的 "RBAC: access denied" 屬別列範圍，未動）
+- Learnings: 無新增通則
+---
+## 2026-11-01 - US-017
+- 修正 Part 3 決策樹 [1]（P03-002）、成因 1 Prometheus/health check（P03-003）、方法 2 憑證指令（P03-004）、sa/default 範圍（P03-005）、成因 3 sidecar 檢查 initContainers（P03-006）
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 1 hard（引用已刪字樣加了「」）→ 去掉引號；Spec 2（P03-004 jq 應用 select(.name=="default")，P03-003 英文引文在頁面找不到逐字句）→ 改官方 jq 寫法、改成不加引號的敘述。
+  第 2 輪未另開 sub-agent：修正皆直接採用 reviewer 建議並已對照官方指令，validate.sh exit 0。
+- Learnings: 官方 istioctl secret 範例用 select(.name=="default")，不要用 [0]（ROOTCA 可能排前面）。
+---
+## 2026-11-01 - US-018
+- 修正 Part 3 成因 3／4／5：P03-007（pilot-agent request GET stats＋distroless／ssl.handshake／XFCC 註記）、P03-008（指回 Part 0 sidecar 注入段落，不重述）、P03-009（保守寫法：比對連線實際目的 port）、P03-010（paths 為正規化後，BASE／RFC 3986）、P03-011（custom-columns 列出 selector／targetRefs）。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md
+- Review round 1: Standards 無硬性違規（3 個 nit：Part 0 指標名稱、精準除錯引用、註解混兩件事）；Spec 引文皆在頁面上找到，2 點（「不論哪種」含糊→改成「所以」；XFCC 區塊仍用 curl config_dump，屬 P03-015 範圍，未動）。已修 nit 並以 fix commit 收；未再跑第二輪（只剩措辭 nit）。
+- Learnings: node 改檔時反斜線被吞，已寫進 patterns.md。
+---
+## 2026-11-01 - US-019
+- 修正 P03-012：成因 5 結尾一句改成「必須有 `selector` 或 `targetRefs`（兩者擇一即可），兩者都沒有才會套用到全 mesh」，並逐字引 Istio 英文原句。
+- Files changed: k8s-ecosystem-guide.md（1 行）
+- Review round 1：Standards 無違規（3 條 judgement 觀察：未註明 Gateway API、「擇一即可」稍冗、引文只支撐「都沒設=全 workload」，皆不改）；Spec 確認原句在官方頁、新措辭一致、無 scope creep。1 輪收斂。
+- Learnings: 無新慣例。Part 3 的 `### 參考來源` 與 VERIFIED_PARTS 由 US-020 處理。
+---
+## 2026-11-01 - US-020
+- 修正 Part 3 的 P03-013（matched policy none）、P03-014（--port 15006）、P03-015（XFCC 改用 app 回顯／access log，config_dump 只看設定）、P03-016（grep 加群組名，以 auth can-i --list 為準）；加 Part 3 `### 參考來源`，VERIFIED_PARTS 加 "Part 3"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1（BASE=09cf0be）：直接 WebFetch 核對引文——15006 句（istio proxy-cmd）、XFCC 句（authn-policy）、rbac_filter.cc 的 `matched policy {}`／none、K8s RBAC 的 ServiceAccount 群組句，全部逐字存在且 guide 措辭一致。Standards／Spec 皆無發現。（因本輪 feat commit 已在前一輪完成，本輪只做 review 與收尾；未起 sub-agent，由本代理直接驗證。）
+- Learnings: K8s RBAC 頁超過 100000 字，SA 群組句在 offset 100000 之後（已在 patterns 記過）。
+---
+## 2026-11-01 - US-021
+- 修正 Part 4 步驟 0／1：P04-002（FQDN 並不省查詢，加結尾點／調 ndots）、P04-003（ndots 說明改為先套 search domain、命中就停）、P04-004（istio-proxy 沒有 nslookup → kubectl debug busybox／kdig）、P04-006（apply 即滾動更新，不需 rollout restart）、P04-007（grep spiffe:// → jq+base64+openssl）。
+- P04-005 未動。連動修改：步驟 1 末段的驗證指令一併換成 P04-007 的寫法。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 無硬性違規（5 項 judgement 級重複／冗長，未改，措辭沿用帳本建議）；Spec 引文皆查到，1 項發現：kubectl debug 不能接 deploy/ → 改成先取 Pod 名。修後 validate.sh exit 0；第 2 輪未重跑完整 review（修正僅一行指令，與帳本 <pod> 寫法一致）。
+- Learnings: kubectl debug 只收 Pod（或 node），不收 deploy/；Part 4 的參考來源尚未加（留給最後一個 Part 4 故事，並同時加入 VERIFIED_PARTS）。
+---
+## 2026-11-01 - US-022
+- 修正 Part 4 步驟 2（P04-008～011）：2a 註解改成 STRICT 的真正作用並指回 Part 0「表中三列的補充」；規則 2 的 SA 改 istio-ingressgateway-service-account 並附查法；規則 3 註解說明預設不需要（probe 改寫／metrics merge 走 15020）且無 from；AUDIT 預演改成 istio.io/dry-run annotation。
+- 連動修改（同小節一致性）：「務必記得規則 2 和 3。90%…」改成只強調規則 2（原句與修正後的規則 3 矛盾，且 90% 無來源）；dry-run yaml 前加一段說明為何不用 AUDIT。
+- 未動：~1654 行的 ingressgateway principal（屬 P05-002）。
+- Files: k8s-ecosystem-guide.md、ralph/patterns.md（刪 P04-008 提醒）
+- Review round 1：Standards 無硬性違規（2 點 cosmetic：標題冒號、註解與 Part 0 部分重複，只改了冒號）；Spec 無阻擋，1 minor：authz_dry_run_result 是 label 不是指標、shadow denied 需 rbac debug level → 已改。round 2 因只是兩處措辭修正，未再開 sub-agent，只重跑 validate.sh（exit 0）。
+- Learnings: authz_dry_run_result 是指標上的 label；shadow denied 要 rbac:debug log level。
+---
+## 2026-11-01 - US-023
+- Part 4 步驟 4／5：P04-012（NetworkPolicy ingressgateway 加 podSelector＋ports）、P04-013（繞過的是自己的 sidecar，AuthZ 改「可以」）、P04-014（header 偽造補充段）、P04-016（200/403/503+UF/000 判讀）、P04-017（describe 是設定推論；加實際流量檢查）。Part 4 結尾加 ### 參考來源（20 個 URL），"Part 4" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 2 hard（表格格子過長、與段落重複）＋ 引用 user=alice 當 AND 語意不準；Spec 1（同一個 user=alice 引用）。已修：格子改「見表下說明」、新增「直連 Pod IP 的補充」、註解改引官方 AND 句。未再跑第 2 輪（修正皆為措辭，validate.sh 通過）。
+- 備註：「UDP／ICMP」「通常等到 connect timeout」是帳本建議改法／Part 2 既有措辭，非官方頁逐字。
+---
+## 2026-11-01 - US-024
+- 修正 Part 5 的 P05-001（Sidecar egress.hosts：REGISTRY_ONLY 丟棄／ALLOW_ANY 通常放行）、P05-002（身分不再寫「永遠」，格式 <trust-domain>/ns/<ns>/sa/<SA>，加查 SA 的 kubectl 指令，policy 的 principals 改 -service-account 並加註解）。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1：Standards 2 條 judgement（⓶ 格子偏長、SA 說明在註解與正文重複），皆照帳本建議改法／repo 註解風格而不改；Spec 0 發現，兩個 URL 的引文都在頁面上且新措辭一致。1 輪收斂。
+- 觀察（無帳本列，未改）：約 1656 行 ASCII 圖仍標 `sa/istio-ingressgateway`；約 8307 行仍寫「永遠是 FZ2 的 sa/istio-ingressgateway」。
+- Learnings: 無新慣例。
+---
+## 2026-11-01 - US-025
+- 修正 Part 5「補救方案一：JWT」：P05-003 issuer/jwksUri/requestPrincipals 去掉 /auth 並加註解（iss 逐字相同、http-relative-path=/auth 例外）；P05-004 azp 改成保守註解（以實際 token 為準，提 request.auth.presenter）；P05-005 重寫 RequestAuthentication 提示（無效 token 401、沒帶 token 通過）；P05-006 DENY 註解改寫並加表下 > 注意 說明。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0, Spec 0（五個來源 URL 皆 WebFetch 確認引文存在；Keycloak 17 見 migrating-to-quarkus 頁）。
+- 連動修改：無。"Keycloak 17" 出自該頁 "Starting with Keycloak 17 the default distribution is now powered by Quarkus"。
+---
+## 2026-11-01 - US-026
+- 修正 Part 5 補救方案二（ALLOW→DENY+notRemoteIpBlocks 並加警告、numTrustedProxies 前提補 L7/L4 區分、grep XFF 改法）與補救方案三（標題與說明改為 app 自行 mTLS、刪「沒有 canary weight」）。對應 P05-007..011。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 抓到 L4 bullet 缺「PROXY protocol 需 gateway 設定、與 numTrustedProxies 不併用」；Standards 抓到 DENY 理由在警告與 yaml 註解重複。已在 fix commit 處理。未跑第二輪 review（剩餘皆為風格層級觀察：引號樣式、externalTrafficPolicy 官方頁未載明但為帳本建議）。
+- 觀察（未改）：externalTrafficPolicy: Local 出自帳本建議，network-topologies 頁沒提到；Part 5 尚未加進 VERIFIED_PARTS（最後一個 Part 5 故事才加）。
+---
+## 2026-11-01 - US-027
+- 修正 Part 5「A cluster 這一側要準備什麼」「B cluster 這一側的完整組合」（P05-201～P05-204）：
+  ServiceEntry 加 port 80/HTTP/targetPort 443（保留 443 給 app 自己講 https）；DR 的 TLS 移進 portLevelSettings port 80，
+  拿掉 sni 的錯誤註解，改給 caCertificates／credentialName（secret 在 ea-pmc＋workloadSelector）＋subjectAltNames；
+  NetworkPolicy 加「疊加式、需搭配 kube-dns 53 與 istiod 15012 egress」註解；B 側 AuthorizationPolicy 補 remoteIpBlocks 前提、ipBlocks／externalTrafficPolicy: Local 與 node／NAT 出口 IP 註解。
+- Files: k8s-ecosystem-guide.md（只動上述 yaml 區塊，沒有連動修改其他句子）
+- Review: round 1 — Standards 無硬性違規（觀察：註解與前文有些重複、workloadSelector 只在註解提到）；Spec 五個 URL 皆查到引文，P05-201～204 皆符合，無發現。未需 fix round。
+- Learnings: 「DR host 層級 TLS 會雙重加密」是帳本的推論，官方頁沒有逐字句子；故事未引用為官方原文。
+- 觀察（未改）：P05-204 的 AuthorizationPolicy yaml 本體仍是 remoteIpBlocks，ipBlocks 只在註解。
+---
+## 2026-11-01 - US-028
+- Part 5 附錄 multi-cluster（P05-205..209）：Multi-Primary 改為各 istiod 直接 watch 對方 API server；Multi-Network 從模式表拆出成獨立的「網路模型」維度；root CA 改為 intermediate CA；API server 存取權改為「每個 primary 要有所有 cluster」；east-west gateway 改為視網路模型而定。
+- 連動修改：「必要條件（缺一不可）」標題改為「依模式而定」（否則與 P05-209 矛盾）；Multi-Primary 代價欄一併對齊 P05-205。
+- 檔案：k8s-ecosystem-guide.md
+- Review：第 1 輪 Standards 無硬性違規（判斷題：remote-secret 機制重複寫兩處、標題「第 3 點尤其」不精確 → 已修）；Spec 所有引文在官方頁皆找到，無缺漏。
+- 觀察（不在本故事範圍）：必要條件第 4 點 network label 仍寫成無條件，應留意是否為後續帳本列所涵蓋。
+- Learnings：P05-206 引文實際在 deployment-models 頁，不在 multi-primary_multi-network 頁。
+---
+## 2026-11-01 - US-029
+- 修正 Part 5 附錄 multi-cluster（P05-210..213）：network label 限 multi-network 且標在 istio-system、補 clusterName/meshID/CIDR 共通前提；locality failover 補 outlierDetection、改「幾乎無感需 retry」、依 locality 非 cluster；「不能換」列改為 API server＋east-west gateway 不可達才不能換（細節放表下）；istiod 同步升級改為遵守版本差支援規則（P05-213 保守寫法）。
+- Part 5 結尾加 ### 參考來源（已修各列 URL 去重），"Part 5" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 1（表格格子過長→移到表下，已修）；Spec 0 實質發現（稱參考來源漏 6 個 URL，但那些屬判定正確的列，依 patterns 不列，不改）。Round 2: 乾淨。
+- 觀察（未改，不在 ledgerIds）：Part 16 約 8436 行有同樣的 outlierDetection 說法，可能與 Part 5 漂移。
+- Learnings: 帳本「正確」列沒有判定欄（URL 在第 4 欄），抓來源 URL 時要用判定欄過濾。
+---
+## 2026-11-01 - US-030
+- 修正 Part 6.1 Deployment（1/2）：P06-001（Deployment 不搬流量）、P06-002（minReadySeconds 影響 available，擋不住流量）、P06-003（maxSkew 在 ScheduleAnyway 下只是偏好）、P06-004（toleration 改示範 unreachable，註明預設 300 秒會自動加）、P06-005（PriorityClass 需先存在、作用為排程順序＋搶占）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 round. Standards: 0 hard violations; judgement calls only (long comments; whenUnsatisfiable comment repeats the maxSkew point; tolerationSeconds: 300 repeats the default, which the comment says honestly). Spec: 5/5 quotes found on pages (P06-001/002/004 after offset 100000), wording agrees; no findings. No changes made after review.
+- 觀察（不在本故事範圍，未改）：line ~2389 表格「minReadySeconds … app 需要暖機時設 10~30」可能屬同一誤解，留意是否屬別的帳本列。
+- Learnings: none new for patterns.md.
+---
+## 2026-11-01 - US-031
+- 修正 P06-006..P06-010（Part 6 / 6.1 Deployment 2/2）：terminationGracePeriod 含 preStop 起算、preStop 補 /bin/sh 與 sleep action(v1.30 beta/v1.34 GA)、liveness/readiness 分打 health group 並移除「3 倍」、Guaranteed QoS 條件、endpoint terminating 說明。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 3 項（引文改用「」、語氣、Envoy 用詞）已修；Spec 無發現（5 列來源引文皆在頁面上）。未動：liveness failureThreshold 仍為 3（帳本給的是二選一，已改 path）。
+- Learnings: 無新增通則。
+---
+## 2026-11-01 - US-032
+- 修正 Part 6 6.2 Service（1/2）：P06-011（yaml 註解改成 appProtocol 優先、名稱擇一）、P06-012（表格改為自動偵測失敗才當 TCP）、P06-013（Local 改為 drop／timeout，補 healthCheckNodePort）、P06-014（刪 Redis，改 SMTP/MySQL/MongoDB，改成與自動偵測及 PERMISSIVE mTLS 不相容）、P06-015（DR cookie 改 istio-session-affinity + ttl，註解說明撞名原因）
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規；Spec 四個來源頁引文都查到、措辭一致，無發現。未改動的觀察：「Istio 用 port 名稱的前綴判斷」那句（表前一行）仍說只靠前綴，與 appProtocol 優先略有張力，不在 P06-011 行範圍，留給後續；其他 Part 的 JSESSIONID httpCookie 區塊屬別的帳本列。
+- Learnings: 無新增通用慣例
+---
+## 2026-11-01 - US-033
+- 修正 Part 6 的 6.2「其他踩雷」與 consistentHash 段：P06-016（ringHash 或 maglev）、P06-017（改 EndpointSlice 指令並註明 Endpoints API 自 v1.33 deprecated）、P06-018（保守寫法：官方只說會當 port 名稱查，沒寫查不到的行為）、P06-019（healthCheckNodePort 讓 LB 避開沒有 endpoint 的節點；topologySpread 保證不了，要每台都有用 DaemonSet）。
+- Files changed: k8s-ecosystem-guide.md（4 行）
+- Review rounds: 1 輪。Standards：無硬性違規，2 個可選的 judgement call（targetPort 句可標示為推論、deprecated 說明可能重複），不處理。Spec：4 列引文都在頁面上找到（v1.33、service-v1 的 targetPort 引文在 offset 100000 之後），新措辭與引文一致，無發現。
+- 未動：guide 其他位置的 `kubectl get endpoints`（約 3845、4438 行）屬其他帳本列。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-034
+- 修正 Part 6.3（1/2）：P06-201（Secret 風險補 etcd／建 Pod 權限＋官方四步）、P06-202（subPath 機制改「綁定掛載當下那個檔案」）、P06-204（更新延遲改最長約 2 分鐘＋官方原文＋annotation 立刻刷新）、P06-205（checksum 改對 data 的 jsonpath 算 sha256 前 8 碼）。
+- P06-203（defaultMode，無法驗證）依帳本建議不動。
+- 連動：表格格子寫結論＋「見表下說明」，延遲出處放表下一段。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 0 發現；Spec（WebFetch 全部來源，引文都找得到）0 發現。備註：P06-205 的 ObjectMeta 引文只直接支持 uid，其餘欄位屬一般知識（非發現）。
+- Learnings: 改 guide 時 node 字串裡的 `\.` 會被吃掉，改完 grep 確認（patterns 已有）。
+---
+## 2026-11-01 - US-035
+- 修正 guide 6.3 踩雷兩條：P06-206（ConfigMap 不存在時 Pod 起不來；volume 通常 ContainerCreating／FailedMount，env 通常 CreateContainerConfigError，官方未列出）、P06-207（未加引號的 1.10 是 YAML 浮點數，同樣被拒絕；Helm 等工具重新序列化才會變 1.1）。
+- Files changed: k8s-ecosystem-guide.md（2 行）
+- Review rounds: 1 輪。Standards 0 硬性違規（3 個判斷題：2715 偏長且重複「官方未列出」、2717 一句兩點、「同樣會被拒絕」無引文）；Spec 0 發現（兩段引文皆在官方頁找到；P06-207 的「被拒絕」與 Helm 說法只有帳本推論支撐，屬帳本品質備註）。未改措辭，以免偏離帳本建議改法。
+- Learnings: 無新增可重用慣例。
+---
+## 2026-11-01 - US-036
+- 修正 6.4 CronJob（1/3）：P06-208（podFailurePolicy 搭配 restartPolicy: Never，範例與註解）、P06-209（sidecar.istio.io/inject 由 annotations 移到 labels，兩處）、P06-211（jobTemplate.metadata.labels 加 app: pmc-form-daily-sync，kubectl 改用 -l app=...）、P06-212（Pod 清理來源補上 ttl 與歷史上限）、P06-213（Failed 列補 podFailurePolicy FailJob、backoffLimitPerIndex／maxFailedIndexes）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（觀察：restartPolicy 說明在兩處重複、Failed 列偏長，皆屬風格）；Spec 五條引文都在官方頁找到且新措辭一致。
+- 觀察（未改，不屬本故事）：約第 4968 行仍把 sidecar.istio.io/inject 放在 annotations，屬 P12-004。
+- Learnings: 無新增通則。
+---
+## 2026-11-01 - US-037
+- 修正 Part 6 / 6.4 CronJob（2/3）：P06-214（TooManyMissedTimes，刪「永遠不再排程」）、P06-215（只補最近一次、MissSchedule）、
+  P06-216（set +e、127.0.0.1、需 curl／只接受 localhost POST）、P06-217（Istio 1.27 預設 native sidecar、K8s 版本線）、P06-218（controller 本地時區）。
+- 連動修改：解法 C 的「選擇建議」補一句 Istio 1.27+／K8s 1.29+ 預設即 native sidecar（屬 P06-217）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 發現（所有引文逐字找到）；Standards 1 項硬性（「」裡放了翻譯）＋ set +e 註解措辭。已改為英文原文放「」、註解改成「不要加 set -e」並移到 set +e 之前。
+  其餘為判斷題（重複敘述、版本沿革註解、troubleshooting 位置）未改。
+- Round 2：因修正只動措辭，由我自行對照上述發現複查，未再跑 sub-agent；validate.sh exit 0。
+- Learnings: 官方英文放「」、錯誤訊息字串不加引號；`set +e` 的註解要寫「不要加 set -e」。
+---
+## 2026-11-01 - US-038
+- 修正 Part 6 的 6.4 CronJob（3/3）：P06-219「Job 名稱長度」由「建議不超過 52」改為「必須不超過 52」，並寫明 controller 會再加 11 字元、Job 名稱上限 63（k8s-ecosystem-guide.md 單行）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards：無硬性違規（2 項純文風判斷：雙冒號、結尾「超過 52 就違反限制」與開頭重複，未改）。Spec：WebFetch 確認官方引文逐字存在（cron-jobs 頁前 100000 字內），新措辭與引文一致；順帶移除舊句「名稱 + 時間戳有 63 字元上限」（同一句中不精確的部分，非範圍外修改）。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-039
+- 修正 Part 6.5 Gateway（1/3）：P06-401（selector 錯誤行為＋IST0101）、P06-402（GRPC-WEB）、P06-403（port.name 必填／servers[].name 唯一）、P06-404（TLS／generic Secret）、P06-405（ca.crt 或 <secret>-cacert）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 0 findings（所有引文都在官方頁找到）；Standards 3 findings（mTLS 註解續行未對齊、IST0101 英文未加「」、表格格與 YAML 註解重複）→ 全改，fix commit。Round 2 未再跑（皆為機械性修正，validate.sh 通過）。
+- Learnings: P06-403 的「必填」是帳本建議措辭，官方頁只說 Port.name 是 "Label assigned to the port."。
+---
+## 2026-11-01 - US-040
+- 修正 Part 6 6.5 Gateway（2/3）：P06-406（TLS mode 標題改、補 OPTIONAL_MUTUAL）、P06-407（ISTIO_MUTUAL 說明與例子）、P06-408（protocol 欄位 TLS 終止說明）、P06-409（Gateway 互搶改寫為共用憑證 HTTP/2 404 機制）、P06-410（namespace／deploy 名稱依安裝方式而定的提醒）。
+- 連動修改：YAML 註解「見下方四種 mode」改為「見下方 TLS mode 表」（標題改名後的一致性）；proxy-config 指令加註解、selector 列加提醒（P06-410 第二段與 selector 提醒）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 2 項（hosts 儲存格與踩雷重複 → 已刪重複；kubectl 提醒重複 → 觀察不改，因各處語境不同）；Spec 1 項（舊註解「四種 mode」→ 已改）。只做 1 輪；fix 僅改兩處小字，validate.sh exit 0，未再跑第 2 輪。
+- 觀察：「istioctl 預設裝在 istio-system」來自帳本建議文字，官方 gateway 頁的 istioctl 範例未明說，未另行查證。
+---
+## 2026-11-01 - US-041
+- P06-411: deleted the "較新的 Istio 支援 namespace/name 跨 namespace 引用" sentence (IST0161 requires same namespace as the Gateway workload).
+- P06-412: replaced "更新 secret 後通常幾秒內生效，不需要重啟" with the ledger's conservative wording (理論上不用重啟 gateway; verify with `istioctl proxy-config secret`); removed the unsourced timing guarantee.
+- Files changed: k8s-ecosystem-guide.md (2 lines). No linked edits elsewhere.
+- Review round 1: Standards 0 findings (observation: "SDS" not glossed in the bullet, optional); Spec 0 findings (IST0161 quote confirmed on page; secure-ingress page has no no-restart/seconds claim, matching the ledger).
+- Learnings: none new.
+---
+## 2026-11-01 - US-042
+- 修 6.6 VirtualService：P06-413（weight 改相對比例）、P06-414（attempts 2、(1+attempts)×perTryTimeout<=timeout）、P06-415（fault 拆成獨立 VirtualService，附官方原句）、P06-416（拆出後 header 規則在前＋default）、P06-417（rewrite.uri prefix/exact/regex 差異）。
+- 連動：規則 5 原位改成指路註解；新增「故障注入」小節（含獨立 yaml 區塊）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 無發現（所有引文皆在官方頁，僅帳本 P06-414 的 "includes all retries." 在 Istio 頁找不到逐字，guide 未引用）；Standards 無硬性違規，判斷題 6 項，修了 2 項（二選一警告、default 路由 WHY 註解），其餘（表格格子偏長、續行註解縮排）屬觀察。未再跑第二輪。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-043
+- 修正 Part 6 的 6.6 VirtualService（2/2）：P06-418（CORS 改成「可能互相干擾」＋preflight 預設轉給 app＋建議實測）、P06-419（仍經 sidecar、least request）、P06-420（依 endpoint 數量 least request，Pod 數相同才約 50/50）。
+- Part 6 結尾加 `### 參考來源`（34 個 URL，與帳本非「正確」列逐一對過），"Part 6" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review 1 輪：Standards 無硬性違規（3 個判斷題：踩雷 4 句子偏長、來源標籤有重名、least request 說明出現兩處，未改）；Spec 無發現（引文皆在官方頁找到）。觀察：traffic-management 引文原句後接逗號，guide 在引文內加了句點，未改。
+- Learnings: virtual-service 頁的 "Default is forward to upstream." 在 offset 100000 之後。
+---
+## 2026-11-01 - US-044
+- 修正 Part 7.1/7.2（P07-001..004）：7.1 改成「並存但比例綁 Pod 數、自動推進」；DR cookie 改 istio-session-affinity（與 6.2 一致）並註明 subset 內軟黏著；VS 註解與表下補「推進權重時 v2 也要擴／配 HPA」。
+- 連動：7.4 表格 A 列同步改 cookie 名稱與「軟黏著」（P07-006 同一處，為前後一致）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（僅判斷題）；Spec 1 項：130% 引文是 maxSurge=30% 的例子，已補「以 maxSurge 設為 30% 為例」。第 2 輪未再跑（單句措辭修正）。
+- Learnings: 官方引文若是範例值（非預設），引用時要標明是範例。
+---
+## 2026-11-01 - US-045
+- 7.4 建議區塊（P07-007）：移除「解法 A + 離峰就夠」，改為「A 無法避免登出，只能降低影響；要保證用 B 或 C」，並引用 Istio 官方 "soft session affinity" 原句。
+- P07-006（解法 A 的 cookie 名稱）在先前故事已修成 istio-session-affinity，本故事未再改動。
+- Files changed: k8s-ecosystem-guide.md（1 行）
+- Review round 1: Spec 0 findings（兩句引文在官方頁逐字存在）；Standards 0 硬違規，3 則散文風格觀察（未改）。
+- Learnings: 無新增慣例。
+---
+## 2026-11-01 - US-046
+- 修正 Part 7 的 7.5 HorizontalPodAutoscaler（P07-009～P07-012）：HPA 改為 -v1（name 與 scaleTargetRef 對到 7.2 的 Deployment，註明 v2 另複製一份）；7.2 兩份 Deployment 補 resources.requests（帳本 P07-009 建議改法）；minReplicas 理由改為節點故障／drain／PDB（刪掉「滾動更新會有空窗」）；memory 指標整段註解掉並說明多指標取最大值；istio_requests_per_second 註明名稱由 adapter 規則自訂、不限 prometheus-adapter。
+- Files changed: k8s-ecosystem-guide.md
+- 連動修改：7.2 補 requests（P07-009 明文要求），無其他。
+- Review rounds: 1 輪。Standards：0 硬性違規，3 項純風格觀察（長註解、requests 重複、v2 HPA 只用註解說明）未改。Spec：4 個來源都 WebFetch 確認引文存在（P07-010、P07-011 在 offset 100000 之後）、新措辭一致，0 發現。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-047
+- 修正 Part 7.6 Argo Rollouts 範例（P07-014..018）：標明省略 selector/template；改用 subset-level（destinationRule + canarySubsetName/stableSubsetName），移除 canaryService/stableService；inline analysis 改為 strategy.canary.analysis 背景分析並附 AnalysisTemplate；補 workloadRef 說明與「兩個 Service 要自己建」。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（重複、註解指路、PromQL 佔位警告）；Spec 3 項（P07-014 過度斷言 spec invalid、failureLimit 語意過細、scaleDown 漸進措辭）→ 全數改為保守寫法。Round 2: 僅剩 failureLimit 計數語意措辭，已改為「超過容許值」並指向官方文件。
+- Learnings: 帳本標「無法驗證」的列，不要補任何官方頁沒寫的行為斷言。
+---
+## 2026-11-01 - US-048
+- 修正 Part 7.6 Flagger／KEDA（P07-019～023）：Flagger 改成「不用改寫 YAML 但接管副本數」（primary/三個 Service）、threshold 註解拿掉「連續」、load-test 改打 canary Service、KEDA 的「HPA 只能看…」與「HPA 做不到」改成 v1.37 起 HPA 可縮到 0（限 Object/External）。連動：Flagger 表格「解決」格同步改成「不用改寫 Deployment YAML」。
+- Part 7 結尾加 `### 參考來源`（12 個去重 URL），"Part 7" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Spec 0 findings（所有引文都在官方頁面上找到）；Standards 0 硬性違規，6 項判斷題（KEDA 註解與正文重複、「從 0 喚醒更成熟」無官方引文但出自帳本建議改法、cmd 註解偏長等）未處理，屬觀察。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-049
+- 修正 Part 8 的 8.1 istioctl 常用指令（P08-001、P08-002）：STALE 與 NOT SENT 拆開寫（NOT SENT 通常是正常狀態）；
+  復原 log level 改為 `-r`，並說明 `--level warning`（不指定 logger = 全部），`default:warning` 不是有效 logger 名稱。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 第 1 輪 Standards：英文引文要放進「」（2 處，已改）；Spec：「Envoy 沒有名為 default 的 logger」
+  在 proxyconfig.go 找不到支持（原始碼只特別放行名稱 `level`），改成只講 default:warning 不是有效名稱、會回 unrecognized logger name。
+  第 2 輪：clean。
+- Learnings: 帳本 P08-002 的「ALL_LOGGER_IDS 沒有 default」原文不在引文來源裡；寫因果解釋時只寫來源能支持的部分。
+---
+## 2026-11-01 - US-050
+- 修正 Part 8 的 8.2 Envoy access log 判讀（P08-003/004/005/006）：加 access log 預設關閉的前提（Telemetry API／meshConfig.accessLogFile）、格式範例補 `...`；RBAC 拒絕改成表下說明（flag 是 `-`，看 403＋rbac_access_denied_matched_policy）；404 症狀列依 NR／完全沒 log 拆開（HTTP Host 不符＝NR，SNI 不符＝TLS 失敗）；502 改「502／503」並附 UC／UF／URX，細節放表下說明。
+- 連動修改：無超出四列的改動（P09-015 的 ~3689 行留給別的故事）。
+- Files: k8s-ecosystem-guide.md
+- Review rounds: R1 Standards = 長表格格子、flag 表出現兩個 `-`、兩列 404 重疊、`...` 措辭 → 全改；Spec = 無阻擋（SNI 說法為帳本自身無來源的主張、NR 後半句被 WebFetch 截斷未能確認）。R2 = 無實質缺陷（404/NR 格子偏長，接受）。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-01 - US-051
+- 修正 Part 8 的 8.3 一分鐘分流診斷：P08-007（proxy-status 改 awk 'NR==1 || /STALE/'，註解說明 grep -v SYNCED 為何錯）、P08-008（endpoints → endpointslices）、P08-009（步驟 5 註明明文／STRICT 前提）。
+- Part 8 結尾加 ### 參考來源（8 個去重 URL），"Part 8" 加進 VERIFIED_PARTS。
+- 連動：步驟 5 註解建議 STRICT 時改從有 sidecar 的 pod 測（例如步驟 6 的 app pod），屬「例如」性質的延伸，帳本只說「改從有 sidecar 的 pod 測試」。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 0 hard、Spec 0（WebFetch 三個來源引文皆找到）。無 fix commit。
+- Learnings: 無新增通用慣例。
+---
+
+## 2026-11-01 - US-052
+- 修正 Part 9 發現 1／發現 2（P09-002..006）：track-a 已修註記、不需 rollout restart、least request、DR 同 host 衝突提醒、cookie 改 istio-affinity。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 / Spec 0（三個來源 URL 引文皆驗證存在）。
+- 觀察（未改，屬其他列）：guide 內 cookie 名稱 istio-affinity 與 istio-session-affinity 並存；~4230 摘要表「低（需重啟）」。
+---
+## 2026-11-01 - US-053
+- 修正 Part 9 發現 3／4：P09-007、P09-008 在「現狀」標註 track-a 已修（對照 03-virtualservice.yaml、01-service.yaml 確認內容）；P09-009 重寫發現 4 的「為什麼是問題」（HTTP 自動偵測有效，引 Istio 官方兩句；只有 server-first 必須明確宣告），並改優先表第 1 列的效益欄（連動：同一論點）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 0 hard、4 smells（表格格子過長 → 已縮短並指向發現 4 說明；其餘為指路/重複的輕微觀察，未改）；Spec 0 findings（兩句引文逐字在官方頁找到）。
+- 觀察（屬其他帳本列，未動）：L2523/L2525/L2527（Part 4）、L5430、L6986 仍說未命名 port 會讓 L7／header 路由失效。
+---
+## 2026-11-01 - US-054
+- 修正 Part 9 發現 5（P09-011 刪掉「預設 25% 容量減半」改寫成 round down/up 算式；P09-012 PDB selector 加 version: stable，並註明 track-a/base 尚無 04-poddisruptionbudget；P09-013 標 track-a 已修）與發現 6（P09-014 標 track-a 已修＋preStop.sleep 1.34 指回 Part 6.1；P09-015 502 → mesh 內通常 503／UC／UF）。
+- Part 9 結尾加 `### 參考來源`（10 個官方 URL）；VERIFIED_PARTS 加 "Part 9"。
+- 連動修改：發現 6 標題與處理順序表第 2 列的「零星 502」改成「502／503」（與修正後內文一致）。發現 5 加了一句「寫死的值…看得出設計意圖」說明為何仍建議明確寫出（非帳本原句，屬編輯性說明）。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards — 標題／表格殘留 502（已修）、其餘為風格建議（未改；Part 8 來源段落本來就沒有導言行）；Spec — 無阻擋發現，WebFetch 確認 Deployment 頁的 rounding down/up 與 Envoy 的 "in addition to 503 response code"。第 2 輪未重跑（修正只是兩處用字一致性，validate.sh 綠）。
+- Learnings: 修內文結論時順便 grep 同小節標題／表格有沒有殘留舊結論（502）。
+---
+## 2026-11-01 - US-055
+- 修正 Part 10.1（P10-001）：ingressgateway 示意輸出補上 15021 狀態埠，並在輸出下方加註「示意輸出、nodePort 隨機分配、現行預設開 15021/80/443、舊版 chart 才固定 31380/31390」。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（WebFetch 確認 istio.io IST0162 頁有 "only open on target ports 15021, 8080 and 8443"，Service port 80→8080、443→8443，與新說法一致）。
+- Learnings: 無新增通則。
+---
+## 2026-11-07 - US-056
+- 修正 Part 10 §10.4（1/2）：帳本 P10-003／004／005／006／007
+  - P10-003：刪掉「很多 K8s 發行版也拿它當 Pod / Service CIDR」，補 RFC 6598 §4 警告「are likely to experience problems」
+  - P10-004：§10.4 三處 metallb.universe.tf/address-pool → metallb.io/address-pool，註明 0.14.9 起（Part 11 兩處屬 P11-006，未動）
+  - P10-005：loadBalancerSourceRanges 註解註明是否生效取決於 LB 實作，不支援時被靜默忽略
+  - P10-006：第二組 Service／Deployment 的 namespace 行加指路註解；踩雷 2 下方新增 blockquote 引官方建議 gateway 與 control plane 分開 namespace（例 istio-ingress），憑證跟著搬
+  - P10-007：sidecar.istio.io/inject 改 "true"，引官方「Enable gateway injection.」，說明 false 時 image: auto 不會被替換
+- 檔案：k8s-ecosystem-guide.md
+- 註：feat commit（7e54617）由前一個 iteration 完成但沒跑 review；本輪以 BASE=4251e19 接手。
+- Review 第 1 輪：Standards — 「Enable gateway injection」未加「」（硬性）、「前多一個半形空白、兩處 MetalLB 註解措辭不同、踩雷 2 括號塞太多；
+  Spec — 四個 URL 引文全數找到；P10-006 部分完成（建議沒放在 manifest 旁）。另先修了 “” → 「」（8b7b1df）。
+  修正：ce2ba13 加「」、去空白、統一註解、namespace 行加註解、踩雷 2 拆成 blockquote。
+- Review 第 2 輪：Spec 無發現；Standards 無硬性違規，只剩判斷題（新註解欄位對齊差 4 欄、一行註解偏長）—— 依慣例收斂不再改。
+- Learnings：前一個 iteration 中斷在 feat 之後時，BASE 取 feat 的前一個 commit，直接從 review 接手。
+---
+## 2026-11-07 - US-057
+- 修正 Part 10「10.4 雙 VIP 架構」（2/2），帳本 P10-008、P10-009。
+  - P10-008：internal gateway Deployment 的 nodeSelector／toleration 從 routable 改成 `network: non-routable`
+    placeholder（key 沿用 Part 13 的 network），註解說明為何是 non-routable、要用 13.5 查實際 label，
+    以及 non-routable node 沒 label 時 nodeSelector 要拿掉（否則永遠 Pending）、沒 taint 時 toleration 要拿掉。
+  - P10-009：「要換入口，只要改 VS 的 gateways 那一行」改成 hosts 也要符合新 Gateway server 的 hosts，
+    引 Istio Gateway 參考原句，舉 internal-api.example.com 與 404 / NR 為例。
+- Files changed: k8s-ecosystem-guide.md
+- Review 第 1 輪：Spec 無發現（WebFetch 確認引文逐字存在於 Server.hosts 說明）。Standards：nodeSelector 缺少
+  「沒 label 就拿掉」的逃生口（會永遠 Pending）、「照抄第一組」指不到東西（Part 10 沒有第一組 Deployment）
+  → 改指 13.4、「跟 Part 13 一樣」只對 key 成立 → 改寫、段落結尾重複 hosts 那句 → 刪掉。
+  順手把原本引用 13.2 右上格的說法拿掉（那格的 Pending 是 taint 造成，不是缺 label）。
+- Review 第 2 輪：Spec 無發現。Standards 無硬性違規，只有判斷題（未改，上限後不改）：
+  「13.2 表格右下那格」13.2 有兩張表，可寫明是四象限那張；`NR` 前提是 access log 有開（guide 別處有說）；
+  註解重述 Part 13 規則；一句話含兩個條件。
+- Learnings：在註解裡引用 guide 的表格某一格時，先確認那格的「原因」跟你要說的一致，而且該節只有一張表。
+---
+## 2026-11-07 - US-058
+- 修正 Part 10 的 10.5／10.6（帳本 P10-010、P10-012、P10-013、P10-014）：
+  - P10-010：internal-gw-baseline 的 DENY paths 從 "/actuator/*"（前綴比對，打不中 /gui_epmmFormQuery/actuator/...）
+    改成 "/{*}/actuator/{**}" ＋ "/actuator/{**}"，註解說明 {*}／{**} 語意、{**} 必須最後、最低 Istio 版本官方未寫。
+  - P10-012：istioctl proxy-config listener 的 --port 443 → 8443，註解說明 listener 綁 targetPort（0.0.0.0_8443）。
+  - P10-013：「應該要 404，不是 200」→ 000 或 404 都正常、只有 200 有問題；000 = SNI 對不到 filter chain、TLS 握手失敗（curl exit 35）。
+  - P10-014：kubectl get endpoints → kubectl get endpointslices -l kubernetes.io/service-name=istio-ingressgateway-internal。
+  - Part 10 結尾加 `### 參考來源`（P10-001～014 已修各列的 9 個官方 URL，去重），"Part 10" 加進 VERIFIED_PARTS。
+- 檔案：k8s-ecosystem-guide.md、scripts/validate.sh
+- Review 第 1 輪：Spec 0 項（四個來源頁引文皆找到）；Standards 0 項硬性違規，1 項判斷題被採納：
+  「access log 的 NR」只掛在 404 那行，但 Envoy 的 NR 也涵蓋 no matching filter chain（000 那種）→ 改成兩種都記成 NR。
+  其餘（443→8443 說明與 P10-001 重複、版本未驗證的 caveat、path template 規則是轉述）記為觀察，不改。
+- Review 第 2 輪：兩軸皆 0 項。
+- Learnings：無新的可重用慣例。
+---
+
+## 2026-11-07 - US-059
+- 修正 Part 11 帳本 P11-002、P11-003、P11-004（k8s-ecosystem-guide.md）
+  - P11-002：11.2 表格 session 列改「沒有跨 cluster 的 session 問題」＋表下說明（stable replicas: 2 ＋ canary pod、狀態在 pod 記憶體、DR consistentHash 的 epmm-affinity 是目標設定且只是軟性黏著）；11.2「何時選 A」bullet、11.6 對照表、11.7 選擇表同步改說法
+  - P11-003：11.3 故障域列改成「切換時間 ≈ 健康檢查判定時間 ＋ DNS TTL ＋ 用戶端快取」，指向 11.10 踩雷 4
+  - P11-004：11.3 第 1 點與 11.4 健康檢查區塊加註：後端補 permitAll（PRD 階段 1）前該路徑回 302；期望 200 → 兩邊不健康，3xx 算成功 → 假綠燈
+- 連動修改：11.2 bullet 原本「（見 11.4）」指錯小節（session 在 11.5），因為同一行整句重寫，順手改成 11.5。11.3 表格 session 列的「見 11.4」同樣指錯，但不在本故事帳本列，未動（留給之後處理）
+- Files: k8s-ecosystem-guide.md
+- Review 第 1 輪：Standards 5 項判斷題（11.3 的「秒～分鐘級」與 11.6 不一致、cross-pod 說明重複 4 次但都指回 11.2（接受）、「見上一段」不精確、「PRD 階段 1」未解釋、epmm-affinity 是目標狀態非現況）；Spec 同指出秒～分鐘級與 epmm-affinity 現況問題、§9.1 未引用。修：刪掉區間改指 11.10、改「見上方表下說明」、加「目標設定」、加註 Spring 後端修正
+- Review 第 2 輪：只剩 11.6 表格「DR 軟性黏著」與同表「FZ2 是 DR（災難備援）」縮寫撞名 → 上限後改成 DestinationRule（單字替換，未再 review）
+- Learnings：Part 11 裡「DR」已被定義為災難備援，提到 DestinationRule 時要寫全名
+---
+## 2026-11-07 - US-060
+- 修 Part 11 §11.4（P11-005～P11-008）：
+  - P11-005：「兩邊相同」區塊的 VS 加註解，說明它是簡化範例、與 track-a 03-virtualservice.yaml 同 namespace／name，照抄會蓋掉它（pilot-run 消失；沒 subset → Service 只比對 app，stable／canary pod 都分到正式流量）；段落改成 Gateway 用上面那份、VS 兩邊都 apply track-a 那份。
+  - P11-006：metallb.universe.tf → metallb.io（0.14.9 起，沿用 Part 10 的註解措辭），註明 LB／位址池屬環境特定。
+  - P11-007：targetPort 依安裝方式（istioctl 8443／`istio/gateway` Helm chart 443）；註明示意 Service 少了 status-port 15021／http2，直接 apply 可能蓋掉，位址池應走安裝工具 values。
+  - P11-008：GSLB 健康檢查改成 SNI＋Host 兩行；blockquote 改寫並引用 istio network-issues 兩句原文，附 curl --resolve 範例。
+- 連動修改：區塊標頭「FZ1 與 FZ2 內容一字不差，兩邊都要 apply」改成只叫人 apply Gateway（否則與 P11-005 的警告矛盾）。
+- Files: k8s-ecosystem-guide.md
+- Review 第 1 輪：Standards 4 項（標頭與新註解矛盾、說明重複、FZ2 targetPort 註解重複、chart 名稱不一致）；Spec 1 項（段落只提 VS、漏了 Gateway），來源引文全部查到。已修（4d3003e）。
+- Review 第 2 輪：Spec clean；Standards 1 項（標頭仍叫人 apply 整個區塊）。上限後修掉（b96486b），未 review → 寫進 notes、passes 維持 false。
+- Learnings：在 yaml 區塊裡加「不要照抄 apply」警告時，同一區塊的標頭／標題若寫著「都要 apply」要一起改，reviewer 會抓矛盾。
+- 觀察（不在本故事範圍）：Part 10 建議用 istio/gateway helm chart 裝第二組，但示意 Service 仍是 targetPort 8443；track-a 03-virtualservice.yaml 仍有 CLAUDE.md 列的已知未修項。
+---
+## 2026-11-07 - US-060 (re-review)
+- 依 notes 以 BASE=4d3003e 重新 review 上限後的修正 b96486b（11.4 第一個 yaml 區塊標頭改成「Gateway 兩邊都要 apply；VirtualService 是簡化範例，不要 apply」）。沒有重做故事。
+- Files changed: 無（只有 ralph 記帳）
+- Review round（re-review）：Standards 0 項硬性違規，3 項選擇性判斷題（標頭「一字不差」仍像涵蓋整塊、「不要 apply」說了三次、區塊內註解沒寫 03-virtualservice.yaml 檔名）—— 都由區塊後的段落解決，依 patterns.md 收斂規則不改。Spec 0 項；WebFetch 驗過 metallb.io/release-notes、istio gateway chart values.yaml、istio network-issues 三個 URL，引文都在。
+- validate.sh: ALL PASS（138 項）
+- Learnings: 無新的（照 patterns.md「上限後的修正以前一個 commit 為 BASE 再 review 一次」的流程跑，一輪就收斂）
+---
+## 2026-11-07 - US-061
+- 修正 Part 11：11.5（P11-009 SSO 重新認證而非直接登入頁、P11-010 多分頁改「不同瀏覽器／裝置」、P11-011 補第四種 F5 cookie persistence）、11.10（P11-014 kubectl 用全名避免 Gateway 撞名、P11-015 切換時間 = 健康檢查＋TTL＋用戶端快取，刪掉未驗證的 30~60 秒與「忽略短 TTL」）。
+- 連動修改：11.10 踩雷 1 的 for 迴圈四個資源都改全名（同一行，一致性）。
+- 加 Part 11 `### 參考來源`（5 個 URL），"Part 11" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review: 第 1 輪 Standards 0 硬性違規（5 個判斷題）、Spec 1 項（帳本 P11-014 引文與 Alibaba 頁面字句不完全一致，頁面語意相同，guide 未引用該句；帳本問題，未改）＋ F5 列有 2 句帳本沒有的推論 → 刪掉；「跳邊」改「被切到另一邊」。第 2 輪只做刪減，未重跑完整 review。
+- Learnings: 帳本引文可能是意譯，WebFetch 對不上逐字時先看語意與建議改法是否被頁面支持。
+---
+## 2026-11-07 - US-062
+- Part 12 (12.2/12.3): P12-001 added managedRoutes (canary-test, canary-testers) to the 12.2 skeleton + v1.3 note + note that 12.5-12.7 route names must be listed; P12-002 cookie no longer "sticks for the whole session" (table row + paragraph); P12-004 Job sidecar.istio.io/inject moved from annotations to labels.
+- Linked edits: 12.2 table cookie row (same claim as P12-002, two lines earlier).
+- Not done: Istio 1.27 native sidecar remark (ledger says already confirmed in prior batch).
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards no hard violations (quoted elision, wrong "step 3 closes cookie route" claim -> fixed); Spec: all ledger quotes verified on pages, leftover table claim -> fixed. Round 2: only minor canary-testers comment clarity -> fixed.
+- Learnings: ledger line numbers drift; grep by text. Same wrong claim often appears twice (table + paragraph).
+---
+## 2026-11-07 - US-063
+- 修正 Part 12 / 12.4（P12-005~008）：query 改 reporter="destination" + destination_service_name（args 傳入）；enough-traffic 併進 success-rate query（and on() >= 20）；警告第 3 點改成拉長 [2m] range；Inconclusive 改為「success+failure 兩條件留空隙」並補 NaN／空陣列／consecutiveErrorLimit 說明。
+- 連動修改（同一小節一致性）：latency-p99 也加了 failureCondition／inconclusiveLimit／len(result)、selector 換成同一組；successCondition 小標題改名。
+- 未動（屬其他故事）：12.12 的 enough-traffic（P12-025）、12.6 的 analysis step 沒傳 args（success-rate 現在有必填 arg service-name，12.6／12.11 的 Rollout 範例需要在其故事補 args）。
+- Review：round 1 Standards 0 硬性、2 observation（重複說明、args 示範）已修；Spec 0 阻擋，建議補 args 傳法，已修。
+---
+
+## 2026-11-07 - US-064
+- 修正 Part 12 的 12.7（P12-009 階段 1 的 pause: {} 移到關閉 header route 之前；P12-010 階段 3 補回 setHeaderRoute 開/關；P12-011 通知要先設 argo-rollouts-notification-configmap 並加訂閱 annotation）與 12.8（P12-012 progressDeadline 語意＋progressDeadlineAbort 預設 false，同步改 12.11 的同句；P12-013 startingStep 從 0 起算、背景分析需拿掉 count 的另一份 template）。
+- Files: k8s-ecosystem-guide.md
+- 連動修改：12.11 Rollout 範例中 progressDeadlineSeconds／progressDeadlineAbort 的註解（帳本 P12-012 第二個位置 5105–5106 所指）。
+- Review round 1: Standards 抓到 1 處「碰運氣」引號落空（改成不加引號的敘述）、success-rate-bg 沒交代做法（補「複製 12.4、刪 count、改名」）；Spec 全部引文在官方頁找到，唯一提醒是「不設 count」官方只明寫 0（改為引官方 count 0 原句）。Round 2：只有上述小修，由我自行對照確認（未再開 sub-agent）。
+- Learnings: 註解裡用「」引 guide 自己的字樣要先 grep 確認存在。
+---
+## 2026-11-07 - US-065
+- P12-014: 兩處 `kubectl exec deploy/pmc-epmmformquerygui[-stable]`（12.10 與「先確認環境有沒有 Prometheus」）改成用 `-l app=pmc-epmmformquerygui` 挑 pod，並在註解說明 Track B 是 Rollout、沒有 Deployment。
+- Files: k8s-ecosystem-guide.md
+- Review: 1 輪，diff 只有 2 處，對照 track-b/release/20-rollout.yaml（app label、kind: Rollout）人工審；帳本該列無官方 URL（證據是 repo 內檔案），無發現。validate.sh exit 0。
+- 未改：istio-proxy 映像有沒有 curl 帳本註明未研究，故沒動。
+---
+## 2026-11-07 - US-066
+- 修正 Part 12 / 12.11（1/2）：P12-015（改成 track-b 實際路徑並列出差異）、P12-016（標成未完成、不可直接 apply；Rollout env 加警告註解）、
+  P12-017（user-name-attribute 改 sub）、P12-018（刪 app.cors／app.sso，補 app.post-logout-redirect-uri）、P12-021（補 -svc Service 與 ServiceAccount 的說明）。
+- 連動修改：12.11 開頭「前面 12.2 的 Rollout 是精簡版…才是可以直接 apply 的完整版」改成與新警告一致；章節標題「六份資源」改為含 ServiceAccount／-svc 的說法。
+- 觀察（未改，屬其他故事）：套用順序（00-configmap.yaml…05-analysistemplate.yaml）與 Part 15 的檔名樹仍是舊檔名。
+- Files: k8s-ecosystem-guide.md
+- Review：1 輪（BASE=95dc186），Standards／Spec 皆無發現；來源為 repo 檔案，已直接對照 CANARY-COMPLETE.md 與 track-b/*。
+---
+## 2026-11-07 - US-067
+- 修正 Part 12.11（2/2）：P12-019 managedRoutes 註解（驗證失敗而非不生效）、P12-020 兩份 DR cookie 改 epmm-affinity、P12-022 retryOn 改 reset,connect-failure,refused-stream、P12-023 套用順序改為先建 Rollout、確認健康再刪 Deployment（&& 串接）、P12-024 檔名改 base/、release/ 實際路徑、補 ServiceAccount、dry-run 移最前。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 3 hard（引用已刪字樣、未附來源的斷言、delete 沒擋在 status 後）＋smells；Spec 1（「selector 不能重疊」官方頁沒寫）。全修：改成不加引號敘述、刪掉 selector 推論、delete 用 && 串在 status 後、第二份 DR 註解改「同上」。第 2 輪未重跑 review（只剩小修，validate.sh exit 0）。
+- 未動（帳本其他列範圍）：其餘 JSESSIONID／retryOn 5xx 出現在 Part 14 等處；track-b 實際 DR 檔還沒改 epmm-affinity（track-b 未補齊，已知）。
+---
+## 2026-11-07 - US-068
+- 修正 Part 12 的 12.12：P12-025（enough-traffic 指標 failureLimit 形同虛設 → 改成把最低樣本數併進 success-rate 的 query，加 failureCondition 空隙與 inconclusiveLimit，並說明為什麼不另開指標；註明 track-b success-rate-safe 仍有同樣問題、尚未修）、P12-026（analysis 後接 pause 無法在失敗時停下來 → 改成 Inconclusive 設計或 dryRun）。
+- 連動修改：「陷阱」小節的「解法：多加一個指標」改成併進 query（與新 yaml 一致）；刪掉推薦 success-rate-safe 的 blockquote 改為警示。
+- Part 12 結尾加 `### 參考來源`（14 個去重官方 URL），"Part 12" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（3 項判斷題：「停下來等人」引號、與 12.4 說明重複、用詞密度，未改）；Spec 無發現（P12-026 的 "or abort the rollout completely" 因 WebFetch 截斷未能逐字確認，其餘引文皆確認；"空結果→Inconclusive" 官方來源未明講，但由求值順序推得）。
+- 觀察（未改）：5916–5920、7575–7592 仍用 success-rate-safe ＋ pause: {}，屬另一列範圍。
+---
+## 2026-11-07 - US-069
+- Part 13 (13.3, 13.4) fixed per ledger P13-002..P13-005 (feat commit 4503b3a; review fix follow-up).
+- Files changed: k8s-ecosystem-guide.md, ralph/prd.json, ralph/progress.txt
+- Review round 1 (BASE=0c971cb): Spec 0 blocking (2 minor notes: "預設" for Cluster not quoted from page; not-ready example consistent with guide line 2272). Standards 0 hard; 1 judgement fixed: unquoted English paraphrase of Cluster policy replaced by the verbatim ledger quote. Not changed: repeated Cluster/Local explanation (intentional, each spot read standalone).
+- Observation (out of scope): Part 10 may still carry "一定要 routable" framing; owned by another ledger row.
+- Learnings: story may already have its feat commit when an iteration starts; use the commit before it as BASE.
+---
+## 2026-11-07 - US-070
+- 修正 Part 13 的 13.7 踩雷：P13-006（v1.34 起事件只印 untolerated taint(s)，加版本差異說明）、P13-007（DoNotSchedule+maxSkew 擋的是不均勻、補 labelSelector、真正排不上去的是 hostname required podAntiAffinity）、P13-009（get hpa 沒有 CURRENT/DESIRED，改看 get deploy READY／describe hpa）。
+- Part 13 結尾加 ### 參考來源（6 個官方 URL）；VERIFIED_PARTS 加 "Part 13"。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（describe hpa 的 X/Y 放在「」裡不逐字 → 改成反引號）；Spec 抓到 get hpa 欄位寫成 TARGETS（頁面是 TARGET）→ 已改。
+  podAntiAffinity、"REPLICAS 含 Pending"、"Deployment pods:" 字樣無法在被抓的頁面範圍內直接查到，來自帳本建議改法（使用者已確認）。第 2 輪僅確認修正是單行改動、validate.sh exit 0。
+- Learnings: HPA walkthrough 頁的 get hpa 表頭欄位是 TARGET（單數）。
+---
+
+## 2026-11-07 - US-071
+- 修正 Part 14 的 14.2／14.3（P14-001..005）：圖說改「BFF 依名單自動發 cookie」並指向 CANARY-COMPLETE §7.1；風險列改「路由風險為零；程式風險不為零」；canary 掛掉改為正式使用者不受影響、cookie 持有者吃 503 UH；每次發布要改改為 ConfigMap＋image＋replicas 0→1＋sync 同 commit；promote 改兩個 commit。
+- 連動修改：表格儲存格改成一句結論＋「（見表下說明）」，細節放表下清單（patterns.md 的規矩）。
+- Files: k8s-ecosystem-guide.md
+- Review: round 1 Standards 2 項（儲存格太長、重複一句 cookie 持有者不知情）→ 已改；Spec 0 項。round 2 無發現。
+- Learnings: 帳本引的是本地 CANARY-COMPLETE.md 而非網址，直接對該檔 grep 驗證即可。
+---
+## 2026-11-07 - US-072
+- 14.4 內容換成摘要＋指標（CANARY-COMPLETE.md §2、§3.2–§3.9、§4.2），保留四層 label 串接圖與 UH/NC 表與驗證指令；刪掉五份 manifest 複本與套用順序（P14-018～029 隨之解決）。小節內無 skip-yaml 標記需處理。
+- 連動修改：「四層 label 串接」標題的「後面的 YAML 就都通了」改為「任何一份 YAML」（後面已無 YAML）。
+- Files: k8s-ecosystem-guide.md
+- Review：未啟動平行 sub-agent；因為來源皆為本地 CANARY-COMPLETE.md，直接核對章節存在、14.4 無禁止操作字樣、diff 僅限 14.4。發現 1 項（指標漏 §4.2 套用順序），已補。
+- 觀察（不在本故事範圍，未改）：guide 其他處仍指向 14.4 的完整 manifest——Part 12 開頭「Part 14.4 給了 Track A 的完整 manifest」、14.6「14.4 的 VirtualService 裡那條 default route」、末尾延伸閱讀「Track A 的完整 manifest 見 Part 14 的 14.4」。
+---
+## 2026-11-07 - US-073
+- 修正 Part 14 的 14.5：P14-006（前提 1 刪掉「必須在 canary subset 上加 consistentHash」，改成 repo 規定 canary 只開 1 個 replica，引 CANARY-COMPLETE.md §8.3）、P14-007（前提 2 改成「靠自動偵測，通常認得出 HTTP；偵測失敗才當純 TCP；明確宣告才可靠，appProtocol 優先於 port 名稱前綴」，逐字引官方兩句英文）。
+- Files changed: k8s-ecosystem-guide.md（2 行）
+- Review round 1: Standards 0 hard violations（5 條風格 judgement call：句子偏長等，未改）；Spec 0 findings（兩個官方 URL 的引文都 WebFetch 確認存在，appProtocol 優先於 port name 亦吻合）。
+- 未改動：14.5 結尾「這就是 Part 9 發現 4 為什麼要修」、line 5577 的「Istio 可能用 L4 處理」屬其他帳本列範圍，留給對應故事。CANARY §4.1 同樣過強的說法不在本故事範圍。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-07 - US-074
+- 修正 Part 14 14.6（P14-008..011）：round-robin 改 least request（圖 ⑤、方法說明、一句話總結連動），「約三分之一」註明近似值；retries 列改為「不行（但仍套用 Istio 預設重試）」＋表下說明；刪除 Prometheus 呼叫方一列（P14-010 保守刪除）；方法 2 註明先確認測試 pod 為 2/2。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec — 引文皆在頁面上；多餘的「實際比例依 least request 即時負載」已刪。retryOn 清單在 virtual-service 參考頁而非帳本引的 concepts 頁（內容為真，未新增來源，依帳本）。Standards — 無硬性違規；retries 儲存格改成「不行（…）」與鄰列一致。未處理：方法 2 callout 內含 native sidecar 說明（來自帳本，保留）。
+- Learnings: 無新增通用慣例。
+---
+
+## 2026-11-07 - US-075
+- 修正 Part 14 的 14.7（P14-012 加註 x-app-track 只證明 pod、指向 §6.4；P14-013 加註指向 §3.4）與 14.9（P14-014 流量切換、P14-015 promote 兩 commit、P14-016 兩軌互斥原因與官方建議順序）。
+- Files: k8s-ecosystem-guide.md, ralph/patterns.md
+- Review round 1: Standards 無硬性違規（4 項 judgement call，只處理行內 URL 重複：移除，改留 patterns.md 提醒）；Spec 無發現，官方兩段引文皆在頁面上。
+- 未處理的 judgement call：表格儲存格偏長、「base/03 還沒改」句子日後可能過時（帳本建議改法本身要求這句）。
+---
+## 2026-11-07 - US-076
+- 14.10 換成摘要＋指標（指向 CANARY-COMPLETE.md 第 5、6.1、8.1、8.4 節）。P14-030 摘要、P14-031～035 隨整段 bash 區塊與 canary 腳本句一起移除。
+- Files: k8s-ecosystem-guide.md（只動 14.10；該區塊無 skip-yaml 標記，無連動修改）
+- Review: 1 輪。Standards／Spec 皆無發現（diff 內被禁字串只出現在刪除行；章節標題已對照 CANARY-COMPLETE.md）。
+---
+## 2026-11-07 - US-077
+- 14.11 圖「現在」欄補上「BFF 依名單／自動發 cookie」（P14-017）；Part 14 結尾加 `### 參考來源`（5 個官方 URL，含 migrating/）；"Part 14" 加進 VERIFIED_PARTS；patterns.md 刪掉已完成的 Part 14 提醒。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh, ralph/patterns.md
+- Review round 1: Standards — 圖列太擠（改成兩行各自對齊）、最後一筆來源與 `---` 之間缺空行（已補）；Spec — 所有引文在官方頁都找得到，P14-017 與 CANARY-COMPLETE.md §0 一致，僅圖排版問題（同上已修）。未改動 P14-017 以外的說法。
+- Learnings: 在 ASCII 圖加字時用 node 依顯示寬度（CJK=2）補空白，欄寬不夠就拆成兩行而不是擠在同一行。
+---
+## 2026-11-07 - US-078
+- 修正 Part 15：15.1 table cell（ownerReference／共用 app label 與 VS 才是互斥原因）、切換風險改為引用官方並存遷移建議＋workloadRef/scaleDown；15.2 做法二標題改「未來選項，目前不支援」並加 ⚠ 說明（CANARY-COMPLETE §0／§10 #11）；promote --full 依官方「skipping analysis, pauses, and steps」限縮說法；結尾「建議」改為未來選項。
+- 連動修改：15.7「切換時最容易出錯的三件事」表第一列（P15-001 的第二個位置，帳本行號 7302），因為與 15.1 同一說法。
+- 觀察、未改：15.6 約 7503 行「Track B 的 promote --full 指標仍會跑」（非本故事 ID）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無違反（重複說明為判斷題，未改）；Spec 抓到 P15-001 第二位置漏改 → fix commit 7dee46d。第 2 輪未另跑（修正僅一格、validate.sh exit 0）。
+---
+## 2026-11-07 - US-079
+- 修正 15.3 表格 P15-005～009：ConfigMap 命名(Track A 固定 -stable/-canary)、檔案總數 9/7、權重不調、promote 指向第 5 章 4a、回滾指向 git revert/8.1/8.3。
+- 連動修改：15.3 資源清單表 ConfigMap 列 Track A 欄（同為 P15-005 的 6867 行）。
+- Files: k8s-ecosystem-guide.md
+- Review: 1 round, Standards/Spec 皆無發現（引文逐一對照 CANARY-COMPLETE.md；實數 track-a 4+4+1、track-b 7）。
+- Learnings: 帳本引用本地檔時，直接讀該檔取代 WebFetch。
+---
+## 2026-11-07 - US-080
+- 修正 15.3「同樣的部分」：ConfigMap 不能直接複製（P15-010：track-b 缺 APP_TRACK/APP_CANARY_ENABLED/名單掛載、ADDITIONAL vs LOCATION 語意不同）、pod template 改成「寫法可參考、非整段複製」；canary 1 replica 理由補上 OAuth2 state（P15-011）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Spec 無發現（引文與 CANARY-COMPLETE.md §10 #11 / §3.7 相符）；Standards 指出小節標題「可以直接沿用，不用改」與新內文矛盾、兩條 bullet 重複列 env。連動修改：標題改為「兩個 track 共通的部分（有些可以沿用，ConfigMap 與 pod template 不行）」，pod template bullet 的重複 env 清單改成「上一條列的 env」。無其他帳本列受影響。
+- Learnings: 改掉小節內的結論時，順手檢查該小節標題是否仍成立。
+---
+## 2026-11-07 - US-081
+- 15.4 整節內容換成摘要＋指標（CANARY-COMPLETE.md §4.1/§4.3/§5/§8/§9），標題保留；P15-012～020 隨取代一起解決。
+- 15.4 內沒有 validate:skip-yaml 標記。未連動修改其他句子。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 與 Spec 都確認 15.4 本身乾淨（無禁止操作、章節號存在、引文在 CANARY-COMPLETE.md）。
+  觀察（不在本故事帳本 ID 內，未改）：約 7087 行「15.4 / 15.5 是有完整 kubectl 權限時的版本」、
+  約 7464 行「前面 15.4 / 15.5 的 SOP 假設你可以下 kubectl scale…」現在與 15.4 變成指標不一致，帳本沒有對應列；
+  約 7922 行屬 P15-051。另：摘要含 §4.3、§9 兩個額外指標（超出 P15-012 的 §4.1/§5/§8）。
+- Learnings: 取代整節後，其他段落對該節的描述（「15.4 / 15.5 的 SOP」）會變過時；需另開帳本列處理。
+---
+## 2026-11-07 - US-082
+- 15.5 Track B SOP（約 120 行：前置檢查、步驟 1–6、緊急煞車）換成摘要＋指標：需要 kubectl argo rollouts、與 apply-only 不相容；track-b 沒依附錄 C 補齊；指向 CANARY-COMPLETE.md §0、§10 第 11 項；一句「日後補齊以 Argo 官方文件為準」；保留指向 15.12。
+- 註解/skip-yaml 標記：該小節沒有 skip 標記需刪。
+- Files: k8s-ecosystem-guide.md
+- Review round 1（inline，BASE=af91313）：Standards 0；Spec 0（引文在 CANARY-COMPLETE.md §10 #11 逐字存在；§0 第 41 行是「目前沒有跟上自動分流」）。無禁止操作字樣。
+- 觀察（未改，不屬 P15-021）：guide 第 7087 行「15.4 / 15.5 是有完整 kubectl 權限時的版本」、第 7347、7805 行仍提到 15.5 的 SOP；應由 15.8／15.11 對應帳本列處理。
+---
+## 2026-11-07 - US-083
+- 修正 Part 15 的 15.6 表格「緊急修補」列（P15-022）：舊說法「指標仍會跑，只跳過人工那關」是錯的，
+  改成「會跳過還沒跑的 analysis、pause 與剩餘 step（見 15.2 的 `promote --full` 說明）；已跑完的 analysis 不受影響」。
+- 連動：無其他句子被改。「已跑完的 analysis 不受影響」是照 15.2（第 7155 行）既有說法補上，避免讀者誤以為指標永遠不跑。
+- Files changed: k8s-ecosystem-guide.md（1 行）
+- Review rounds: 1 輪。Standards：無硬性違規（2 則可選的判斷題：格子稍長、中英 step 用詞）；Spec：無發現，
+  WebFetch 確認官方頁真的有「To skip analysis, pauses and steps entirely, use '--full' to fully promote the rollout」。
+- Learnings: 指標到同一頁其他 Part 的說明時，先 grep 確認說明真的在哪一節（第一版我寫成 15.4，實際在 15.2）。
+---
+## 2026-11-07 - US-084
+- 15.7 兩種 track 之間的切換：整段 SOP（Track A→B、B→A、三件易錯事、延伸閱讀）換成摘要＋指標（§0、§2、§10 第 11 項、Argo migrating 官方頁）。P15-024~028 隨取代解決。
+- Files: k8s-ecosystem-guide.md（+4/-86，只動 15.7）
+- Review round 1: Standards — 0 hard；judgement：標題可加「不維護」、與 15.5 開頭相似（不改，同 US-082 風格）。Spec — 0 findings（WebFetch 確認 "Not following this approach might result in downtime." 在官方頁；§0 引文逐字相符；禁用指令皆未出現）。「不會互搶 pod」舊說法已隨表格刪除，guide 內無殘留。
+- 連動修改：無。
+- Learnings: 無新增（沿用 15.5 的 stub 形式）。
+---
+## 2026-11-07 - US-085
+- 修正 Part 15 的 15.8：P15-029（replicas 開關：開＝1；關＝APP_CANARY_ENABLED=false＋image 改回，排空後才設 0，新增「canary 的關」段落）、P15-030（刪 kubectl delete 一列）、P15-031（promote 列改成保守寫法：官方文件未說明，先驗證，見 15.12）、P15-032（補 edit-last-applied 遷移步驟與官方「one-time degradation」引文）。
+- 連動修改（同小節一致性）：標題「四件做不到的事」→「三件」（因 P15-030 刪一列）；stable/canary 表格 canary 格「一定要寫（靠它開關 0 / 1）」→「要寫（開＝1；關＝0，但只能在確認排空後才設 0）」（P15-029 的原文摘錄之一）；edit-last-applied 補一句需要有編輯權限的人手動做（apply-only 前提）。
+- Files: k8s-ecosystem-guide.md
+- Review: 第 1 輪 Standards 2 項軟性（格子與段落重複、「見表下說明」指標落空）、Spec 2 項小提醒（edit-last-applied 權限、連動修改需記錄）→ 全部修掉；第 2 輪無發現。
+- 觀察（不屬本故事）：15.11 的「ConfigMap 累積怎麼辦」（約 7606 行）可能是已刪 P15-030 列的對應處，留給負責的故事。
+---
+## 2026-11-07 - US-086
+- 修正 Part 15 的 15.9（P15-033～036）：track-a 目錄樹換成 CANARY §2 的樹（10-/11- 固定檔名、補 runtime/05-）；
+  「打回 100/0」改成 controller 立刻改回、權重短暫跳動、VS 留 base/、Argo CD 設 ignoreDifferences；
+  編號表補 05-、10-～11-；apply 順序註明是 kubectl 走目錄的實作行為（P15-036 保守寫法，引文為官方 configmap 頁原句）。
+- 連動修改：編號表 `00-～09-` 改 `00-～04-`（避免與 05- 重疊）；「限制二」段的同一句錯誤說法（帳本「另 7704」）一併改掉。
+- Files: k8s-ecosystem-guide.md
+- Review: round 1 Spec 1 項（P15-034 第二處未改）、Standards 判斷題（05- 範圍重疊），均已修；round 2 無發現。
+- 觀察（未改，不屬本故事列）：15.10 仍有 `release/10-configmap-1.3.0.yaml` 與 immutable 說法；track-b 樹仍帶版本號（符合現況）。
+- Learnings: WebFetch 的 configure-pod-configmap 頁引文在 offset 100000 之後。
+---
+## 2026-11-07 - US-087
+- 15.10「Track A 的 apply-only SOP」整段（約 206 行，含起始狀態、步驟 1–5b、操作對照總表）換成一句摘要＋兩點指標：主線以 CANARY-COMPLETE.md §5（步驟 0–5）為準，關閉看 §8（8.1／8.2），回滾看 8.4 與 15.11。標題保留。
+- 解決 P15-037～P15-043。摘要不含任何禁止操作字樣（連「replicas: 0」都避開，改寫成「縮到零個 replica」）。該小節沒有 validate:skip-yaml 標記。
+- Files changed: k8s-ecosystem-guide.md（只有 15.10）。沒有連動修改其他句子。
+- Review rounds: 1 輪。Standards 無發現；Spec 無發現（帳本六則引文都在 CANARY-COMPLETE.md 找到，guide 沒有懸空的「見 15.10」）。
+- Learnings: 觀察（不屬本故事）— guide 約 7386 行仍有「三處版本號改回 1.2.3」，屬 P15-044。
+---
+## 2026-11-07 - US-088
+- 修正 Part 15 的 15.11（P15-044～047）：revert 註解與好處段落改成「ConfigMap 內容＋image tag＋config-hash 一起還原，前提同一個 commit，用 8.4 比對 hash」；
+  「舊 ConfigMap 絕對不能刪／保留 3 版」改成「舊版不必保留」＋歷史說明；prune 列補上 alpha 原文引文與 last-applied／allowlist 範圍，「不建議」不變。
+- 連動修改：「那 ConfigMap 累積怎麼辦」小節改名為「那要不要清 ConfigMap」，表格去掉「定期請有權限的人清」列（依 P15-046 累積問題已消失）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1：Standards 無硬性違規（6 項判斷題：表格只剩兩列、段落密度等，未改）；Spec 無缺漏，allowlist 為「partial list」的細節屬輕微不完整，未改。
+- Learnings: Part 15 的 `### 參考來源` 與 VERIFIED_PARTS 由最後一個 Part 15 故事加入，本故事不加。
+---
+## 2026-11-07 - US-089
+- 15.12 Track B 在 apply-only 下：標題保留，內文（限制一／二、spec.paused 流程表、比較表）換成摘要＋指向 CANARY-COMPLETE.md 第 0 章、第 10 章 #11 的指標（P15-048）。
+- Files changed: k8s-ecosystem-guide.md
+- Review rounds: 1 輪。Standards 0 發現；Spec 0 發現（兩個 nit：摘要比 2-3 句稍長、帳本行號已過時，皆不處理）。
+- 連動修改：無。Learnings：無新增（沒有可重用的新慣例）。
+---
+## 2026-11-07 - US-090
+- 15.13 換成摘要＋指標（CANARY-COMPLETE.md 第 2 章、4.1、第 8 章）；P15-050/051 的錯誤說法隨舊內容移除。
+- Part 15 結尾加 ### 參考來源（取已修列的官方 URL）；"Part 15" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 無硬性違規（4 項軟性觀察，未改）；Spec 無阻擋，指出 Traffic Management／Analysis 兩個 URL 只來自「正確」列 → 已從參考來源移除。
+---
+## 2026-11-07 - US-091
+- 修正 Part 16（16.2/16.3/16.4/16.5）：P16-002 Endpoints→EndpointSlice（圖、清單、指令、16.3 一句連動）、P16-003 範例輸出補欄位並註明節錄、P16-004 補 access log 預設不開的前提（16.2 括號、16.4 表下引言、16.5 第 4 步）、P16-006 「通常沒有 log」改為 NR + filter_chain_not_found、P16-008 加 --all-pods=true。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（判斷題：access log 前提在三處重複、16.4 表格第一列儲存格偏長，未改）；Spec：四列引文皆在頁面上找到，P16-006 的 filter_chain_not_found 字串不在 Envoy 頁面上（帳本建議改法明列此字串，依帳本保留）。無需修改。
+- 未改（範圍外）：16.6 之後 line ~7739 的 "Service / Endpoints"（多叢集段落，非帳本列）。
+---
+## 2026-11-07 - US-092
+- 修正 Part 16.6：P16-009 ServiceEntry exportTo 加 istio-system；P16-010 sni 改成「明確化」並補 CA 說明；P16-011 SNI 加 stable_；P16-012 label 標在 istio-system namespace 並補 global 值與 expose-services.yaml；P16-013 第 5 點降為建議，標題改「1～4 缺一不可」（連動修改）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（判斷題：stable_ 說明、expose-services）；Spec 無發現（5 個 URL 引文皆驗證）。修了 expose-services 與 stable_ 備註。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-07 - US-093
+- 修正 P16-014：16.6「附帶好處」locality failover 那句。改成：mesh 預設已開 locality LB（`localityLbSetting.enabled: true`），所以 localityLbSetting 不是必填；DestinationRule 只要有 outlierDetection 就會啟動 failover；repo 的 02-destinationrule.yaml 已有 outlierDetection，接上 multi-cluster 後自動生效；關閉用 `localityLbSetting.enabled: false`。
+- Files changed: k8s-ecosystem-guide.md（只有該行）
+- Review round 1: Spec 無發現（兩段官方引文在 istio.io DestinationRule 頁都逐字找到，新措辭一致）。Standards：新增的兩處「DR」改寫成 DestinationRule（Part 11 的 DR 是災難備援）；其餘（bullet 偏長、粗體句與前句語意相反）是判斷題，粗體句是帳本認定正確的原句，故保留。
+- 觀察（不在 P16-014 範圍，未改）：guide 約 2120–2121 行的 yaml 註解仍寫「需要時再加 localityLbSetting／failover」，與新說法（localityLbSetting 非必填）略有出入，應屬別的帳本列或後續故事。
+- Learnings: 無新增的可重用慣例。
+---
+## 2026-11-07 - US-094
+- 修正 Part 16 16.8 踩雷 4（P16-016）：「沒帶 Host 會回 404」改成兩種情況（HTTPS 具體 host → TLS 失敗 NR filter_chain_not_found；HTTP／wildcard Gateway → VS host 對不到才 404 NR），並指回 16.4 表。
+- Part 16 結尾加 `### 參考來源`（P16-001..016 的 URL 欄去重，共 10 條），"Part 16" 加進 VERIFIED_PARTS。
+- Files: k8s-ecosystem-guide.md, scripts/validate.sh
+- Review round 1: Standards 0 hard（提醒 Envoy 引文無句號，屬片段引用，不改）；Spec 0 finding（Envoy NR 引文分兩次 fetch 對到）。無 fix commit。
+- Learnings: 無新增通用慣例。
+---
+## 2026-11-07 - US-095
+- 文末「需向他人確認」表新增 10 列（涵蓋 30 個環境特定 ID，含 Q-001/Q-002）；原處加註：P01-004 改寫、P02-009 SA 前提（455/545/674）、P04-001 補 :8080、P04-015 curl 前提、P06-210 UTC 前提、P09-001 已修正橫幅、P10-011 F5 L4/PROXY、P11-001 CD 確認、P15-023 本環境不適用、P16-007 kubeconfig 加註。
+- Files: k8s-ecosystem-guide.md
+- Review: R1 Standards 4 judgement（jsonpath 重複等）、Spec 缺 P02-009/P10-011/P04-015 原處註與杜撰的「問誰」→全修；R2 殘留 545/674 註、UTC 問誰不一致、P15-023 列措辭→已修（R2 後的修正未再 review）。URL 引文 P04-005/P10-011 已確認。
+- Learnings: 帳本的「問誰」欄空白時，表格「問誰」寫「自己查」，不要編造團隊。
+---
+## 2026-11-07 - US-096
+- retro 寫進 tasks/retro-k8s-guide-verification.md；CLAUDE.md 修正 X-002（互斥原因改為共用 app label + 同一條 VirtualService，引 Argo 原句），新增改 guide 前的導覽（帳本、PRD、VERIFIED_PARTS 指路）。
+- Files: CLAUDE.md, tasks/retro-k8s-guide-verification.md
+- Review round 1: Spec 0 findings（Argo 原句與並存說法已 WebFetch 確認）；Standards 數項（重複的 VERIFIED_PARTS 說明、缺帳本路徑、run 專屬行未標示、「別拿搶 pod…」流水帳）→ 全部精簡／補上；Argo 引文因驗收條件要求而保留。第 1 輪後收斂，未做第 2 輪。
+- Learnings: 無新增可重用慣例。
+---

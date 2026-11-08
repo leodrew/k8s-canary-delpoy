@@ -8,20 +8,18 @@
 
 ## Codebase Patterns
 
-> 從上一個 run（ralph/canary-configmap-split，封存在 ralph/archive/2026-10-31-canary-configmap-split/）
-> 帶過來的慣例。這個 run 改的是 k8s-ecosystem-guide.md（文件），不是 manifest：只有 US-001
-> 要往 validate.sh 加檢查；其他故事的閘門是 validate.sh 的 [10]（guide yaml 可解析）與
-> [11]（VERIFIED_PARTS 的參考來源），內容正確性由 code-review 對照帳本把關。
-> 下面「每個故事都要加斷言」那條，在這個 run 只適用於動到 manifest 的情況（本 run 不該動）。
+> 目前的 run 是 ralph/guide-explainers：在 k8s-ecosystem-guide.md 的既有 Part **新增**說明（不是修正既有說法）。
+> 事實依據是 tasks/guide-explainers-ledger.md（E-001～E-030，沒有行號欄，插入位置看 spec 驗收條件）。
+> 這個 run 不動 manifest、不改 validate.sh；閘門是 [10]（guide yaml 可解析）與 [11]（VERIFIED_PARTS 的參考來源），
+> 內容正確性由 code-review 對照帳本把關。下面講 manifest／validate.sh 的條目是 repo 通用慣例，本 run 只在誤動 manifest 時才適用。
 
 
 - **This is NOT a code project.** `dev/k8s` holds Kubernetes/Istio YAML, shell scripts and
   Traditional-Chinese markdown. There is no compiler, no test framework, nothing to build.
   The typecheck equivalent is `bash scripts/validate.sh` from the repo root, exit 0 = pass.
-  US-001 creates that script; before it exists there is no quality gate at all.
 
-- **Every story adds its own assertions to `scripts/validate.sh`, in the same commit as the
-  change.** This is the most important rule in this run. It is what keeps the script green at
+- **A story that changes a manifest adds its own assertions to `scripts/validate.sh`, in the same commit.**
+  This is the most important rule in this repo (this run should not touch manifests at all). It is what keeps the script green at
   every commit and what stops story N+3 from silently undoing story N. A story that changes a
   manifest but adds no check is not finished.
 
@@ -62,14 +60,7 @@
   Prose and comments are Traditional Chinese.
 
 - **Scope is `dev/k8s` only.** The Spring Boot backend is a separate repo at
-  `dev/spring_oauth2_backend`. Never edit it. US-007 in particular only completes the k8s half
-  of the probe fix — the `SecurityConfig` permitAll change it depends on is out of scope, and
-  the probes keep passing unconditionally until that lands elsewhere. Say so; do not report
-  the probe problem as solved.
-
-- **Story order is load-bearing.** The ConfigMap is made complete (US-002..US-005) *before*
-  the env var is flipped to replace semantics (US-006), and the file is split (US-008) *after*
-  its content is correct so both copies inherit the fix. Do not reorder.
+  `dev/spring_oauth2_backend`. Never edit it.
 
 - **`scripts/validate.sh` 的擴充方式**（US-001 建立）：腳本裡有一個
   `# 之後的檢查加在這裡` 標記區段，新檢查以 `== [n] 說明 ==` 區段加在那裡、
@@ -155,7 +146,7 @@
   雜湊算的是**解析後**的 `data['application.yml']` 字串（跟叢集端 `kubectl ... | sha256sum`
   一致），不是原始檔位元組 —— 否則改一行註解就會讓全部 pod 滾動重啟。
 
-## 修 guide 的慣例（ralph/guide-verification，從 US-001～US-004 的 Learnings 整理）
+## 改 guide 的慣例（ralph/guide-verification 累積下來，本 run 沿用）
 
 - **帳本是唯一依據，措辭含糊時回官方原句。** 帳本「建議改法」寫得含糊時，回到官方頁看原句的限定範圍再寫
   （US-002 第 1 輪 Spec 就抓到寫反）。為了讓 Standards 滿意而改措辭時，要回頭對照帳本建議改法，

@@ -89,15 +89,18 @@ bash scripts/validate.sh      # 或 npm run validate
   `progress.txt`，還會把新 `progress.txt` 清空。換 run 前先自己把舊的 `prd.json`、
   `progress.txt`、`patterns.md` 複製到 `ralph/archive/<日期>-<舊分支名>/`，再把 `.last-branch`
   改成新分支。`patterns.md` 不會被重置 —— 慣例跨 run 帶過去，換 run 時順手刪掉只適用舊 run 的條目。
-- **目前的 run（`ralph/guide-verification`）** 修的是 `k8s-ecosystem-guide.md`，不是 manifest。
-  事實依據是 `tasks/guide-verification-ledger.md`（查證帳本：每列有官方 URL、逐字引文、
-  建議改法、使用者確認），spec 是 `tasks/prd-k8s-guide-verification.md`；每個故事的
-  `ledgerIds` 列出它負責的帳本列，只改那些列。上一個 run 封存在
-  `ralph/archive/2026-10-31-canary-configmap-split/`（US-010 未完成）。
-  這個 run 的回顧在 `tasks/retro-k8s-guide-verification.md`（換 run 時這行可刪）。
+- **目前的 run（`ralph/guide-explainers`）** 在 `k8s-ecosystem-guide.md` 的既有 Part **新增**
+  概念說明（mesh、mTLS、登入 session、Spring Session + Redis、CronJob 的三個「幾份」、公司的
+  ipPolicy），不是 manifest。事實依據是 `tasks/guide-explainers-ledger.md`（E-001～E-030：
+  「要新寫進 guide 的說法」，每列有官方 URL、逐字引文、使用者確認；沒有行號欄），spec 是
+  `tasks/prd-guide-explainers.md`（第 3 節開頭的共通驗收條件適用每個故事）；故事編號接續
+  上一個 run，從 US-097 開始，以免 commit 訊息跟歷史撞名。上一個 run（`ralph/guide-verification`，
+  US-001～US-096 全部完成）封存在 `ralph/archive/2026-11-08-guide-verification/`，回顧在
+  `tasks/retro-k8s-guide-verification.md`。
 - **改 `k8s-ecosystem-guide.md` 的任何一個 Part 之前（任何 run 都適用）：** 事實依據是
   `tasks/guide-verification-ledger.md`（「原文摘錄」與官方 URL 欄）和
-  `tasks/prd-k8s-guide-verification.md`，措辭要回到那裡對照，不要憑印象改。
+  `tasks/prd-k8s-guide-verification.md`（新增的說明則是 `tasks/guide-explainers-ledger.md`），
+  措辭要回到那裡對照，不要憑印象改。
   `VERIFIED_PARTS`（檢查 [11]，用法見下方「擴充 `scripts/validate.sh`」一節）裡列的 Part
   必須維持它的 `### 參考來源`，來源 URL 就取自帳本的 URL 欄；刪掉或換成部落格連結都會 FAIL，
   而 FAIL 訊息不會告訴你去哪找原來的 URL。
