@@ -89,14 +89,19 @@ bash scripts/validate.sh      # 或 npm run validate
   `progress.txt`，還會把新 `progress.txt` 清空。換 run 前先自己把舊的 `prd.json`、
   `progress.txt`、`patterns.md` 複製到 `ralph/archive/<日期>-<舊分支名>/`，再把 `.last-branch`
   改成新分支。`patterns.md` 不會被重置 —— 慣例跨 run 帶過去，換 run 時順手刪掉只適用舊 run 的條目。
-- **目前的 run（`ralph/guide-explainers`）** 在 `k8s-ecosystem-guide.md` 的既有 Part **新增**
-  概念說明（mesh、mTLS、登入 session、Spring Session + Redis、CronJob 的三個「幾份」、公司的
-  ipPolicy），不是 manifest。事實依據是 `tasks/guide-explainers-ledger.md`（E-001～E-030：
-  「要新寫進 guide 的說法」，每列有官方 URL、逐字引文、使用者確認；沒有行號欄），spec 是
-  `tasks/prd-guide-explainers.md`（第 3 節開頭的共通驗收條件適用每個故事）；故事編號接續
-  上一個 run，從 US-097 開始，以免 commit 訊息跟歷史撞名。上一個 run（`ralph/guide-verification`，
-  US-001～US-096 全部完成）封存在 `ralph/archive/2026-11-08-guide-verification/`，回顧在
-  `tasks/retro-k8s-guide-verification.md`。
+- **目前（最近一個）的 run：`ralph/guide-explainers`**，US-097～US-103 全部完成。它在
+  `k8s-ecosystem-guide.md` 的既有 Part **新增**概念說明（mesh、mTLS、登入 session、Spring Session
+  + Redis、CronJob 的三個「幾份」、公司的 ipPolicy），不是 manifest。事實依據是
+  `tasks/guide-explainers-ledger.md`（E-001～E-030：「要新寫進 guide 的說法」，每列有官方 URL、
+  逐字引文、使用者確認；沒有行號欄），spec 是 `tasks/prd-guide-explainers.md`；故事編號接續上一個
+  run，以免 commit 訊息跟歷史撞名。回顧在 `tasks/retro-guide-explainers.md`。再上一個 run
+  （`ralph/guide-verification`，US-001～US-096）封存在
+  `ralph/archive/2026-11-08-guide-verification/`，回顧在 `tasks/retro-k8s-guide-verification.md`。
+  開新 run 前先照上面「換 run 時要手動封存」做，並把 `ralph/patterns.md` 裡只適用 manifest 的條目移走。
+- **帳本的引文可能已經過期或被改寫過。** 這個 run 的 review 最常抓到的就是「guide 與帳本都引了
+  一句話，但官方頁上沒有這句」（例：把 `commonName` 寫成舊措辭、把兩句話合成一句）。改這些
+  說明、或新增引文時，要回官方頁確認原句，引用只引到真正的句子邊界；帳本沒有的「合理推論」
+  （例如某故障的症狀、timeout 行為）不要順手補進 guide。
 - **改 `k8s-ecosystem-guide.md` 的任何一個 Part 之前（任何 run 都適用）：** 事實依據是
   `tasks/guide-verification-ledger.md`（「原文摘錄」與官方 URL 欄）和
   `tasks/prd-k8s-guide-verification.md`（新增的說明則是 `tasks/guide-explainers-ledger.md`），
