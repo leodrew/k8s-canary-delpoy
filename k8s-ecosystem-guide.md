@@ -124,7 +124,30 @@ kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio
 | 警衛 | **Envoy** |
 | 園區大門的警衛室 | **istio-ingressgateway** |
 | 各棟大樓門口的警衛 | 每個 Pod 裡的 **istio-proxy** |
+| 整個園區的警衛網（所有警衛＋總部） | **mesh**（見下一小節） |
 | 規則手冊 | 你寫的 **Gateway / VS / DR / AuthorizationPolicy** |
+
+#### 「mesh」這個字的兩種意思
+
+文件裡的 mesh 有兩個不同的意思，讀到「mesh 內的流量」和「VS 要加 `mesh`」時要分清楚。
+
+**意思①：service mesh（一整層基礎設施）。** Istio 官方的定義是「A service mesh is an infrastructure layer that gives applications capabilities like zero-trust security, observability, and advanced traffic management, without code changes.」。在本文的 sidecar 模式裡，它就是**所有帶 sidecar 的 Pod ＋ istiod**。例子：pmc GUI 的 Spring 只寫 `http://epmm-api-svc.ea-epmm.svc.cluster.local`，加密與身分是兩端的 `istio-proxy` 做的，app 程式碼完全不用改：
+
+```
+pmc GUI Pod                          epmm-api Pod
+[Spring] -http-> [istio-proxy] ==mTLS==> [istio-proxy] -http-> [Spring]
+_________ 兩端都帶 sidecar，加上 istiod，合起來就是 mesh _________/
+```
+
+**意思②：VirtualService `gateways` 裡的保留字 `mesh`。** 官方原文：「The reserved word `mesh` is used to imply all the sidecars in the mesh.」。它決定這份 VS 的規則套用到**誰**：
+
+| `gateways` 怎麼寫 | 規則套用到誰 |
+|---|---|
+| 省略 | 只有 `mesh`（所有 sidecar；官方：「When this field is omitted, the default gateway (`mesh`) will be used」） |
+| 只寫 gateway 名字 | 只有那些 gateway（官方：「If a list of gateway names is provided, the rules will apply only to the gateways.」），sidecar 不套用 |
+| gateway 名字 ＋ `mesh` | gateway 和所有 sidecar 都套用（官方：「To apply the rules to both gateways and sidecars, specify `mesh` as one of the gateway names.」） |
+
+例子：從 ea-pmc 的 Pod 內 curl Service，如果 VS 的 `gateways` 沒列 `mesh`，就看不到 VS 加的 `x-app-track` header —— 內部呼叫沒經過這條 VS 的規則。完整說明見 [Part 9 發現 3](#發現-3virtualservice-沒有-mesh內部流量繞過所有路由規則) 與 [Part 14 的 14.6](#146-為什麼-virtualservice-一定要加-mesh)。
 
 #### 你 `kubectl apply` 一份 VirtualService 之後，實際發生什麼
 
@@ -310,6 +333,8 @@ selector:
 - Kubernetes — Pod v1 API（containerPort）：https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/
 - Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
 - Istio — Ambient mode overview：https://istio.io/latest/docs/ambient/overview/
+- Istio — What is a service mesh：https://istio.io/latest/about/service-mesh/
+- Istio — VirtualService reference：https://istio.io/latest/docs/reference/config/networking/virtual-service/
 - Istio — Installing the Sidecar（sidecar injection）：https://istio.io/latest/docs/setup/additional-setup/sidecar-injection/
 - Istio — Deployment Models：https://istio.io/latest/docs/ops/deployment/deployment-models/
 - Istio — Security concepts：https://istio.io/latest/docs/concepts/security/
