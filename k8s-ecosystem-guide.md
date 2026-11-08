@@ -3671,7 +3671,7 @@ canary 分流是**逐請求（per-request）**決定的，所以一個已登入�
 |---|---|---|
 | **A. consistentHash by cookie** | DestinationRule 用 `httpCookie`（專屬名稱如 `istio-session-affinity`，不要用 `JSESSIONID`） | 快，但是軟黏著，**只在 subset 內生效**——weight 分流仍在 subset 之間，同一個 cookie 還是可能被分到不同 subset |
 | **B. 用 header/cookie 決定版本** | 不用 weight，改用 `match` 比對 cookie 值決定走 v1 或 v2 | 黏著保證，但比例控制變粗糙 |
-| **C. session 外部化** | Spring Session + Redis | **根本解**，canary、擴縮容、Pod 重啟全都不再是問題 |
+| **C. session 外部化** | Spring Session + Redis | **根本解**，canary、擴縮容、Pod 重啟全都不再是問題（依賴、設定、K8s 端清單與踩雷見 Part 9 發現 2 的「根本修法：Spring Session + Redis」） |
 
 **解法 B 的寫法（不用 Redis 也能安全灰度）：**
 
@@ -4197,7 +4197,58 @@ spec:
           ttl: 10800s
 ```
 
-**根本修法**：Spring Session + Redis，把 session 外部化。**這也是做 canary 發布的前提條件**（Part 7.4）。
+#### 根本修法：Spring Session + Redis
+
+把 session 外部化。**這也是做 canary 發布的前提條件**（Part 7.4 解法 C）。
+
+**機制（一句話）**：加了依賴之後，Spring Boot 自動設定等同 `@EnableRedisHttpSession`，Spring Session 官方："This creates a Spring bean with the name of `springSessionRepositoryFilter` that implements `Filter`. The filter is in charge of replacing the `HttpSession` implementation to be backed by Spring Session."。也就是**程式碼不用改，`HttpSession` 的實作被換成 Redis 版**；兩個 Pod 讀寫同一份 session，所以 Part 6.2 說的兩種壞法（consistentHash 黏不住、`sessionAffinity: ClientIP` 不生效）都不再造成登出。
+
+> **範圍**：下面的 pom 與 `application.yml` 是**給後端 repo 的參考**，要改的是 Spring 後端，不是這個 repo。這個 repo 的 ConfigMap 目前沒有這些 key，這次也不加（加的話要依 CLAUDE.md 同時加 `validate.sh` 檢查並跑 `sync-config-hash.sh`）。
+
+**依賴（Spring Boot 3.4，版本由 Boot 管理）**：
+
+```xml
+<dependency>
+    <groupId>org.springframework.session</groupId>
+    <artifactId>spring-session-data-redis</artifactId>
+</dependency>
+```
+
+註：Spring Boot 4 起這個依賴改名為 `spring-boot-starter-session-data-redis`（見參考來源的 Boot 4 版頁面），升級 Boot 時要跟著改。
+
+**設定（`application.yml` 片段）**：
+
+```yaml
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST}           # 從 Secret / ConfigMap 帶，不要寫死
+      port: 6379
+      password: ${REDIS_PASSWORD}   # 從 Secret 帶
+  session:
+    redis:
+      # 預設 spring:session。三個 GUI 服務共用同一個 Redis 時各自取不同的 namespace，
+      # 否則 key 互相撞，A 服務會讀到 B 服務的 session。
+      # Spring Boot 預設用 RedisSessionRepository（不建索引）；要用 findByPrincipalName
+      # 或 session 事件才需要 repository-type=indexed，這裡不需要。
+      namespace: spring:session:pmc-epmmformquerygui
+server:
+  servlet:
+    session:
+      timeout: 3h   # 對應原本 sessionAffinity 的 3 小時；Redis 端的 TTL 跟著這個值
+```
+
+**踩雷：序列化的類別版本。** Spring Session 官方："By default, Spring Session uses Java Serialization to serialize the session attributes. Sometimes it might be problematic, especially when you have multiple applications that use the same Redis instance but have different versions of the same class."。canary 與 stable 是不同版本、又共用同一個 Redis，正好就是這個情境：放進 session 的自訂類別如果改了欄位，canary 讀 stable 寫的 session 可能反序列化失敗（這一點是從官方那句推得）。做 Part 7.4 的 canary 前要先確認 session 裡放的類別這一版有沒有改。
+
+**K8s 端要準備的（由機制推得，不是官方清單）**：
+
+1. **Secret 放 `REDIS_PASSWORD`**（`REDIS_HOST` 可放 ConfigMap 或同一個 Secret）。
+2. **Redis 的 Service port 命名 `tcp-redis`**（或用 `appProtocol: tcp`）。Istio protocol selection 官方："`mongo`, `mysql`, `redis`: Experimental application protocol support. … If not enabled, treated as opaque TCP data stream"，以及 "If both are defined, `appProtocol` takes precedence over the port name."。Part 6.2 已說明 Redis 是 client-first 協定，自動偵測也能過，但明確宣告比較好除錯。
+3. **default-deny 的 namespace 要放行到 Redis 6379 的 egress**（NetworkPolicy）。沒放行時連線 timeout，Spring 啟動或第一次建立 session 才會失敗。
+4. **DestinationRule 的 consistentHash 黏著變成可有可無**：可以拿掉，或只為了本地快取命中率保留；`sessionAffinity` 也不再是正確性的前提。
+5. **這是 Part 7.4 canary（解法 C）的前提。**
+
+Redis 本體（StatefulSet、Sentinel、HA）怎麼部署不在本 guide 範圍內。
 
 ---
 
@@ -4350,6 +4401,9 @@ K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`（`preStop: { sle
 - istio.io — destination-rule：https://istio.io/latest/docs/reference/config/networking/destination-rule/
 - istio.io — virtual-service：https://istio.io/latest/docs/reference/config/networking/virtual-service/
 - istio.io — protocol-selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
+- spring-session — boot-redis（3.4）：https://docs.spring.io/spring-session/reference/3.4/guides/boot-redis.html
+- spring-session — Boot 4 版 boot-redis：https://docs.spring.io/spring-session/reference/guides/boot-redis.html
+- spring-session — configuration/redis（3.4）：https://docs.spring.io/spring-session/reference/3.4/configuration/redis.html
 - envoyproxy.io — substitution_formatter：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
 - kubernetes.io — Deployment：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
 - kubernetes.io — disruptions：https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
