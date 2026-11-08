@@ -1018,7 +1018,7 @@ spec:
 |---|---|---|---|
 | 範圍 | namespaced | cluster-wide（官方：「Calico global network policy is a non-namespaced resource and can be applied to any kind of endpoint」） | cluster-scoped |
 | 能不能 deny | 不行（只有允許） | 可以（Allow／Deny／Log） | 可以（Accept／Deny／Pass） |
-| 有沒有排序 | 沒有（多條是聯集） | 有，`order` 欄位（官方：「the order field (with precedence from the lowest value to highest)」） | 有，`priority`（官方：「rules with lower priority values have higher precedence」）；Admin tier 在 NetworkPolicy 之前、Baseline 在之後（官方：「Policy tiers are evaluated in the following order: `Admin` tier, NetworkPolicy tier, `Baseline` tier.」） |
+| 有沒有排序 | 沒有（多條是聯集） | 有，`order` 欄位（官方：「the order field (with precedence from the lowest value to highest)」） | 有，`priority`（官方：「rules with lower priority values have higher precedence」）；Admin tier 在 NetworkPolicy 之前、Baseline 在之後（官方：「Policy tiers are evaluated in the following order:」，依序是 `Admin` tier、NetworkPolicy tier、`Baseline` tier） |
 | 誰在寫 | 開發團隊 | 平台組 | 平台組（cluster 管理者） |
 | 備註 | K8s 內建 | 要裝 Calico；CIDR 欄位是 `nets` | CRD（`policy.networking.k8s.io`），要 CNI 有實作 |
 
