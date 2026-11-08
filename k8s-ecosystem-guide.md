@@ -134,9 +134,10 @@ kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio
 **意思①：service mesh（一整層基礎設施）。** Istio 官方的定義是「A service mesh is an infrastructure layer that gives applications capabilities like zero-trust security, observability, and advanced traffic management, without code changes.」。在本文的 sidecar 模式裡，它就是**所有帶 sidecar 的 Pod ＋ istiod**。例子：pmc GUI 的 Spring 只寫 `http://epmm-api-svc.ea-epmm.svc.cluster.local`，加密與身分是兩端的 `istio-proxy` 做的，app 程式碼完全不用改：
 
 ```
-pmc GUI Pod                          epmm-api Pod
+pmc GUI Pod                                                epmm-api Pod
 [Spring] -http-> [istio-proxy] ==mTLS==> [istio-proxy] -http-> [Spring]
-\_________ 兩端都帶 sidecar，加上 istiod，合起來就是 mesh _________/
+\__________ 兩端都帶 sidecar，加上 istiod，合起來就是 mesh ___________/
+app 只寫 http://，加密與身分由兩個 istio-proxy 處理
 ```
 
 **意思②：VirtualService `gateways` 裡的保留字 `mesh`。** 官方原文：「The reserved word `mesh` is used to imply all the sidecars in the mesh.」。它決定這份 VS 的規則套用到**誰**：
@@ -147,7 +148,7 @@ pmc GUI Pod                          epmm-api Pod
 | 只寫 gateway 名字 | 只有那些 gateway（官方：「If a list of gateway names is provided, the rules will apply only to the gateways.」），sidecar 不套用 |
 | gateway 名字 ＋ `mesh` | gateway 和所有 sidecar 都套用（官方：「To apply the rules to both gateways and sidecars, specify `mesh` as one of the gateway names.」） |
 
-例子：從 ea-pmc 的 Pod 內 curl Service，如果 VS 的 `gateways` 沒列 `mesh`，就看不到 VS 加的 `x-app-track` header —— 內部呼叫沒經過這條 VS 的規則。完整說明見 [Part 9 發現 3](#發現-3virtualservice-沒有-mesh內部流量繞過所有路由規則) 與 [Part 14 的 14.6](#146-為什麼-virtualservice-一定要加-mesh)。
+例子：從 ea-pmc 的 Pod（要有 sidecar，即 `2/2`）內 curl Service，如果 VS 的 `gateways` 沒列 `mesh`，就看不到 VS 加的 `x-app-track` header —— 內部呼叫沒經過這條 VS 的規則。完整說明見 [Part 9 發現 3](#發現-3virtualservice-沒有-mesh內部流量繞過所有路由規則) 與 [Part 14 的 14.6](#146-為什麼-virtualservice-一定要加-mesh)。
 
 #### 你 `kubectl apply` 一份 VirtualService 之後，實際發生什麼
 
