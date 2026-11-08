@@ -41,3 +41,10 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規（觀察：表格儲存格偏長，屬可讀性判斷，未改）；Spec 無發現，四個來源頁引文皆逐字找到（"ReplicaSet ensures..." 在 deployment 概念頁只出現在連結 tooltip，非內文，帳本與 guide 引用正確）。
 - Learnings: 無新增通則。
 ---
+## 2026-11-08 - US-102
+- Added Part 2.4 subsection 「公司的 ipPolicy 可能是什麼（通用說明）」 (E-019~E-024), E-025 row in 需向他人確認, 3 new URLs in Part 2 參考來源.
+- Files: k8s-ecosystem-guide.md, tasks/guide-explainers-ledger.md (quote cells corrected)
+- Review round 1: Standards none hard (4 judgement calls; softened 實務上 claim, renamed 踩雷 title). Spec: 2 quotes not on page (Calico "A GlobalNetworkPolicy..." is really "Calico global network policy is..."; tier order sentence) -> fixed guide + ledger.
+- Review round 2: tier sentence only partly verbatim (colon ends the sentence) -> quoted only up to the colon; fixed after the round cap, mechanical.
+- Learnings: ledger quotes can be paraphrased; reviewers WebFetching found them. Quote only up to the real sentence boundary.
+---
