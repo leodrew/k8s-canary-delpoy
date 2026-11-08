@@ -6,3 +6,10 @@ Started: (not yet run)
 > 只在重試某個故事時 grep 該故事的條目。值得傳下去的 learning 要寫進 patterns.md，不是這裡。
 
 ---
+## 2026-11-08 - US-097
+- Part 0 加「mesh 的兩種意思」小節（意思①service mesh＋ASCII 圖、意思②VS gateways 保留字＋三列表＋curl 例子，回指 Part 9 發現 3 與 14.6）、比喻表加 mesh 一列、參考來源加 2 個 Istio URL（E-001～E-003）
+- Files changed: k8s-ecosystem-guide.md, ralph/patterns.md
+- Review round 1: Standards — 圖只有 3 行且底線行比流程行短 3 欄；Spec — 同上，另外 curl 例子漏了 14.6 方法 2 的「Pod 要有 sidecar」但書。引文三列都 WebFetch 確認存在。已修（重排圖為 4 行等寬 71、補但書）。
+- Review round 2: clean
+- Learnings: node 寫 ASCII 圖時行首反斜線會消失，已寫進 patterns.md
+---

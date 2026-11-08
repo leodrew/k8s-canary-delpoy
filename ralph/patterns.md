@@ -179,6 +179,7 @@
   含單引號的 node 片段用 Write 寫成 repo 內暫存 .js 再跑、跑完刪掉。
 - `GUIDE_FENCE_JS` 包在 bash 單引號裡，在裡面加註解不能出現 ASCII 單引號。
 - 用 node 腳本改 guide 時，要寫進檔案的反斜線（如 ``）會在跳脫層裡消失（實測留下空的 ``）；改完 grep／印出該處確認，必要時用 `String.fromCharCode(92)`。
+- 用 node 寫 ASCII 圖時，行首的 `` 會在跳脫層消失（US-097 實測）；用 `String.fromCharCode(92)` 組，並用 node 量寬度（CJK／全形算 2）確認各行等寬、行數符合驗收條件，否則 review 兩軸都會抓。
 - Bash 工具裡不要在 heredoc 前面留 `cat > /dev/null;` 之類讀 stdin 的指令 —— 會卡到 timeout。
 
 ## 留給特定帳本列的提醒（修到那一列時照做；做完就把該條刪掉）
