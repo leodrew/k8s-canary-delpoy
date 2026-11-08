@@ -27,7 +27,7 @@
 - Standards reviewer 這個 run 沒有硬性違規，只有判斷題（表格儲存格偏長、措辭強度）。
   沒有需要新增的規則。
 - Spec reviewer 抓到的是「帳本沒有的合理推論」（US-100 的 timeout 症狀、Redis TTL）。
-  已在 `patterns.md`（progress 的 US-100 learning 所指的慣例）涵蓋，不重複。
+  已寫進 CLAUDE.md（帳本的引文可能過期那條）；`patterns.md` 原本沒有，不另加，以免每輪多付 token。
 
 ## 4. Tool economy
 
