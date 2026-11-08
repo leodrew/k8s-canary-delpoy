@@ -136,7 +136,7 @@ kubectl get ns ea-pmc --show-labels      # 找 istio-injection=enabled 或 istio
 ```
 pmc GUI Pod                          epmm-api Pod
 [Spring] -http-> [istio-proxy] ==mTLS==> [istio-proxy] -http-> [Spring]
-_________ 兩端都帶 sidecar，加上 istiod，合起來就是 mesh _________/
+\_________ 兩端都帶 sidecar，加上 istiod，合起來就是 mesh _________/
 ```
 
 **意思②：VirtualService `gateways` 裡的保留字 `mesh`。** 官方原文：「The reserved word `mesh` is used to imply all the sidecars in the mesh.」。它決定這份 VS 的規則套用到**誰**：
