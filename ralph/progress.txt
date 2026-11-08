@@ -29,3 +29,9 @@ Started: (not yet run)
 - Review round 1: Standards 無發現；Spec 無阻擋（4 條引文 WebFetch 都找得到；僅 2 個次要觀察：圖中 Keycloak 欄沒畫箭頭、E-007 頁面為弧形撇號，皆未改）。
 - Learnings: 圖若無右邊框可免對齊；有右邊框時先用 node 量寬度（CJK=2），箭頭與 lifeline 的欄位要逐行檢查。
 ---
+## 2026-11-08 - US-100
+- Part 9 發現 2 的「根本修法」展開成「#### 根本修法：Spring Session + Redis」(E-008..E-014)：機制、pom(xml)、application.yml(過 [10])、序列化踩雷、K8s 端五項清單；Part 7.4 解法 C 回指；Part 9 參考來源補 3 個 spring-session URL。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規(只有 smell 判斷)；Spec 引文 E-008..E-013 全部在官方頁找到，發現帳本沒有的說法(連線 timeout、Redis TTL 跟 timeout、3h 對應 sessionAffinity)與 password key 引文未驗 -> fix commit 移除/改寫。Round 2: clean(僅 REDIS_HOST 放哪、「本地」快取兩處極輕微未入帳本措辭)。
+- Learnings: 寫 guide 時不要順手補「合理的行為描述」(如 timeout 症狀)，帳本沒有就不寫或標由機制推得。
+---

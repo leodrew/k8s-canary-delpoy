@@ -118,7 +118,7 @@
         "`bash scripts/validate.sh` exits 0"
       ],
       "priority": 100,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
