@@ -4227,15 +4227,15 @@ spring:
       password: ${REDIS_PASSWORD}   # 從 Secret 帶
   session:
     redis:
-      # 預設 spring:session。三個 GUI 服務共用同一個 Redis 時各自取不同的 namespace，
-      # 否則 key 互相撞，A 服務會讀到 B 服務的 session。
+      # 預設 spring:session。多個 GUI 服務共用同一個 Redis 時，每個服務要取各自不同的 namespace
+      # （這裡是 pmc-epmmformquerygui 的；其他服務換成自己的名稱），否則 key 互相撞。
       # Spring Boot 預設用 RedisSessionRepository（不建索引）；要用 findByPrincipalName
       # 或 session 事件才需要 repository-type=indexed，這裡不需要。
       namespace: spring:session:pmc-epmmformquerygui
 server:
   servlet:
     session:
-      timeout: 3h   # 對應原本 sessionAffinity 的 3 小時；Redis 端的 TTL 跟著這個值
+      timeout: 3h   # session 逾時；數值依需求設定，這裡的 3h 只是舉例
 ```
 
 **踩雷：序列化的類別版本。** Spring Session 官方："By default, Spring Session uses Java Serialization to serialize the session attributes. Sometimes it might be problematic, especially when you have multiple applications that use the same Redis instance but have different versions of the same class."。canary 與 stable 是不同版本、又共用同一個 Redis，正好就是這個情境：放進 session 的自訂類別如果改了欄位，canary 讀 stable 寫的 session 可能反序列化失敗（這一點是從官方那句推得）。做 Part 7.4 的 canary 前要先確認 session 裡放的類別這一版有沒有改。
@@ -4244,7 +4244,7 @@ server:
 
 1. **Secret 放 `REDIS_PASSWORD`**（`REDIS_HOST` 可放 ConfigMap 或同一個 Secret）。
 2. **Redis 的 Service port 命名 `tcp-redis`**（或用 `appProtocol: tcp`）。Istio protocol selection 官方："`mongo`, `mysql`, `redis`: Experimental application protocol support. … If not enabled, treated as opaque TCP data stream"，以及 "If both are defined, `appProtocol` takes precedence over the port name."。Part 6.2 已說明 Redis 是 client-first 協定，自動偵測也能過，但明確宣告比較好除錯。
-3. **default-deny 的 namespace 要放行到 Redis 6379 的 egress**（NetworkPolicy）。沒放行時連線 timeout，Spring 啟動或第一次建立 session 才會失敗。
+3. **default-deny 的 namespace 要放行到 Redis 6379 的 egress**（NetworkPolicy）。
 4. **DestinationRule 的 consistentHash 黏著變成可有可無**：可以拿掉，或只為了本地快取命中率保留；`sessionAffinity` 也不再是正確性的前提。
 5. **這是 Part 7.4 canary（解法 C）的前提。**
 
@@ -4402,7 +4402,7 @@ K8s 1.34 以上可以改用不需要 shell 的 `preStop.sleep`（`preStop: { sle
 - istio.io — virtual-service：https://istio.io/latest/docs/reference/config/networking/virtual-service/
 - istio.io — protocol-selection：https://istio.io/latest/docs/ops/configuration/traffic-management/protocol-selection/
 - spring-session — boot-redis（3.4）：https://docs.spring.io/spring-session/reference/3.4/guides/boot-redis.html
-- spring-session — Boot 4 版 boot-redis：https://docs.spring.io/spring-session/reference/guides/boot-redis.html
+- spring-session — Boot 4 版 boot-redis（latest）：https://docs.spring.io/spring-session/reference/guides/boot-redis.html
 - spring-session — configuration/redis（3.4）：https://docs.spring.io/spring-session/reference/3.4/configuration/redis.html
 - envoyproxy.io — substitution_formatter：https://www.envoyproxy.io/docs/envoy/latest/configuration/advanced/substitution_formatter
 - kubernetes.io — Deployment：https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
