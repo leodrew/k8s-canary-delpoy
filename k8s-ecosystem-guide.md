@@ -2927,6 +2927,37 @@ spec:
 | `Forbid` | 前一個還在跑就**跳過這次** | **資料同步、報表產生**（避免重複寫入） |
 | `Replace` | 殺掉舊的，跑新的 | 只在乎最新結果的任務（快取更新） |
 
+#### 三個「幾份」不要搞混
+
+`concurrencyPolicy`、`parallelism`／`completions`、`replicas` 都是「幾份」，但管的是三個不同的層。
+
+```
+CronJob --(concurrencyPolicy：Job 與 Job 之間)--> Job --(parallelism／completions：同一個 Job 裡的 Pod)--> Pod
+Deployment --(replicas)----------------------------------------------------------------------------------> Pod
+```
+
+| 欄位 | 屬於哪個物件 | 管什麼 | 預設值 | Pod 跑完會怎樣 |
+|---|---|---|---|---|
+| `concurrencyPolicy` | CronJob | 同一個 CronJob 建出來的 Job 與 Job 之間能不能同時跑。官方：「It specifies how to treat concurrent executions of a Job that is created by this CronJob.」；也只管同一個 CronJob：「Note that concurrency policy only applies to the Jobs created by the same CronJob. If there are multiple CronJobs, their respective Jobs are always allowed to run concurrently.」 | `Allow` | 與 Pod 無關，管的是 Job 之間 |
+| `parallelism` | Job | 同一個 Job 裡同時跑幾個 Pod。官方：「The requested parallelism (`.spec.parallelism`) can be set to any non-negative value. If it is unspecified, it defaults to 1. If it is specified as 0, then the Job is effectively paused until it is increased.」所以 `parallelism: 0` 等於暫停 | 1 | Pod 成功退出就算完成，不會被重啟 |
+| `completions` | Job | 要幾個 Pod 成功，Job 才算完成。官方：「the Job represents the overall task, and is complete when there are `.spec.completions` successful Pods.」 | 兩個都不設時都是 1（官方：「When both are unset, both are defaulted to 1.」） | 成功的 Pod 數累計到 `completions` 就結束 |
+| `replicas` | Deployment | 期望的 Pod 數。官方：「Number of desired pods. This is a pointer to distinguish between explicit zero and not specified. Defaults to 1.」；ReplicaSet 會維持數量：「ReplicaSet ensures that a specified number of Pod replicas are running at one time」 | 1 | Pod 是長駐的，「跑完」不算完成，死了會被補回這個數量 |
+
+**Job 沒有 `replicas` 欄位**；Job 要幾個 Pod 看 `parallelism`／`completions`，Deployment 才看 `replicas`。
+
+例子：每晚同步 1000 筆，切成 4 份同時跑。`completionMode: Indexed` 時，官方說明「when using `.spec.completionMode="Indexed"`, each Pod gets a different index in the range 0 to `.spec.completions-1`.」每個 Pod 從環境變數 `JOB_COMPLETION_INDEX` 讀到自己的編號，處理 250 筆（編號 N 處理第 N×250 到 N×250+249 筆）。
+
+```yaml
+# 只列 jobTemplate.spec 相關片段；schedule、concurrencyPolicy、template 等其他欄位見本節上方的全註解 YAML
+jobTemplate:
+  spec:
+    completions: 4          # 要 4 個 Pod 成功，這個 Job 才算完成；少了它就用預設 1，只會有一個 Pod 處理全部 1000 筆
+    parallelism: 4          # 同時跑 4 個 Pod；少了它預設 1，4 份會一個接一個跑，總時間變 4 倍
+    completionMode: Indexed # 每個 Pod 拿到 0~3 的編號（JOB_COMPLETION_INDEX），用來決定自己處理哪 250 筆；少了它 Pod 之間沒有編號，無法分工
+```
+
+**一句話收尾**：`concurrencyPolicy: Forbid` 擋的是「昨晚那個 Job 還沒跑完、今晚又來一個」，不是這 4 個 Pod；兩者要一起想。例：`parallelism: 4` × 每晚一次，`Forbid` 確保同時最多 4 個 Pod 寫資料庫，而不是 8 個。
+
 #### 成功 / 失敗的判定與觀察
 
 ```bash
@@ -3418,6 +3449,7 @@ istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
 - github.com/spring-projects — OAuth2LoginAuthenticationFilter（原始碼，二手來源）：https://github.com/spring-projects/spring-security/blob/main/oauth2/oauth2-client/src/main/java/org/springframework/security/oauth2/client/web/OAuth2LoginAuthenticationFilter.java
 - docs.spring.io — spring-session boot-redis：https://docs.spring.io/spring-session/reference/3.4/guides/boot-redis.html
 - kubernetes.io — cron-jobs：https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+- kubernetes.io — deployment-v1：https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/
 - raw.githubusercontent.com — utils.go：https://raw.githubusercontent.com/kubernetes/kubernetes/master/pkg/controller/cronjob/utils.go
 - pubs.opengroup.org — V3_chap02.html：https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html
 - istio.io — change-notes：https://istio.io/latest/news/releases/1.27.x/announcing-1.27/change-notes/
