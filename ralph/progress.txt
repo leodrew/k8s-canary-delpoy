@@ -35,3 +35,9 @@ Started: (not yet run)
 - Review round 1: Standards 無硬性違規(只有 smell 判斷)；Spec 引文 E-008..E-013 全部在官方頁找到，發現帳本沒有的說法(連線 timeout、Redis TTL 跟 timeout、3h 對應 sessionAffinity)與 password key 引文未驗 -> fix commit 移除/改寫。Round 2: clean(僅 REDIS_HOST 放哪、「本地」快取兩處極輕微未入帳本措辭)。
 - Learnings: 寫 guide 時不要順手補「合理的行為描述」(如 timeout 症狀)，帳本沒有就不寫或標由機制推得。
 ---
+## 2026-11-08 - US-101
+- Part 6.4 新增「#### 三個「幾份」不要搞混」：三層 ASCII 圖（110 欄等寬）、四列對照表（E-015～E-018）、Indexed Job yaml 範例（過 [10]）、Forbid 收尾；Part 6 參考來源補 deployment-v1。
+- Files changed: k8s-ecosystem-guide.md
+- Review round 1: Standards 無硬性違規（觀察：表格儲存格偏長，屬可讀性判斷，未改）；Spec 無發現，四個來源頁引文皆逐字找到（"ReplicaSet ensures..." 在 deployment 概念頁只出現在連結 tooltip，非內文，帳本與 guide 引用正確）。
+- Learnings: 無新增通則。
+---
