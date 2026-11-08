@@ -22,3 +22,10 @@ Started: (not yet run)
 - 第 2 輪 review 未重跑（修正都是刪除／拆分／註明，無新增事實主張）；下個 iteration 如要複核可用 BASE=6d78bde。
 - Learnings: 無需新增 patterns。
 ---
+## 2026-11-08 - US-099
+- Part 6.2「但這仍然是治標」之後新增「#### 為什麼登入會壞：兩種壞法」：E-004 官方原句、壞法一時序圖（量寬度 69 欄對齊）、E-006 註明原始碼出處、壞法二 E-007、結論指向 Part 9 發現 2；callback 路徑照 10-configmap-stable.yaml 的 redirect-uri。
+- Part 6 `### 參考來源` 補 3 個 URL（authorization-grants、OAuth2LoginAuthenticationFilter 二手、spring-session boot-redis）。
+- Files: k8s-ecosystem-guide.md
+- Review round 1: Standards 無發現；Spec 無阻擋（4 條引文 WebFetch 都找得到；僅 2 個次要觀察：圖中 Keycloak 欄沒畫箭頭、E-007 頁面為弧形撇號，皆未改）。
+- Learnings: 圖若無右邊框可免對齊；有右邊框時先用 node 量寬度（CJK=2），箭頭與 lifeline 的欄位要逐行檢查。
+---
