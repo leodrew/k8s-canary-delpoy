@@ -13,3 +13,12 @@ Started: (not yet run)
 - Review round 2: clean
 - Learnings: node 寫 ASCII 圖時行首反斜線會消失，已寫進 patterns.md
 ---
+
+## 2026-11-08 - US-098
+- Part 2.1 新增「#### 先搞懂 mTLS」（TLS vs mTLS、控制面 PKI vs Istio 對照表、握手五步驟、「每個 namespace 都有嗎」）；Part 0 PeerAuthentication 補回指；Part 2 參考來源加 2 條 kubernetes.io。
+- E-030 的 O 欄位引文用 WebFetch（offset 100000）取得，已填回帳本；該頁現行措辭是 `commonName`，帳本引文欄同步改成逐字現行句。
+- Files: k8s-ecosystem-guide.md, tasks/guide-explainers-ledger.md
+- Review round 1: Standards 無硬性違規（判斷題：帳本引文過期、「憑證過期不影響 mesh」無來源、secure naming 未說明、長 bullet）；Spec 所有「」引文逐字找到，3 個輕微（同上＋官方只有 4 步，第 3 步是作者拆的）。修正：刪掉無來源句、拆 bullet、第 3 步註明是從握手拆出、帳本引文改現行。
+- 第 2 輪 review 未重跑（修正都是刪除／拆分／註明，無新增事實主張）；下個 iteration 如要複核可用 BASE=6d78bde。
+- Learnings: 無需新增 patterns。
+---
