@@ -2630,6 +2630,37 @@ spec:
 
 > **但這仍然是治標。** 只要 Pod 重啟，那個 Pod 上的 session 就沒了。根本解法是把 session 外部化（Spring Session + Redis）。canary 發布時這個問題會更嚴重（Part 7）。
 
+#### 為什麼登入會壞：兩種壞法
+
+Istio 官方對 `consistentHash` 的定位是：「Consistent Hash-based load balancing can be used to provide soft session affinity based on HTTP headers, cookies or other properties.」，而且 Pod 增減時「the guarantees are weaker」。也就是說它是軟性黏著，不是保證。這個「不保證」在登入流程裡有兩種具體的壞法：
+
+**壞法一：登入到一半。** Spring Security 官方說明：「The `AuthorizationRequestRepository` is responsible for the persistence of the `OAuth2AuthorizationRequest` from the time the Authorization Request is initiated to the time the Authorization Response is received (the callback).」預設實作是「`HttpSessionOAuth2AuthorizationRequestRepository`, which stores the `OAuth2AuthorizationRequest` in the `HttpSession`.」也就是 authorization request 只存在「當時處理請求的那個 Pod」的記憶體裡：
+
+```
+使用者                Pod A                 Pod B                 Keycloak
+  |                     |                     |                     |
+  | ① 打登入頁          |                     |                     |
+  |-------------------->|                     |                     |
+  |   302 到 Keycloak   | request 存進 Pod A  |                     |
+  |<--------------------|                     |                     |
+  |                     | (HttpSession)       |                     |
+  | ② 在 Keycloak 輸入密碼。這段期間 Pod A 被滾動更新／縮容，       |
+  |    或 canary cookie 改變，下一個請求不再導向 Pod A              |
+  | ③ callback                                                      |
+  |------------------------------------------>|                     |
+  |                     |                     | 找不到 request      |
+  |                     |                     | authorization_      |
+  |                     |                     | request_not_found   |
+  |<------------------------------------------| 導回登入頁          |
+```
+
+- callback 路徑來自本 repo 的設定：`redirect-uri: "{baseUrl}/gui_epmmFormQuery/login/oauth2/code/{registrationId}"`（`canary-manual/track-a/release/10-configmap-stable.yaml`）。
+- 錯誤碼 `authorization_request_not_found` 是 log 裡常見的字樣，出處是 Spring Security 原始碼（`OAuth2LoginAuthenticationFilter` 的常數 `AUTHORIZATION_REQUEST_NOT_FOUND_ERROR_CODE`），不是參考文件裡的說明。
+
+**壞法二：登入之後。** 就算登入成功，Spring Session 官方說明也寫了「When Spring Security's `SecurityContextPersistenceFilter` saves the `SecurityContext` to the `HttpSession`, it is then persisted into Redis.」，也就是沒有外部化時，登入後的 `SecurityContext` 同樣只在 Pod 的 `HttpSession` 裡。Pod 一重啟，那個 Pod 上的人全部被登出。
+
+**結論：** `consistentHash` 對兩種壞法都只能降低機率，不能消除。根本解法是 session 外部化，見 [Part 9](#part-9你目前環境的具體發現) 發現 2。
+
 #### 其他踩雷
 
 - **`selector` 比對的是 Pod label，不是 Deployment label**。改 Deployment 的 `metadata.labels` 不會影響 Service 選中誰。
@@ -3383,6 +3414,9 @@ istioctl proxy-config endpoint deploy/istio-ingressgateway -n istio-system \
 - kubernetes.io — configmap：https://kubernetes.io/docs/concepts/configuration/configmap/
 - kubernetes.io — job：https://kubernetes.io/docs/concepts/workloads/controllers/job/
 - istio.io — annotations：https://istio.io/latest/docs/reference/config/annotations/
+- docs.spring.io — oauth2 client authorization-grants：https://docs.spring.io/spring-security/reference/servlet/oauth2/client/authorization-grants.html
+- github.com/spring-projects — OAuth2LoginAuthenticationFilter（原始碼，二手來源）：https://github.com/spring-projects/spring-security/blob/main/oauth2/oauth2-client/src/main/java/org/springframework/security/oauth2/client/web/OAuth2LoginAuthenticationFilter.java
+- docs.spring.io — spring-session boot-redis：https://docs.spring.io/spring-session/reference/3.4/guides/boot-redis.html
 - kubernetes.io — cron-jobs：https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
 - raw.githubusercontent.com — utils.go：https://raw.githubusercontent.com/kubernetes/kubernetes/master/pkg/controller/cronjob/utils.go
 - pubs.opengroup.org — V3_chap02.html：https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html
