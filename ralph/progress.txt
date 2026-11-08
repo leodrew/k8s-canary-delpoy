@@ -48,3 +48,9 @@ Started: (not yet run)
 - Review round 2: tier sentence only partly verbatim (colon ends the sentence) -> quoted only up to the colon; fixed after the round cap, mechanical.
 - Learnings: ledger quotes can be paraphrased; reviewers WebFetching found them. Quote only up to the real sentence boundary.
 ---
+## 2026-11-08 - US-103
+- Wrote tasks/retro-guide-explainers.md; CLAUDE.md「目前的 run」改為已完成並加「帳本引文可能過期」陷阱。
+- Files: CLAUDE.md, tasks/retro-guide-explainers.md
+- Review round 1 (done inline, no sub-agents): Standards none; Spec — retro claimed patterns.md already covered the "no invented behaviour" convention, it does not -> corrected. Round 2 not rerun (one-line text fix).
+- Learnings: none new for patterns.md.
+---
