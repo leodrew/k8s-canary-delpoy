@@ -1016,9 +1016,9 @@ spec:
 
 | | 原生 `NetworkPolicy` | Calico `GlobalNetworkPolicy` | K8s SIG `ClusterNetworkPolicy`（前身 `AdminNetworkPolicy`） |
 |---|---|---|---|
-| 範圍 | namespaced | cluster-wide（官方：「A GlobalNetworkPolicy is a non-namespaced resource and can be applied to any kind of endpoint」） | cluster-scoped |
+| 範圍 | namespaced | cluster-wide（官方：「Calico global network policy is a non-namespaced resource and can be applied to any kind of endpoint」） | cluster-scoped |
 | 能不能 deny | 不行（只有允許） | 可以（Allow／Deny／Log） | 可以（Accept／Deny／Pass） |
-| 有沒有排序 | 沒有（多條是聯集） | 有，`order` 欄位（官方：「the order field (with precedence from the lowest value to highest)」） | 有，`priority`（官方：「Rules with lower priority values have higher precedence」）；Admin tier 在 NetworkPolicy 之前、Baseline 在之後（官方：「Admin, then NetworkPolicy, then Baseline」） |
+| 有沒有排序 | 沒有（多條是聯集） | 有，`order` 欄位（官方：「the order field (with precedence from the lowest value to highest)」） | 有，`priority`（官方：「rules with lower priority values have higher precedence」）；Admin tier 在 NetworkPolicy 之前、Baseline 在之後（官方：「Policy tiers are evaluated in the following order: `Admin` tier, NetworkPolicy tier, `Baseline` tier.」） |
 | 誰在寫 | 開發團隊 | 平台組 | 平台組（cluster 管理者） |
 | 備註 | K8s 內建 | 要裝 Calico；CIDR 欄位是 `nets` | CRD（`policy.networking.k8s.io`），要 CNI 有實作 |
 
@@ -1026,9 +1026,9 @@ spec:
 
 - 被選中的 Pod 一旦有 egress policy，egress 預設全擋；那份公司 policy 認不得 label 或 namespace，只能用 CIDR 放行。
 - 有 sidecar 時，Pod 打 Service 實際送出的目的地是對方的 **Pod IP**（Envoy 直連 endpoint，見 Part 1 關鍵觀念一：Service 幾乎只剩 DNS）。所以 CIDR 要涵蓋 **Pod CIDR**；只放 Service CIDR 不夠。
-- 官方對 `ipBlock` 的說法是「These should be cluster-external IPs, since Pod IPs are ephemeral and unpredictable.」，而且 Service 的 NAT 發生在 NetworkPolicy 之前或之後並沒有定義：「it is not defined whether this happens before or after NetworkPolicy processing, and the behavior may be different for different combinations of network plugin, cloud provider, `Service` implementation, etc.」所以公司 policy 實務上直接放行整段 10.x／172.x，上面 `ipBlock.cidr` 那列的「用來放行叢集外部」仍是官方原意。
+- 官方對 `ipBlock` 的說法是「These should be cluster-external IPs, since Pod IPs are ephemeral and unpredictable.」，而且 Service 的 NAT 發生在 NetworkPolicy 之前或之後並沒有定義：「it is not defined whether this happens before or after NetworkPolicy processing, and the behavior may be different for different combinations of network plugin, cloud provider, `Service` implementation, etc.」所以公司 policy 很可能是直接放行整段 10.x／172.x，上面 `ipBlock.cidr` 那列的「用來放行叢集外部」仍是官方原意。
 
-> **踩雷：`172.0.0.0/8` 不是私有網段。** RFC 1918 的三個私有網段是 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`（RFC 1918：「172.16.0.0 - 172.31.255.255 (172.16/12 prefix)」）。`172.0.0.0/8` 比 `172.16.0.0/12` 大 16 倍，涵蓋 172.0–172.15 與 172.32–172.255 的公網位址。若看到這個寫法，建議跟平台組確認是否應為 `172.16.0.0/12`，或直接寫叢集實際的 Pod CIDR／Service CIDR。
+> **踩雷（ipPolicy）：`172.0.0.0/8` 不是私有網段。** RFC 1918 的三個私有網段是 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`（RFC 1918：「172.16.0.0 - 172.31.255.255 (172.16/12 prefix)」）。`172.0.0.0/8` 比 `172.16.0.0/12` 大 16 倍，涵蓋 172.0–172.15 與 172.32–172.255 的公網位址。若看到這個寫法，建議跟平台組確認是否應為 `172.16.0.0/12`，或直接寫叢集實際的 Pod CIDR／Service CIDR。
 
 ---
 
