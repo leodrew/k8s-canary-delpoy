@@ -299,7 +299,7 @@ selector:
 
 - **DestinationRule：** 只有「同一個 Service 底下分版本」才需要 subset；兩個版本是不同 Service 時，VirtualService 用 `weight` 分到兩個 Service 照樣能分流。它的 `tls` 是 client 這一端對上游連線的 TLS 設定（例如 `ISTIO_MUTUAL`）；server 端要不要**強制** mTLS（拒收明文）由 PeerAuthentication 決定。
 - **ServiceEntry：** 「打不出去」只發生在 mesh 設成 `outboundTrafficPolicy.mode: REGISTRY_ONLY` 時。預設是 `ALLOW_ANY`，沒有 ServiceEntry 也會放行，但流量走 passthrough，拿不到 VirtualService／DestinationRule 的功能。（這裡的模式跟 mTLS 的 `STRICT` 無關。）
-- **PeerAuthentication：** 沒寫時 mesh 預設是 `PERMISSIVE` —— 明文與 mTLS 都收，兩端都有 sidecar 的連線會自動升級成 mTLS，身分照樣存在。所以真正的風險不是「沒有身分」，而是沒有 sidecar 的 client 可以用明文繞過身分。AuthorizationPolicy 裡依賴 mTLS 的只有 `principals`／`notPrincipals`、`namespaces`／`notNamespaces` 與 `source.principal`、`source.namespace` 條件；path、method 這類規則不受影響。
+- **PeerAuthentication：** mTLS 是什麼、跟 K8s 控制面那套有何不同，見 Part 2.1「先搞懂 mTLS」。沒寫時 mesh 預設是 `PERMISSIVE` —— 明文與 mTLS 都收，兩端都有 sidecar 的連線會自動升級成 mTLS，身分照樣存在。所以真正的風險不是「沒有身分」，而是沒有 sidecar 的 client 可以用明文繞過身分。AuthorizationPolicy 裡依賴 mTLS 的只有 `principals`／`notPrincipals`、`namespaces`／`notNamespaces` 與 `source.principal`、`source.namespace` 條件；path、method 這類規則不受影響。
 
 ### 最重要的一組區分：認證 vs 授權 vs 防火牆
 
@@ -473,6 +473,41 @@ meshConfig:
 這一節把「誰能打誰」的四種工具全部攤開。**先看 2.5 的對照表決定要用哪一個，再回頭看細節。**
 
 ### 2.1 PeerAuthentication — 服務間 mTLS（決定「你是誰」）
+
+#### 先搞懂 mTLS
+
+**TLS 與 mTLS 差在哪：** 一般 TLS 只有一邊驗身分 —— 瀏覽器驗銀行的憑證，銀行不驗你是誰；mTLS（mutual TLS）是雙方互驗，client 與 server 都出示憑證。
+
+**K8s 裡其實有兩套互不相干的 mTLS**，名字像但管的東西完全不同：
+
+| | K8s 控制面 PKI | Istio workload mTLS |
+|---|---|---|
+| 誰跟誰 | apiserver、etcd、kubelet、scheduler、controller-manager 之間 | 你的 workload（例如 pmc GUI ↔ epmm-api）之間 |
+| 誰簽憑證 | cluster CA | istiod 當 CA |
+| 身分長怎樣 | 憑證的 CN 當 username、O 當 group | SPIFFE 身分，對應 ServiceAccount（`spiffe://cluster.local/ns/<ns>/sa/<sa>`） |
+| 誰在管 | 平台組 | 你，用 PeerAuthentication |
+
+兩套互不相干：改 PeerAuthentication 不會動到控制面憑證，控制面憑證過期也不會影響 mesh 內的 mTLS。
+
+- 控制面那套（Kubernetes：「Kubernetes requires PKI certificates for authentication over TLS.」）：每個 kubelet、每個 API server、scheduler 各有 client 憑證，用來向 API server 或 etcd 證明自己（Kubernetes：「Client certificates for each kubelet, used to authenticate to the API server as a client of the Kubernetes API」）。
+- apiserver 怎麼從憑證取身分（Kubernetes：「Kubernetes determines the username from the `commonName` field in the _subject_ of the certificate (for example, `commonName=bob` represents a user with username "bob").」；群組則是「Client certificates can also indicate a user's group memberships using the certificate's organization fields.」）。這跟 Part 3「K8s RBAC 版」判斷 403 時看到的 user／group 是同一套。
+
+**握手五步驟**（以 pmc GUI 打 epmm-api 為例；Istio：「Istio re-routes the outbound traffic from a client to the client's local sidecar Envoy.」）：
+
+1. pmc GUI 的 app 照常發出請求，Istio 把這個 outbound 流量導到 pmc GUI Pod 內的本機 sidecar Envoy。
+2. pmc GUI 的 Envoy 與 epmm-api 的 Envoy 做 mTLS 握手（Istio：「The client side Envoy starts a mutual TLS handshake with the server side Envoy.」），雙方出示憑證。
+3. client 端 Envoy 做 secure naming 檢查：確認對方憑證裡的身分，確實是 epmm-api 這個 Service 該有的 ServiceAccount。
+4. 檢查通過，連線建立。
+5. epmm-api 的 Envoy 做授權（Istio：「The server side Envoy authorizes the request.」），通過才轉給 epmm-api 的 app。
+
+第 2 步交換的憑證身分，就是 Part 4 要你建立的 ServiceAccount；第 5 步的授權，就是 AuthorizationPolicy 的 `principals` 在比對的東西。
+
+**「每個 namespace 都有嗎？」**
+
+- 憑證是**每個 workload（ServiceAccount 身分）各自一張**，不是每個 namespace 一張。流程是：Istio agent 產生私鑰與 CSR，istiod 簽發（Istio：「`istiod` offers a gRPC service to take certificate signing requests」），Envoy 經 SDS 拿到憑證，到期前由 agent 自動輪替（Istio：「Istio agent monitors the expiration of the workload certificate」）。
+- namespace 只是 **PeerAuthentication 的政策範圍**，不是憑證的單位。範圍取最窄的那條（Istio：「Istio applies the narrowest matching policy for each workload」），完整優先序見下方「優先序」，這裡不重寫。
+- 整個 mesh 都沒設 mode 時是 `PERMISSIVE`（Istio：「Mesh-wide peer authentication policies with an unset mode use the `PERMISSIVE` mode by default.」）。
+- **沒注入 sidecar 的 namespace 沒有 workload mTLS**：沒有 Envoy 就沒有人出示憑證，PeerAuthentication 對它也無從執行。
 
 #### 這是在解決什麼問題
 
@@ -1057,6 +1092,8 @@ spec:
 - Kubernetes — Admission Controllers（extensible）：https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
 - Flannel — 專案首頁（netpol.enabled）：https://github.com/flannel-io/flannel
 - Istio — Network Topologies：https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/
+- Kubernetes — PKI certificates and requirements：https://kubernetes.io/docs/setup/best-practices/certificates/
+- Kubernetes — Authenticating（X.509 client certificates）：https://kubernetes.io/docs/reference/access-authn-authz/authentication/
 
 ---
 
