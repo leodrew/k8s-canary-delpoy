@@ -1008,6 +1008,28 @@ spec:
 - **忘記開 DNS = 全部掛掉**，而且症狀是 `UnknownHostException` 不是連線被拒，很容易誤判成 DNS 壞了。
 - **NetworkPolicy 比對的是 Pod IP，不是 ServiceAccount**。Pod 重建 IP 會變，所以一定要用 selector 而不是寫死 IP。
 
+#### 公司的 ipPolicy 可能是什麼（通用說明）
+
+本文不知道貴公司 ipPolicy 的實際 kind，以下是通用說明；實際規格見文末「需向他人確認」。
+
+**原生 NetworkPolicy 做不到的三件事。** 官方 Network Policies 頁的「What you can't do with network policies (at least, not yet)」清單裡有：「Default policies which are applied to all namespaces or pods (there are some third party Kubernetes distributions and projects which can do this).」、「The ability to log network security events」、「The ability to explicitly deny policies」。也就是：套用到所有 namespace 的預設政策、記錄被擋的連線、explicit deny。所以名字不是 `NetworkPolicy`、卻又能寫 CIDR 的 policy，幾乎都是為了補這幾個缺口的 CNI／廠商 CRD。
+
+| | 原生 `NetworkPolicy` | Calico `GlobalNetworkPolicy` | K8s SIG `ClusterNetworkPolicy`（前身 `AdminNetworkPolicy`） |
+|---|---|---|---|
+| 範圍 | namespaced | cluster-wide（官方：「A GlobalNetworkPolicy is a non-namespaced resource and can be applied to any kind of endpoint」） | cluster-scoped |
+| 能不能 deny | 不行（只有允許） | 可以（Allow／Deny／Log） | 可以（Accept／Deny／Pass） |
+| 有沒有排序 | 沒有（多條是聯集） | 有，`order` 欄位（官方：「the order field (with precedence from the lowest value to highest)」） | 有，`priority`（官方：「Rules with lower priority values have higher precedence」）；Admin tier 在 NetworkPolicy 之前、Baseline 在之後（官方：「Admin, then NetworkPolicy, then Baseline」） |
+| 誰在寫 | 開發團隊 | 平台組 | 平台組（cluster 管理者） |
+| 備註 | K8s 內建 | 要裝 Calico；CIDR 欄位是 `nets` | CRD（`policy.networking.k8s.io`），要 CNI 有實作 |
+
+**為什麼「不加 10.0.0.0/8 就打不到對方」。** 這段由機制推得，不是官方逐字寫的結論：
+
+- 被選中的 Pod 一旦有 egress policy，egress 預設全擋；那份公司 policy 認不得 label 或 namespace，只能用 CIDR 放行。
+- 有 sidecar 時，Pod 打 Service 實際送出的目的地是對方的 **Pod IP**（Envoy 直連 endpoint，見 Part 1 關鍵觀念一：Service 幾乎只剩 DNS）。所以 CIDR 要涵蓋 **Pod CIDR**；只放 Service CIDR 不夠。
+- 官方對 `ipBlock` 的說法是「These should be cluster-external IPs, since Pod IPs are ephemeral and unpredictable.」，而且 Service 的 NAT 發生在 NetworkPolicy 之前或之後並沒有定義：「it is not defined whether this happens before or after NetworkPolicy processing, and the behavior may be different for different combinations of network plugin, cloud provider, `Service` implementation, etc.」所以公司 policy 實務上直接放行整段 10.x／172.x，上面 `ipBlock.cidr` 那列的「用來放行叢集外部」仍是官方原意。
+
+> **踩雷：`172.0.0.0/8` 不是私有網段。** RFC 1918 的三個私有網段是 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`（RFC 1918：「172.16.0.0 - 172.31.255.255 (172.16/12 prefix)」）。`172.0.0.0/8` 比 `172.16.0.0/12` 大 16 倍，涵蓋 172.0–172.15 與 172.32–172.255 的公網位址。若看到這個寫法，建議跟平台組確認是否應為 `172.16.0.0/12`，或直接寫叢集實際的 Pod CIDR／Service CIDR。
+
 ---
 
 ### 2.5 四者對照表 —— 這個需求該用哪一個？
@@ -1088,6 +1110,9 @@ spec:
 - Kubernetes — Network Policies：https://kubernetes.io/docs/concepts/services-networking/network-policies/
 - Kubernetes — Well-Known Labels, Annotations and Taints：https://kubernetes.io/docs/reference/labels-annotations-taints/
 - Kubernetes — KEP-2161（namespace 預設 label）：https://www.kubernetes.dev/resources/keps/2161/
+- Calico — Get started with Calico network policy：https://docs.tigera.io/calico/latest/network-policy/get-started/calico-policy/calico-network-policy
+- Kubernetes SIG Network — Network Policy API overview：https://network-policy-api.sigs.k8s.io/api-overview/
+- IETF — RFC 1918：https://www.rfc-editor.org/rfc/rfc1918
 - Istio — Installing Gateways：https://istio.io/latest/docs/setup/additional-setup/gateway/
 - Istio — Application Requirements：https://istio.io/latest/docs/ops/deployment/application-requirements/
 - Kubernetes — Admission Controllers（extensible）：https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
@@ -8099,4 +8124,5 @@ standby zone 平常收不到流量，所以它壞掉也沒人發現 —— 直�
 | Track B 全自動是否適用本環境（CANARY-COMPLETE.md §0：CD 只能 `kubectl apply`，不能 patch／scale／delete） | CD 團隊 | Part 15 |
 | 公司 DNS 是不是 active/standby、FZ1 是否只有 CD 建的共用 Gateway、`--context` 名稱與 FZ2 VIP、16.7 表格的分工與切 zone 流程 | 網路組 / 平台組 | Part 16.1、16.5、16.6、16.7 |
 | FZ2 ingressgateway 的憑證由哪個 CA 簽發（決定路線一的 DestinationRule 要不要 `credentialName`／`caCertificates`） | 平台組 | Part 16.6 路線一 |
+| 公司 ipPolicy 的 apiVersion／kind、是誰維護、跟 NetworkPolicy 疊加時誰優先（`kubectl api-resources \| grep -i policy` 的輸出） | 平台組 | Part 2.4 |
 | 環境有沒有開 access log（Telemetry API 或 `meshConfig.accessLogFile`）—— Part 1、8、16 的除錯步驟都假設有 | 平台組 | Part 8.2、16.4、16.5 |
